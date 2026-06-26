@@ -1,0 +1,41 @@
+config main 'main'
+	option enabled '1'
+	option dns_listen '127.0.0.1:5353'
+	option real_dns_upstream '1.1.1.1:53'
+	option manage_dnsmasq '1'
+	option filter_aaaa_for_fakeip '1'
+	option routing_mode 'custom'
+	option default_outbound 'direct'
+	list lan_subnet '192.168.8.0/24'
+	option singbox_bin '/usr/libexec/neto/sing-box'
+	option singbox_dns '127.0.0.1:15353'
+	option tproxy_port '16001'
+	option mark '0x101'
+	option table '101'
+	option fakeip_enabled '1'
+	option fakeip_range '198.18.0.0/15'
+	option resolve_for_subnet_rules '1'
+	option nft_counters '1'
+	option default_action 'direct'
+
+config client
+	option name 'gaming_pc'
+	option ip '192.168.8.50'
+	option policy 'direct'
+
+config client
+	option name 'all_proxy'
+	option ip '192.168.8.100'
+	option policy 'proxy'
+
+config domain_rule
+	option name 'youtube'
+	option mode 'fakeip'
+	option outbound 'proxy_default'
+	list suffix 'youtube.com'
+	list suffix 'googlevideo.com'
+
+config subnet_rule
+	option name 'cloudflare'
+	option outbound 'proxy_default'
+	list file '/etc/neto/providers/cloudflare-v4.txt'

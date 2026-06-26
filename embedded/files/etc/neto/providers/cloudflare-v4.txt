@@ -1,0 +1,4 @@
+# Placeholder IPv4 provider for the default cloudflare subnet rule.
+# Add one IPv4 CIDR per line, for example:
+# 1.1.1.0/24
+

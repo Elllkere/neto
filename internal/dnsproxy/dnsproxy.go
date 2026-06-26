@@ -1,0 +1,447 @@
+package dnsproxy
+
+import (
+	"context"
+	"encoding/binary"
+	"fmt"
+	"io"
+	"net"
+	"strings"
+	"time"
+
+	"github.com/elllkere/neto/internal/config"
+)
+
+type Proxy struct {
+	Listen              string
+	FakeUpstream        string
+	RealUpstream        string
+	RoutingMode         string
+	ClientPolicies      map[string]string
+	Suffixes            []string
+	FilterAAAAForFakeIP bool
+	Timeout             time.Duration
+}
+
+type Query struct {
+	Name        string
+	Type        uint16
+	QuestionEnd int
+}
+
+const (
+	qTypeA    uint16 = 1
+	qTypeAAAA uint16 = 28
+)
+
+func New(cfg config.Config) Proxy {
+	var suffixes []string
+	clientPolicies := map[string]string{}
+	for _, client := range cfg.Clients {
+		clientPolicies[client.IP] = client.Policy
+	}
+	for _, rule := range cfg.DomainRules {
+		if rule.Mode != "fakeip" {
+			continue
+		}
+		for _, suffix := range rule.Suffixes {
+			suffix = strings.Trim(strings.ToLower(suffix), ".")
+			if suffix != "" {
+				suffixes = append(suffixes, suffix)
+			}
+		}
+	}
+	return Proxy{
+		Listen:              cfg.Main.DNSListen,
+		FakeUpstream:        cfg.Main.SingBoxDNS,
+		RealUpstream:        cfg.Main.RealDNSUpstream,
+		RoutingMode:         cfg.Main.RoutingMode,
+		ClientPolicies:      clientPolicies,
+		Suffixes:            suffixes,
+		FilterAAAAForFakeIP: cfg.Main.FilterAAAAForFakeIP,
+		Timeout:             5 * time.Second,
+	}
+}
+
+func (p Proxy) Run(ctx context.Context) error {
+	if p.RealUpstream == p.Listen {
+		return fmt.Errorf("real DNS upstream points back to neto DNS listener")
+	}
+
+	lc := net.ListenConfig{}
+	udpConn, err := lc.ListenPacket(ctx, "udp", p.Listen)
+	if err != nil {
+		return fmt.Errorf("listen udp %s: %w", p.Listen, err)
+	}
+	defer udpConn.Close()
+
+	tcpLn, err := lc.Listen(ctx, "tcp", p.Listen)
+	if err != nil {
+		return fmt.Errorf("listen tcp %s: %w", p.Listen, err)
+	}
+	defer tcpLn.Close()
+
+	errCh := make(chan error, 2)
+	go p.serveUDP(ctx, udpConn, errCh)
+	go p.serveTCP(ctx, tcpLn, errCh)
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errCh:
+		if err == nil {
+			return nil
+		}
+		return err
+	}
+}
+
+func (p Proxy) serveUDP(ctx context.Context, conn net.PacketConn, errCh chan<- error) {
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+	}()
+
+	for {
+		buf := make([]byte, 4096)
+		n, addr, err := conn.ReadFrom(buf)
+		if err != nil {
+			if ctx.Err() != nil {
+				errCh <- nil
+				return
+			}
+			errCh <- err
+			return
+		}
+		msg := append([]byte(nil), buf[:n]...)
+		go func() {
+			resp, err := p.handleUDP(ctx, msg, p.clientIP(msg, sourceIP(addr)))
+			if err == nil && len(resp) > 0 {
+				_, _ = conn.WriteTo(resp, addr)
+			}
+		}()
+	}
+}
+
+func (p Proxy) serveTCP(ctx context.Context, ln net.Listener, errCh chan<- error) {
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+	}()
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				errCh <- nil
+				return
+			}
+			errCh <- err
+			return
+		}
+		go p.handleTCP(ctx, conn)
+	}
+}
+
+func (p Proxy) handleTCP(ctx context.Context, conn net.Conn) {
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(p.Timeout))
+
+	msg, err := readTCPDNS(conn)
+	if err != nil {
+		return
+	}
+	resp, err := p.handleTCPQuery(ctx, msg, p.clientIP(msg, sourceIP(conn.RemoteAddr())))
+	if err != nil || len(resp) == 0 {
+		return
+	}
+	_ = writeTCPDNS(conn, resp)
+}
+
+func (p Proxy) handleUDP(ctx context.Context, msg []byte, clientIP string) ([]byte, error) {
+	if resp, ok := p.localResponse(msg, clientIP); ok {
+		return resp, nil
+	}
+	return p.forwardUDP(ctx, msg, p.upstreamFor(msg, clientIP))
+}
+
+func (p Proxy) handleTCPQuery(ctx context.Context, msg []byte, clientIP string) ([]byte, error) {
+	if resp, ok := p.localResponse(msg, clientIP); ok {
+		return resp, nil
+	}
+	return p.forwardTCP(ctx, msg, p.upstreamFor(msg, clientIP))
+}
+
+func (p Proxy) forwardUDP(ctx context.Context, msg []byte, upstream string) ([]byte, error) {
+	d := net.Dialer{}
+	conn, err := d.DialContext(ctx, "udp", upstream)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(p.Timeout))
+
+	if _, err := conn.Write(msg); err != nil {
+		return nil, err
+	}
+	resp := make([]byte, 4096)
+	n, err := conn.Read(resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp[:n], nil
+}
+
+func (p Proxy) forwardTCP(ctx context.Context, msg []byte, upstream string) ([]byte, error) {
+	d := net.Dialer{}
+	conn, err := d.DialContext(ctx, "tcp", upstream)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(p.Timeout))
+
+	if err := writeTCPDNS(conn, msg); err != nil {
+		return nil, err
+	}
+	return readTCPDNS(conn)
+}
+
+func (p Proxy) upstreamFor(msg []byte, clientIP string) string {
+	query, ok := ParseQuery(msg)
+	if !ok {
+		return p.RealUpstream
+	}
+	if p.shouldUseFakeIP(query.Name, clientIP) {
+		return p.FakeUpstream
+	}
+	return p.RealUpstream
+}
+
+func (p Proxy) localResponse(msg []byte, clientIP string) ([]byte, bool) {
+	query, ok := ParseQuery(msg)
+	if !ok {
+		return nil, false
+	}
+	if p.FilterAAAAForFakeIP && query.Type == qTypeAAAA && p.shouldUseFakeIP(query.Name, clientIP) {
+		return nodataResponse(msg, query.QuestionEnd), true
+	}
+	return nil, false
+}
+
+func (p Proxy) shouldUseFakeIP(name string, clientIP string) bool {
+	policy := p.clientPolicy(clientIP)
+	if policy == "direct" {
+		return false
+	}
+	if p.RoutingMode == "global" && policy != "proxy" {
+		return false
+	}
+	return p.matchesFakeIP(name)
+}
+
+func (p Proxy) clientPolicy(clientIP string) string {
+	if p.ClientPolicies != nil {
+		if policy := p.ClientPolicies[clientIP]; policy != "" {
+			return policy
+		}
+	}
+	return "default"
+}
+
+func (p Proxy) matchesFakeIP(name string) bool {
+	name = strings.Trim(strings.ToLower(name), ".")
+	for _, suffix := range p.Suffixes {
+		if name == suffix || strings.HasSuffix(name, "."+suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func sourceIP(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return ""
+	}
+	return host
+}
+
+func (p Proxy) clientIP(msg []byte, src string) string {
+	if ip := net.ParseIP(src); ip != nil && !ip.IsLoopback() {
+		return src
+	}
+	if ecs := clientSubnetIPv4(msg); ecs != "" {
+		return ecs
+	}
+	return src
+}
+
+func clientSubnetIPv4(msg []byte) string {
+	if len(msg) < 12 {
+		return ""
+	}
+	qd := int(binary.BigEndian.Uint16(msg[4:6]))
+	ar := int(binary.BigEndian.Uint16(msg[10:12]))
+	off := 12
+	var ok bool
+	for i := 0; i < qd; i++ {
+		_, off, ok = decodeName(msg, off, 0)
+		if !ok || off+4 > len(msg) {
+			return ""
+		}
+		off += 4
+	}
+	for i := 0; i < ar; i++ {
+		_, off, ok = decodeName(msg, off, 0)
+		if !ok || off+10 > len(msg) {
+			return ""
+		}
+		rrType := binary.BigEndian.Uint16(msg[off : off+2])
+		rdLen := int(binary.BigEndian.Uint16(msg[off+8 : off+10]))
+		off += 10
+		if off+rdLen > len(msg) {
+			return ""
+		}
+		if rrType == 41 {
+			if ip := ecsIPv4FromOptions(msg[off : off+rdLen]); ip != "" {
+				return ip
+			}
+		}
+		off += rdLen
+	}
+	return ""
+}
+
+func ecsIPv4FromOptions(opts []byte) string {
+	for off := 0; off+4 <= len(opts); {
+		code := binary.BigEndian.Uint16(opts[off : off+2])
+		length := int(binary.BigEndian.Uint16(opts[off+2 : off+4]))
+		off += 4
+		if off+length > len(opts) {
+			return ""
+		}
+		if code == 8 && length >= 8 {
+			family := binary.BigEndian.Uint16(opts[off : off+2])
+			prefix := opts[off+2]
+			addr := opts[off+4 : off+length]
+			if family == 1 && prefix > 0 && len(addr) > 0 {
+				var full [4]byte
+				copy(full[:], addr)
+				return net.IPv4(full[0], full[1], full[2], full[3]).String()
+			}
+		}
+		off += length
+	}
+	return ""
+}
+
+func QueryName(msg []byte) (string, bool) {
+	query, ok := ParseQuery(msg)
+	if !ok {
+		return "", false
+	}
+	return query.Name, true
+}
+
+func ParseQuery(msg []byte) (Query, bool) {
+	if len(msg) < 12 {
+		return Query{}, false
+	}
+	if binary.BigEndian.Uint16(msg[4:6]) != 1 {
+		return Query{}, false
+	}
+	name, off, ok := decodeName(msg, 12, 0)
+	if !ok || off+4 > len(msg) {
+		return Query{}, false
+	}
+	return Query{
+		Name:        name,
+		Type:        binary.BigEndian.Uint16(msg[off : off+2]),
+		QuestionEnd: off + 4,
+	}, true
+}
+
+func decodeName(msg []byte, off int, depth int) (string, int, bool) {
+	if depth > 8 {
+		return "", 0, false
+	}
+	var labels []string
+	for {
+		if off >= len(msg) {
+			return "", 0, false
+		}
+		l := int(msg[off])
+		off++
+		switch {
+		case l == 0:
+			return strings.Join(labels, "."), off, true
+		case l&0xc0 == 0xc0:
+			if off >= len(msg) {
+				return "", 0, false
+			}
+			ptr := ((l & 0x3f) << 8) | int(msg[off])
+			off++
+			suffix, _, ok := decodeName(msg, ptr, depth+1)
+			if !ok {
+				return "", 0, false
+			}
+			if suffix != "" {
+				labels = append(labels, suffix)
+			}
+			return strings.Join(labels, "."), off, true
+		case l&0xc0 != 0:
+			return "", 0, false
+		default:
+			if off+l > len(msg) {
+				return "", 0, false
+			}
+			labels = append(labels, string(msg[off:off+l]))
+			off += l
+		}
+	}
+}
+
+func nodataResponse(query []byte, questionEnd int) []byte {
+	resp := make([]byte, questionEnd)
+	copy(resp, query[:questionEnd])
+	resp[2] = 0x81
+	resp[3] = 0x80
+	if len(query) >= 4 && query[2]&0x01 == 0x01 {
+		resp[2] |= 0x01
+	}
+	binary.BigEndian.PutUint16(resp[6:8], 0)
+	binary.BigEndian.PutUint16(resp[8:10], 0)
+	binary.BigEndian.PutUint16(resp[10:12], 0)
+	return resp
+}
+
+func readTCPDNS(r io.Reader) ([]byte, error) {
+	var hdr [2]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
+		return nil, err
+	}
+	n := int(binary.BigEndian.Uint16(hdr[:]))
+	if n == 0 {
+		return nil, fmt.Errorf("empty DNS TCP message")
+	}
+	msg := make([]byte, n)
+	_, err := io.ReadFull(r, msg)
+	return msg, err
+}
+
+func writeTCPDNS(w io.Writer, msg []byte) error {
+	if len(msg) > 65535 {
+		return fmt.Errorf("DNS TCP message too large")
+	}
+	var hdr [2]byte
+	binary.BigEndian.PutUint16(hdr[:], uint16(len(msg)))
+	if _, err := w.Write(hdr[:]); err != nil {
+		return err
+	}
+	_, err := w.Write(msg)
+	return err
+}

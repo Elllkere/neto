@@ -1,0 +1,448 @@
+#!/bin/sh
+
+set -eu
+
+BASE_URL="${NETO_BASE_URL:-https://example.com/neto}"
+ARCHIVE_NAME="neto-openwrt-embedded.tar.gz"
+WORK_DIR="${TMPDIR:-/tmp}/neto-install.$$"
+MANAGED_SINGBOX="/usr/libexec/neto/sing-box"
+MIN_SINGBOX_VERSION="1.12.0"
+LOCAL_ARCHIVE=""
+DRY_RUN=0
+VERBOSE=0
+
+usage() {
+	cat >&2 <<'EOF'
+usage: install.sh [--local ./dist/neto-openwrt-embedded.tar.gz] [--dry-run] [--verbose]
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+		--local)
+			[ "$#" -ge 2 ] || {
+				usage
+				exit 1
+			}
+			LOCAL_ARCHIVE="$2"
+			shift 2
+			;;
+		--dry-run)
+			DRY_RUN=1
+			shift
+			;;
+		--verbose)
+			VERBOSE=1
+			shift
+			;;
+		-h|--help)
+			usage
+			exit 0
+			;;
+		*)
+			usage
+			exit 1
+			;;
+	esac
+done
+
+[ "$VERBOSE" -eq 1 ] && set -x
+
+cleanup() {
+	rm -rf "$WORK_DIR"
+}
+trap cleanup EXIT INT TERM
+
+die() {
+	echo "neto install: $*" >&2
+	exit 1
+}
+
+log() {
+	echo "neto install: $*"
+}
+
+dry_log() {
+	if [ "$DRY_RUN" -eq 1 ]; then
+		log "dry-run: $*"
+	fi
+}
+
+need_cmd() {
+	command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+version_ge() {
+	awk -v a="$1" -v b="$2" 'BEGIN {
+		split(a, av, ".");
+		split(b, bv, ".");
+		for (i = 1; i <= 3; i++) {
+			ai = av[i] + 0;
+			bi = bv[i] + 0;
+			if (ai > bi) exit 0;
+			if (ai < bi) exit 1;
+		}
+		exit 0;
+	}'
+}
+
+openwrt_version() {
+	. /etc/openwrt_release
+	echo "${DISTRIB_RELEASE:-0}"
+}
+
+distro_id() {
+	local id
+	id="${DISTRIB_ID:-${ID:-unknown}}"
+	echo "$id"
+}
+
+is_supported_distro() {
+	case "${DISTRIB_ID:-}" in
+		OpenWrt|openwrt|ImmortalWrt|immortalwrt) return 0 ;;
+	esac
+	case "${ID:-}" in
+		openwrt|OpenWrt|immortalwrt|ImmortalWrt) return 0 ;;
+	esac
+	case " ${ID_LIKE:-} " in
+		*" openwrt "*|*" lede "*) return 0 ;;
+	esac
+	return 1
+}
+
+detect_pkg_manager() {
+	local ver
+	ver="$(openwrt_version)"
+	if version_ge "$ver" "25.12" && command -v apk >/dev/null 2>&1; then
+		echo "apk"
+		return
+	fi
+	if command -v opkg >/dev/null 2>&1; then
+		echo "opkg"
+		return
+	fi
+	if command -v apk >/dev/null 2>&1; then
+		echo "apk"
+		return
+	fi
+	die "could not find apk or opkg"
+}
+
+pkg_update() {
+	case "$1" in
+		apk) return 0 ;;
+		opkg) opkg update ;;
+		*) die "unknown package manager: $1" ;;
+	esac
+}
+
+pkg_install() {
+	local pm="$1"
+	shift
+	case "$pm" in
+		apk) apk add "$@" ;;
+		opkg) opkg install "$@" ;;
+		*) die "unknown package manager: $pm" ;;
+	esac
+}
+
+collect_arch_hints() {
+	{
+		uname -m 2>/dev/null || true
+		if command -v opkg >/dev/null 2>&1; then
+			opkg print-architecture 2>/dev/null | awk '{ print $2 }' || true
+		fi
+		if [ -r /etc/apk/arch ]; then
+			cat /etc/apk/arch
+		fi
+		if command -v apk >/dev/null 2>&1; then
+			apk --print-arch 2>/dev/null || true
+		fi
+		if [ -r /etc/openwrt_release ]; then
+			cat /etc/openwrt_release
+		fi
+		if command -v ubus >/dev/null 2>&1; then
+			ubus call system board 2>/dev/null || true
+		fi
+	} | tr '[:upper:]' '[:lower:]'
+}
+
+detect_arch() {
+	if [ -n "${NETO_ARCH:-}" ]; then
+		echo "$NETO_ARCH"
+		return
+	fi
+
+	local hints
+	hints="$(collect_arch_hints)"
+
+	case "$hints" in
+		*x86_64*|*amd64*) echo "linux-amd64"; return ;;
+	esac
+	case "$hints" in
+		*aarch64*|*arm64*) echo "linux-arm64"; return ;;
+	esac
+	case "$hints" in
+		*armv7l*|*armv7*|*arm_cortex-a*) echo "linux-armv7"; return ;;
+	esac
+	case "$hints" in
+		*mipsel*|*mipsle*) echo "linux-mipsle-softfloat"; return ;;
+	esac
+	case "$hints" in
+		*mips*) echo "linux-mips-softfloat"; return ;;
+	esac
+
+	die "unsupported CPU architecture; hints: $(echo "$hints" | tr '\n' ' ')"
+}
+
+download() {
+	local url="$1"
+	local dest="$2"
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$url" -o "$dest"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -O "$dest" "$url"
+	else
+		die "curl or wget is required to download $url"
+	fi
+}
+
+first_version() {
+	sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1
+}
+
+write_singbox_check_config() {
+	local path="$1"
+	cat >"$path" <<'JSON'
+{
+  "dns": {
+    "servers": [
+      { "tag": "local", "type": "udp", "server": "1.1.1.1" },
+      { "tag": "fakeip", "type": "fakeip", "inet4_range": "198.18.0.0/15" }
+    ],
+    "rules": [
+      { "query_type": [ "A", "AAAA" ], "server": "fakeip" }
+    ],
+    "final": "local"
+  },
+  "inbounds": [
+    { "type": "direct", "tag": "dns-in", "listen": "127.0.0.1", "listen_port": 15353 },
+    { "type": "tproxy", "tag": "tproxy-in", "listen": "127.0.0.1", "listen_port": 16001 }
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "proxy_default" }
+  ],
+  "route": {
+    "rules": [
+      { "protocol": "dns", "action": "hijack-dns" }
+    ],
+    "final": "proxy_default"
+  }
+}
+JSON
+}
+
+singbox_compatible() {
+	local bin="$1"
+	local check_cfg="$WORK_DIR/sing-box-check.json"
+	local ver
+
+	[ -x "$bin" ] || return 1
+	ver="$("$bin" version 2>/dev/null | first_version || true)"
+	[ -n "$ver" ] || return 1
+	version_ge "$ver" "$MIN_SINGBOX_VERSION" || return 1
+
+	write_singbox_check_config "$check_cfg"
+	"$bin" check -c "$check_cfg" >/dev/null 2>&1
+}
+
+set_fresh_singbox_path() {
+	local path="$1"
+	if command -v uci >/dev/null 2>&1; then
+		uci set neto.main.singbox_bin="$path"
+		uci commit neto
+	else
+		sed -i "s#option singbox_bin .*#option singbox_bin '$path'#" /etc/config/neto
+	fi
+}
+
+netmask_to_prefix() {
+	echo "$1" | awk -F. '{
+		n = 0;
+		for (i = 1; i <= 4; i++) {
+			v = $i + 0;
+			while (v > 0) {
+				n += v % 2;
+				v = int(v / 2);
+			}
+		}
+		print n;
+	}'
+}
+
+detect_lan_subnet() {
+	local ipaddr=""
+	local netmask=""
+	local prefix=""
+
+	if command -v uci >/dev/null 2>&1; then
+		ipaddr="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
+		netmask="$(uci -q get network.lan.netmask 2>/dev/null || true)"
+		case "$ipaddr" in
+			*/*)
+				echo "$ipaddr"
+				return
+				;;
+		esac
+		if [ -n "$ipaddr" ] && [ -n "$netmask" ]; then
+			prefix="$(netmask_to_prefix "$netmask")"
+			if [ -n "$prefix" ]; then
+				echo "$ipaddr/$prefix"
+				return
+			fi
+		fi
+	fi
+
+	if command -v ip >/dev/null 2>&1; then
+		ip -4 addr show dev br-lan 2>/dev/null | awk '/ inet / { print $2; exit }'
+		return
+	fi
+
+	echo "192.168.8.0/24"
+}
+
+ensure_lan_subnet_config() {
+	local subnet
+
+	command -v uci >/dev/null 2>&1 || return 0
+	if uci -q get neto.main.lan_subnet >/dev/null 2>&1; then
+		return 0
+	fi
+
+	subnet="$(detect_lan_subnet)"
+	[ -n "$subnet" ] || subnet="192.168.8.0/24"
+	log "setting default lan_subnet $subnet"
+	uci add_list neto.main.lan_subnet="$subnet"
+	uci commit neto
+}
+
+install_files() {
+	local arch="$1"
+	local config_created=0
+
+	[ -x "$WORK_DIR/bin/$arch/netod" ] || die "archive does not contain netod for $arch"
+
+	mkdir -p /usr/bin /usr/share/neto /usr/libexec/neto /etc/config
+	cp "$WORK_DIR/bin/$arch/netod" /usr/bin/netod
+	chmod 0755 /usr/bin/netod
+
+	if [ -f /etc/config/neto ]; then
+		rm -f "$WORK_DIR/files/etc/config/neto"
+	else
+		config_created=1
+	fi
+
+	cp -R "$WORK_DIR/files/." /
+	chmod 0755 /etc/init.d/neto
+
+	cp "$WORK_DIR/install.sh" /usr/share/neto/install.sh
+	cp "$WORK_DIR/uninstall.sh" /usr/share/neto/uninstall.sh
+	cp "$WORK_DIR/upgrade.sh" /usr/share/neto/upgrade.sh
+	chmod 0755 /usr/share/neto/install.sh /usr/share/neto/uninstall.sh /usr/share/neto/upgrade.sh
+
+	if singbox_compatible /usr/bin/sing-box; then
+		log "using compatible system sing-box"
+		if [ "$config_created" -eq 1 ]; then
+			set_fresh_singbox_path "/usr/bin/sing-box"
+		fi
+	elif [ -x "$WORK_DIR/bin/$arch/sing-box" ]; then
+		log "installing managed sing-box to $MANAGED_SINGBOX"
+		cp "$WORK_DIR/bin/$arch/sing-box" "$MANAGED_SINGBOX"
+		chmod 0755 "$MANAGED_SINGBOX"
+		if ! singbox_compatible "$MANAGED_SINGBOX"; then
+			die "managed sing-box exists but is not compatible"
+		fi
+		if [ "$config_created" -eq 1 ]; then
+			set_fresh_singbox_path "$MANAGED_SINGBOX"
+		fi
+	else
+		die "no compatible system sing-box and no managed sing-box for $arch in archive"
+	fi
+
+	ensure_lan_subnet_config
+}
+
+if [ "$DRY_RUN" -eq 1 ] && [ ! -r /etc/openwrt_release ]; then
+	if [ -n "$LOCAL_ARCHIVE" ] && [ ! -f "$LOCAL_ARCHIVE" ]; then
+		die "local archive not found: $LOCAL_ARCHIVE"
+	fi
+	log "dry-run outside OpenWrt/ImmortalWrt; arguments are valid"
+	exit 0
+fi
+
+[ -r /etc/openwrt_release ] || die "this installer must run on OpenWrt or ImmortalWrt"
+. /etc/openwrt_release
+if [ -r /etc/os-release ]; then
+	. /etc/os-release
+fi
+is_supported_distro || die "this installer must run on OpenWrt or ImmortalWrt"
+
+ver="$(openwrt_version)"
+version_ge "$ver" "23.05" || die "$(distro_id) $ver is unsupported; need 23.05 or newer"
+
+pm="$(detect_pkg_manager)"
+arch="$(detect_arch)"
+log "detected $(distro_id) $ver, package manager $pm, arch $arch"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+	dry_log "would install required dependencies with $pm"
+	if [ -n "$LOCAL_ARCHIVE" ]; then
+		[ -f "$LOCAL_ARCHIVE" ] || die "local archive not found: $LOCAL_ARCHIVE"
+		dry_log "would install from local archive $LOCAL_ARCHIVE"
+	else
+		dry_log "would download $BASE_URL/$ARCHIVE_NAME"
+	fi
+	dry_log "would install netod for $arch and configure dnsmasq/init/LuCI"
+	exit 0
+fi
+
+pkg_update "$pm"
+pkg_install "$pm" \
+	luci-base rpcd rpcd-mod-file rpcd-mod-rpcsys ucode \
+	nftables-json ip-full ca-bundle curl bind-dig tcpdump \
+	kmod-nft-tproxy kmod-nft-socket kmod-nft-nat || die "failed to install required dependencies"
+
+if ! pkg_install "$pm" sing-box; then
+	log "system sing-box package was not installed; managed sing-box will be used if present"
+fi
+
+need_cmd tar
+mkdir -p "$WORK_DIR"
+if [ -n "$LOCAL_ARCHIVE" ]; then
+	[ -f "$LOCAL_ARCHIVE" ] || die "local archive not found: $LOCAL_ARCHIVE"
+	cp "$LOCAL_ARCHIVE" "$WORK_DIR/$ARCHIVE_NAME"
+else
+	download "$BASE_URL/$ARCHIVE_NAME" "$WORK_DIR/$ARCHIVE_NAME"
+fi
+tar -xzf "$WORK_DIR/$ARCHIVE_NAME" -C "$WORK_DIR"
+if [ -d "$WORK_DIR/neto" ]; then
+	WORK_DIR="$WORK_DIR/neto"
+fi
+
+command -v fw4 >/dev/null 2>&1 || die "firewall4/fw4 is required"
+command -v nft >/dev/null 2>&1 || die "nftables is required"
+command -v ip >/dev/null 2>&1 || die "ip-full is required"
+
+install_files "$arch"
+
+/etc/init.d/neto enable
+/etc/init.d/neto restart
+
+if [ -x /etc/init.d/rpcd ]; then
+	/etc/init.d/rpcd restart || true
+fi
+if [ -x /etc/init.d/uhttpd ]; then
+	/etc/init.d/uhttpd restart || true
+fi
+
+log "installed"

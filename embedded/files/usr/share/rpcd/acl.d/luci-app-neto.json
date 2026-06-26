@@ -1,0 +1,21 @@
+{
+  "luci-app-neto": {
+    "description": "Grant access to neto",
+    "read": {
+      "uci": [ "neto" ],
+      "file": {
+        "/usr/bin/netod": [ "exec" ],
+        "/etc/config/neto": [ "read" ],
+        "/tmp/neto/neto.nft": [ "read" ],
+        "/tmp/neto/sing-box.json": [ "read" ]
+      }
+    },
+    "write": {
+      "uci": [ "neto" ],
+      "file": {
+        "/usr/bin/netod": [ "exec" ]
+      }
+    }
+  }
+}
+

@@ -1,0 +1,54 @@
+{
+  "admin/services/neto": {
+    "title": "neto",
+    "order": 60,
+    "action": {
+      "type": "firstchild"
+    },
+    "depends": {
+      "acl": [ "luci-app-neto" ],
+      "uci": { "neto": true }
+    }
+  },
+  "admin/services/neto/overview": {
+    "title": "Overview",
+    "order": 10,
+    "action": {
+      "type": "view",
+      "path": "neto/overview"
+    }
+  },
+  "admin/services/neto/general": {
+    "title": "General",
+    "order": 20,
+    "action": {
+      "type": "view",
+      "path": "neto/general"
+    }
+  },
+  "admin/services/neto/clients": {
+    "title": "Clients",
+    "order": 30,
+    "action": {
+      "type": "view",
+      "path": "neto/clients"
+    }
+  },
+  "admin/services/neto/rules": {
+    "title": "Rules",
+    "order": 40,
+    "action": {
+      "type": "view",
+      "path": "neto/rules"
+    }
+  },
+  "admin/services/neto/providers": {
+    "title": "Providers",
+    "order": 50,
+    "action": {
+      "type": "view",
+      "path": "neto/providers"
+    }
+  }
+}
+

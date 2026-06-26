@@ -1,0 +1,29 @@
+# Build output
+/dist/
+/bin/
+/tmp/
+
+# Local binaries produced during development
+/netod
+/cmd/netod/netod
+/embedded/bin/*/netod
+/embedded/bin/*/sing-box
+!/embedded/bin/README.md
+
+# Go test/coverage/profile artifacts
+*.test
+*.out
+*.prof
+*.pprof
+coverage.*
+
+# Logs and temporary editor files
+*.log
+*.tmp
+*.swp
+*~
+
+# Local IDE/OS metadata
+.vscode/
+.idea/
+.DS_Store
