@@ -23,7 +23,8 @@ return view.extend({
 
 		m = new form.Map('neto', _('neto'));
 
-		s = m.section(form.GridSection, 'client', _('Clients'));
+		s = m.section(form.GridSection, 'client', _('Clients'),
+			_('Default follows general routing mode. Proxy forces non-reserved traffic through neto. Direct bypasses neto completely.'));
 		s.anonymous = true;
 		s.addremove = true;
 
@@ -34,8 +35,7 @@ return view.extend({
 		o.datatype = 'ip4addr';
 		o.rmempty = false;
 
-		o = s.option(form.ListValue, 'policy', _('Policy'),
-			_('Default follows general routing mode. Proxy forces non-reserved traffic through neto. Direct bypasses neto completely.'));
+		o = s.option(form.ListValue, 'policy', _('Policy'));
 		o.value('default', _('Default'));
 		o.value('proxy', _('Proxy'));
 		o.value('direct', _('Direct'));

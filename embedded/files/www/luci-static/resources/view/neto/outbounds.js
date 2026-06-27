@@ -166,12 +166,48 @@ return view.extend({
 	},
 
 	showImportModal: function() {
+		var importButton, cancelButton;
 		var textarea = E('textarea', {
 			'class': 'cbi-input-textarea',
 			'style': 'width:100%',
 			'rows': 8,
 			'placeholder': 'vless://...\nhysteria2://...\nss://...\ntrojan://...'
 		});
+		var status = E('span', {
+			'style': 'display:none;margin-left:1em'
+		}, _('Importing...'));
+
+		cancelButton = E('button', {
+			'class': 'cbi-button cbi-button-neutral',
+			'click': ui.hideModal
+		}, _('Cancel'));
+		importButton = E('button', {
+			'class': 'cbi-button cbi-button-action',
+			'click': L.bind(function(ev) {
+				var value = String(textarea.value || '').trim();
+
+				ev.preventDefault();
+				if (value == '') {
+					textarea.focus();
+					return Promise.resolve();
+				}
+
+				importButton.disabled = true;
+				cancelButton.disabled = true;
+				textarea.disabled = true;
+				importButton.textContent = _('Importing...');
+				status.style.display = '';
+
+				return this.handleManualImport(value).catch(function(err) {
+					importButton.disabled = null;
+					cancelButton.disabled = null;
+					textarea.disabled = null;
+					importButton.textContent = _('Import');
+					status.style.display = 'none';
+					ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+				});
+			}, this)
+		}, _('Import'));
 
 		ui.showModal(_('Import outbounds'), [
 			E('div', { 'class': 'cbi-value' }, [
@@ -179,20 +215,10 @@ return view.extend({
 				E('div', { 'class': 'cbi-value-field' }, textarea)
 			]),
 			E('div', { 'class': 'right' }, [
-				E('button', {
-					'class': 'cbi-button cbi-button-neutral',
-					'click': ui.hideModal
-				}, _('Cancel')),
+				cancelButton,
 				' ',
-				E('button', {
-					'class': 'cbi-button cbi-button-action',
-					'click': L.bind(function(ev) {
-						ev.preventDefault();
-						return this.handleManualImport(String(textarea.value || '')).catch(function(err) {
-							ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
-						});
-					}, this)
-				}, _('Import'))
+				importButton,
+				status
 			])
 		]);
 	},
@@ -308,12 +334,10 @@ return view.extend({
 		};
 		o.datatype = 'host';
 		o.rmempty = false;
-		o.editable = true;
 
 		o = s.option(form.Value, 'port', _('Port'));
 		o.datatype = 'port';
 		o.rmempty = false;
-		o.editable = true;
 
 		o = s.option(form.Value, 'uuid', _('UUID'));
 		o.depends('type', 'vless');

@@ -14,6 +14,14 @@ func TestOutboundsLuCIContainsImportAndSubscriptions(t *testing.T) {
 	s := string(data)
 	for _, want := range []string{
 		"showImportModal: function()",
+		"var importButton, cancelButton;",
+		"var status = E('span'",
+		"importButton.disabled = true;",
+		"cancelButton.disabled = true;",
+		"textarea.disabled = true;",
+		"importButton.textContent = _('Importing...')",
+		"status.style.display = '';",
+		"status.style.display = 'none';",
 		"handleManualImport: function(value)",
 		"fs.write(importPath",
 		"fs.exec('/usr/bin/netod', [ 'import-uri', '-file', importPath ])",

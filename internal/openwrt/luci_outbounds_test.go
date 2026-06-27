@@ -113,6 +113,9 @@ func TestOutboundsLuCITableOnlySectionNameTypeAddressPort(t *testing.T) {
 		if strings.Contains(block, "o.depends(") {
 			t.Fatalf("field %q should not depend on the modal type control in the table:\n%s", needle, block)
 		}
+		if strings.Contains(block, "o.editable = true") {
+			t.Fatalf("field %q should be read-only text in the table and editable through the modal:\n%s", needle, block)
+		}
 	}
 	for _, needle := range []string{
 		"form.Value, 'label'",
