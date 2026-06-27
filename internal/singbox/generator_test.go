@@ -133,9 +133,11 @@ func TestGenerateGoogleDoHUsesDomainResolver(t *testing.T) {
 	if local["type"] != "https" || local["server"] != "dns.google" || local["server_port"].(float64) != 443 {
 		t.Fatalf("unexpected Google DoH DNS server: %+v", local)
 	}
-	resolver, ok := local["domain_resolver"].(map[string]any)
-	if !ok || resolver["server"] != "bootstrap" || resolver["strategy"] != "prefer_ipv4" {
-		t.Fatalf("Google DoH hostname should use bootstrap resolver object: %+v", local)
+	if local["domain_resolver"] != "bootstrap" {
+		t.Fatalf("Google DoH hostname should use bootstrap resolver tag: %+v", local)
+	}
+	if _, ok := local["domain_strategy"]; ok {
+		t.Fatalf("Google DoH DNS server must not use deprecated domain_strategy: %+v", local)
 	}
 	if _, ok := local["detour"]; ok {
 		t.Fatalf("Google DoH direct DNS should not detour to direct outbound: %+v", local)

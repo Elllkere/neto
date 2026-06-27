@@ -197,10 +197,7 @@ func encodeDNSServer(tag string, upstream config.DNSUpstream, detour string) map
 		item["detour"] = detour
 	}
 	if needsBootstrap(upstream) {
-		item["domain_resolver"] = map[string]any{
-			"server":   "bootstrap",
-			"strategy": "prefer_ipv4",
-		}
+		item["domain_resolver"] = "bootstrap"
 	}
 	switch upstream.Protocol {
 	case "tls":
