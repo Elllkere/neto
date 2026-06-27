@@ -29,18 +29,18 @@ git status
 
 ```sh
 git add .
-git commit -m "Prepare release v1.0.0"
+git commit -m "Prepare release vX.Y.Z"
 ```
 
 ## 2. Create Tag
 
-Для release `v1.0.0`:
+Для release:
 
 ```sh
-git tag v1.0.0
+git tag vX.Y.Z
 ```
 
-Для следующего release меняешь tag:
+Например, для patch release после `v1.0.0`:
 
 ```sh
 git tag v1.0.1
@@ -78,14 +78,14 @@ rm -rf "$tmp"
 Expected:
 
 ```text
-netod v1.0.0
+netod vX.Y.Z
 ```
 
 ## 4. Push To GitHub
 
 ```sh
 git push origin main
-git push origin v1.0.0
+git push origin vX.Y.Z
 ```
 
 Или все tags:
@@ -101,8 +101,8 @@ git push origin --tags
 1. Open repository.
 2. Go to Releases.
 3. Draft a new release.
-4. Select tag `v1.0.0`.
-5. Release title: `v1.0.0`.
+4. Select tag `vX.Y.Z`.
+5. Release title: `vX.Y.Z`.
 6. Upload asset:
 
 ```text
@@ -128,16 +128,17 @@ neto-openwrt-embedded.tar.gz
 Если нужно собрать archive без git tag:
 
 ```sh
-NETO_VERSION=v1.0.0 GOCACHE=/tmp/neto-go-cache ./embedded/pack.sh
+NETO_VERSION=vX.Y.Z GOCACHE=/tmp/neto-go-cache ./embedded/pack.sh
 ```
 
 Но для public release лучше использовать git tag, чтобы GitHub Release,
 `git describe` и `netod version` совпадали.
 
-## Current Release
+## Version Source
 
-Current initial release tag:
+Текущая release version берется из Git tag на commit, который собирается.
+Проверить локально:
 
-```text
-v1.0.0
+```sh
+git describe --tags --always --dirty
 ```
