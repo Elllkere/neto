@@ -13,6 +13,8 @@
     "write": {
       "uci": [ "neto" ],
       "file": {
+        "/tmp/neto-import.txt": [ "read", "write" ],
+        "/sbin/uci": [ "exec" ],
         "/usr/bin/netod": [ "exec" ],
         "/etc/init.d/neto": [ "exec" ]
       }

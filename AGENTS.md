@@ -121,24 +121,6 @@ LuCI must not write deprecated matcher names:
 - `domain_prefix`
 - `domain_exact`
 
-## Known Current LuCI Bugs / UX Gaps
-
-Treat these as current handoff blockers until verified on router:
-
-1. LuCI Rules page may delete or not preserve `option enabled`.
-2. LuCI-created rules may lack `priority`.
-3. Rules table shows too many fields.
-4. Providers page may duplicate rules or rule creation may create provider-like
-   entries.
-5. `match_all` must be removed from v1.
-6. LuCI must write only the new matcher fields listed above.
-7. LuCI must not write deprecated matcher fields.
-8. Rules must default outbound to built-in `direct`, not `proxy_default`.
-9. Outbounds page must not expose `direct` as a creatable outbound type.
-10. Outbounds page must create a stable `tag` from the first Add input, then
-    only allow editing the human label/name.
-11. Outbounds table should only show name/label, type, address, and port.
-
 ## Current Outbound Model
 
 - Built-in outbound tags are `direct` and `blocked`.
@@ -158,6 +140,36 @@ Treat these as current handoff blockers until verified on router:
 - `proxy_default` is deprecated. LuCI must not create or offer it.
 - Old rules with `option outbound 'proxy_default'` may be normalized to
   `direct` for compatibility.
+
+## Current Import / Subscription Model
+
+- Manual imports and subscriptions create normal `config outbound` sections.
+- Imported nodes are selectable by rules through the same outbound tag dropdown
+  as manual profiles.
+- LuCI import and subscription management lives on the Outbounds page. Do not
+  add a separate Imports tab unless the user explicitly asks for it.
+- Imported outbound sections should carry `option imported '1'`; subscription
+  nodes also carry `option subscription '<subscription_name>'`.
+- Subscription nodes are ordinary editable outbounds in the main Outbounds
+  table. A later update of the same subscription overwrites those nodes again.
+- `config subscription '<name>'` supports `enabled`, `label`, `url`,
+  `auto_update`, `update_hour`, `update_via`, and `update_outbound`.
+- Supported import URI schemes are `vless://`, `hysteria2://`/`hy2://`,
+  `ss://`, and `trojan://`.
+- `netod import-uri -file <path>` imports one or more share links from a local
+  file.
+- `netod subscriptions update [name]` downloads subscriptions and replaces only
+  nodes belonging to that subscription.
+- Subscription downloads use the system `curl` binary, not Go `net/http`, to
+  keep embedded multi-architecture `netod` binaries small.
+- `auto_update=1` is implemented by neto-owned cron entries in
+  `/etc/crontabs/root`; preserve user cron lines and only rewrite the marked
+  neto block.
+- `update_via=direct` uses direct curl fetching. `update_via=proxy` uses a
+  temporary sing-box mixed inbound and a selected custom outbound; it must not
+  route router-self traffic through nftables.
+- Subscription update intervals are stored in UCI for scheduling/UX; manual
+  update is currently the explicit LuCI action.
 
 Do not assume a LuCI issue is fixed until it has been checked on an actual
 OpenWrt/ImmortalWrt LuCI instance.

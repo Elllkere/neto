@@ -46,6 +46,8 @@ netod compile
 netod apply
 netod status
 netod debug
+netod import-uri -file /tmp/neto-import.txt
+netod subscriptions update
 netod rules list
 netod test-domain 192.168.8.100 youtube.com A
 nft list table inet neto
@@ -53,6 +55,7 @@ nft list set inet neto lan_subnets4
 ip -4 rule show
 ip -4 route show table 101
 uci show neto
+grep -n "neto subscriptions" /etc/crontabs/root
 uci show dhcp.@dnsmasq[0] | grep -E "server|noresolv|addsubnet"
 logread | tail -n 120
 ```
@@ -160,6 +163,17 @@ Manually verify on router:
   insecure, ECH, uTLS fingerprint, REALITY, and transport-specific fields
 - REALITY public key and short ID fields are hidden until `type=vless`,
   `tls=1`, and `reality=1`
+- Outbounds page has an Import button next to Add for `vless://`,
+  `hysteria2://`, `ss://`, and `trojan://` links
+- Outbounds page can save subscription URL, auto-update toggle, update hour
+  from a 0-23 dropdown, update_via, and optional update outbound
+- Outbounds page hides update hour until auto-update is enabled
+- Outbounds page Manual Update replaces only nodes for the selected subscription
+- Imported nodes appear in the node list and in Rules outbound dropdown
+- Subscription nodes appear in the normal Outbounds table and can be edited;
+  the next update of that subscription overwrites those nodes again
+- Imported nodes carry `option imported '1'`; subscription nodes also carry
+  `option subscription '<name>'`
 - LuCI Save & Apply restarts neto after committing changes
 - setting General -> Enabled off stops neto even if no outbound is configured
 - with General -> Enabled on and no custom outbounds, `netod check` still

@@ -426,6 +426,27 @@ config outbound 'direct'
 	}
 }
 
+func TestParseRejectsDuplicateOutboundTag(t *testing.T) {
+	_, err := Parse(`
+config outbound 'first'
+	option tag 'same_tag'
+	option type 'vless'
+	option server 'one.example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+
+config outbound 'second'
+	option tag 'same_tag'
+	option type 'trojan'
+	option server 'two.example.com'
+	option port '443'
+	option password 'secret'
+`)
+	if err == nil || !strings.Contains(err.Error(), "duplicate enabled outbound tag") {
+		t.Fatalf("got error %v, want duplicate outbound tag", err)
+	}
+}
+
 func TestParseRuleCustomOutbound(t *testing.T) {
 	cfg, err := Parse(`
 config outbound 'my_vless'
@@ -468,6 +489,89 @@ config rule
 	}
 	if !cfg.Outbounds[0].Enabled || cfg.Rules[0].Outbound != "my_vless" {
 		t.Fatalf("custom outbound enabled option should be ignored: %+v %+v", cfg.Outbounds[0], cfg.Rules[0])
+	}
+}
+
+func TestParseSubscription(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'updater'
+	option type 'trojan'
+	option server 'example.com'
+	option port '443'
+	option password 'secret'
+
+config subscription 'my_sub'
+	option label 'My subscription'
+	option url 'https://example.com/sub'
+	option auto_update '1'
+	option update_hour '12'
+	option update_via 'proxy'
+	option update_outbound 'updater'
+	option last_update '1710000000'
+	option node_count '2'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Subscriptions) != 1 {
+		t.Fatalf("unexpected subscriptions: %+v", cfg.Subscriptions)
+	}
+	sub := cfg.Subscriptions[0]
+	if sub.Name != "my_sub" || sub.Label != "My subscription" || !sub.AutoUpdate || sub.UpdateHour != 12 || sub.UpdateVia != "proxy" || sub.UpdateOutbound != "updater" || sub.NodeCount != 2 {
+		t.Fatalf("unexpected subscription: %+v", sub)
+	}
+}
+
+func TestParseRejectsInvalidSubscription(t *testing.T) {
+	tests := []struct {
+		name string
+		uci  string
+		want string
+	}{
+		{
+			name: "missing_url",
+			uci: `
+config subscription 'sub'
+`,
+			want: "url is required",
+		},
+		{
+			name: "update_via",
+			uci: `
+config subscription 'sub'
+	option url 'https://example.com/sub'
+	option update_via 'vpn'
+`,
+			want: "unsupported update_via",
+		},
+		{
+			name: "missing_update_outbound",
+			uci: `
+config subscription 'sub'
+	option url 'https://example.com/sub'
+	option update_via 'proxy'
+	option update_outbound 'missing'
+`,
+			want: "unsupported update_outbound",
+		},
+		{
+			name: "invalid_update_hour",
+			uci: `
+config subscription 'sub'
+	option url 'https://example.com/sub'
+	option auto_update '1'
+	option update_hour '24'
+`,
+			want: "invalid update_hour",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(tc.uci)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got error %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

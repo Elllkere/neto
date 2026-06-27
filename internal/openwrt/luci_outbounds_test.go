@@ -19,6 +19,10 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 		"s.sectiontitle = function(section_id)",
 		"s.renderSectionAdd = function()",
 		"ui.addValidator(nameEl, 'uciname'",
+		"function outboundTagExists(tag)",
+		"section.tag || sid || section['.name']",
+		"addNamedSectionValidator(el, this, _('This tag is reserved'), true)",
+		"return _('Expecting: %s').format(_('unique outbound tag'))",
 		"form.Value, 'label'",
 		"o.cfgvalue = function(section_id)",
 		"o.write = function(section_id, formvalue)",
@@ -30,6 +34,8 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 		"o.value('trojan'",
 		"o.default = 'vless'",
 		"form.Value, 'server', _('Address')",
+		"uci.get('neto', section_id, 'server') || uci.get('neto', section_id, 'address')",
+		"uci.set('neto', section_id, 'server', String(formvalue || '').trim())",
 		"reality_public_key",
 		"tls_min_version",
 		"tls_max_version",
@@ -48,14 +54,12 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
-		"o.value('direct'",
 		"o.value('socks'",
 		"o.value('socks4'",
 		"o.value('socks5'",
 		"o.value('mixed'",
 		"o.default = 'proxy_default'",
 		"uci.set('neto', 'proxy_default', 'outbound')",
-		"form.flag, 'enabled'",
 		"form.value, 'tag'",
 	} {
 		if strings.Contains(strings.ToLower(s), forbidden) {
@@ -64,6 +68,18 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 	}
 	if strings.Count(s, "o.modalonly = true") < 10 {
 		t.Fatalf("outbound detail fields should be modal-only:\n%s", s)
+	}
+	start := strings.Index(s, "form.ListValue, 'type'")
+	end := strings.Index(s, "form.Value, 'server', _('Address')")
+	if start < 0 || end < 0 || end <= start {
+		t.Fatalf("could not find outbound type block:\n%s", s)
+	}
+	typeBlock := s[start:end]
+	if strings.Contains(typeBlock, "o.value('direct'") {
+		t.Fatalf("outbound type dropdown must not expose direct:\n%s", typeBlock)
+	}
+	if strings.Contains(typeBlock, "o.editable = true") {
+		t.Fatalf("outbound type should be read-only text in table and editable in modal:\n%s", typeBlock)
 	}
 }
 
@@ -93,6 +109,9 @@ func TestOutboundsLuCITableOnlySectionNameTypeAddressPort(t *testing.T) {
 		}
 		if strings.Contains(block, "o.modalonly = true") {
 			t.Fatalf("field %q should be visible in table:\n%s", needle, block)
+		}
+		if strings.Contains(block, "o.depends(") {
+			t.Fatalf("field %q should not depend on the modal type control in the table:\n%s", needle, block)
 		}
 	}
 	for _, needle := range []string{

@@ -29,6 +29,80 @@ The parser also accepts these homeproxy-style aliases for compatibility:
 `tls_reality_public_key`, `tls_reality_short_id`, `grpc_servicename`, and
 `shadowsocks_encrypt_method`.
 
+## Imports and Subscriptions
+
+The Outbounds LuCI page and `netod` CLI create imported nodes as ordinary
+`config outbound` sections, so rules select imported nodes exactly like manual
+outbounds. LuCI keeps normal manual/imported outbounds separate from
+subscription definitions on the same Outbounds page. Nodes imported from a
+subscription remain editable in the normal Outbounds table; the next update of
+that subscription replaces those nodes from the subscription source again.
+
+Supported share link schemes:
+
+- `vless://`
+- `hysteria2://` and `hy2://`
+- `ss://`
+- `trojan://`
+
+Manual import:
+
+```sh
+cat >/tmp/neto-import.txt <<'EOF'
+vless://UUID@example.com:443?security=reality&sni=example.com&pbk=PUBLIC_KEY&sid=SHORT_ID#My%20VLESS
+EOF
+netod import-uri -file /tmp/neto-import.txt
+/etc/init.d/neto restart
+```
+
+Subscription config:
+
+```uci
+config subscription 'my_sub'
+	option enabled '1'
+	option label 'My subscription'
+	option url 'https://example.com/subscription'
+	option auto_update '0'
+	option update_hour '0'
+	option update_via 'direct'
+```
+
+Manual subscription update:
+
+```sh
+netod subscriptions update my_sub
+/etc/init.d/neto restart
+```
+
+`update_via 'proxy'` does not change nft routing and does not capture router
+self traffic. It starts a temporary sing-box local mixed proxy and downloads the
+subscription through `update_outbound` or the first available custom outbound:
+
+```uci
+config subscription 'my_sub'
+	option enabled '1'
+	option url 'https://example.com/subscription'
+	option auto_update '1'
+	option update_hour '3'
+	option update_via 'proxy'
+	option update_outbound 'my_vless'
+```
+
+Imported subscription nodes are marked like this:
+
+```uci
+config outbound 'my_sub_ab12cd34ef'
+	option imported '1'
+	option subscription 'my_sub'
+	option tag 'my_sub_ab12cd34ef'
+	option label 'Imported node'
+	option type 'vless'
+	...
+```
+
+Updating a subscription replaces only nodes with the matching
+`option subscription`, preserving manual outbounds and other subscriptions.
+
 ## VLESS + REALITY
 
 ```uci
@@ -105,5 +179,3 @@ config outbound 'my_trojan'
 	option websocket_early_data '2048'
 	option websocket_early_data_header 'Sec-WebSocket-Protocol'
 ```
-
-Subscriptions and imports are not implemented in this milestone.

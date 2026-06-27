@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,9 +14,11 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/elllkere/neto/internal/config"
 	"github.com/elllkere/neto/internal/dnsproxy"
+	"github.com/elllkere/neto/internal/importer"
 	"github.com/elllkere/neto/internal/nft"
 	"github.com/elllkere/neto/internal/provider"
 	"github.com/elllkere/neto/internal/singbox"
@@ -33,6 +37,16 @@ type options struct {
 	outDir            string
 	skipRuntimeChecks bool
 	skipSingBoxCheck  bool
+}
+
+type importOptions struct {
+	configPath string
+	filePath   string
+}
+
+type subscriptionOptions struct {
+	configPath string
+	name       string
 }
 
 func main() {
@@ -86,6 +100,18 @@ func run(args []string) error {
 			return err
 		}
 		return commandRun(opts)
+	case "import-uri":
+		opts, err := parseImportOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		return commandImportURI(opts)
+	case "subscriptions":
+		opts, err := parseSubscriptionOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		return commandSubscriptionsUpdate(opts)
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
@@ -114,8 +140,46 @@ func parseOptions(command string, args []string, checkFlags bool) (options, erro
 	return opts, nil
 }
 
+func parseImportOptions(args []string) (importOptions, error) {
+	fs := flag.NewFlagSet("netod import-uri", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	opts := importOptions{configPath: config.DefaultPath}
+	fs.StringVar(&opts.configPath, "config", opts.configPath, "path to UCI config")
+	fs.StringVar(&opts.filePath, "file", opts.filePath, "file containing share links")
+	if err := fs.Parse(args); err != nil {
+		return importOptions{}, err
+	}
+	if opts.filePath == "" {
+		return importOptions{}, fmt.Errorf("import-uri requires -file")
+	}
+	if fs.NArg() != 0 {
+		return importOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	return opts, nil
+}
+
+func parseSubscriptionOptions(args []string) (subscriptionOptions, error) {
+	if len(args) == 0 || args[0] != "update" {
+		return subscriptionOptions{}, fmt.Errorf("usage: netod subscriptions update [name] [options]")
+	}
+	fs := flag.NewFlagSet("netod subscriptions update", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	opts := subscriptionOptions{configPath: config.DefaultPath}
+	fs.StringVar(&opts.configPath, "config", opts.configPath, "path to UCI config")
+	if err := fs.Parse(args[1:]); err != nil {
+		return subscriptionOptions{}, err
+	}
+	if fs.NArg() > 1 {
+		return subscriptionOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(1))
+	}
+	if fs.NArg() == 1 {
+		opts.name = fs.Arg(0)
+	}
+	return opts, nil
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: netod <check|compile|apply|status|debug|run> [options]")
+	fmt.Fprintln(os.Stderr, "usage: netod <check|compile|apply|status|debug|run|import-uri|subscriptions> [options]")
 }
 
 func commandCheck(opts options) error {
@@ -215,6 +279,72 @@ func commandRun(opts options) error {
 	return dnsproxy.New(cfg).Run(ctx)
 }
 
+func commandImportURI(opts importOptions) error {
+	data, err := os.ReadFile(opts.filePath)
+	if err != nil {
+		return err
+	}
+	nodes, err := importer.ParseLinks(string(data))
+	if err != nil {
+		return err
+	}
+	count, err := importer.ApplyNodes(nodes, importer.ApplyOptions{
+		ConfigPath: opts.configPath,
+		Source:     "manual",
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("imported nodes: %d\n", count)
+	return nil
+}
+
+func commandSubscriptionsUpdate(opts subscriptionOptions) error {
+	cfg, err := config.LoadFile(opts.configPath)
+	if err != nil {
+		return err
+	}
+	var matched int
+	var updated int
+	for _, sub := range cfg.Subscriptions {
+		if opts.name != "" && sub.Name != opts.name {
+			continue
+		}
+		matched++
+		if !sub.Enabled {
+			fmt.Printf("subscription %s is disabled; skipped\n", sub.Name)
+			continue
+		}
+		body, err := fetchSubscription(cfg, sub)
+		if err != nil {
+			return fmt.Errorf("subscription %s: %w", sub.Name, err)
+		}
+		nodes, err := importer.ParseLinks(string(body))
+		if err != nil {
+			return fmt.Errorf("subscription %s: %w", sub.Name, err)
+		}
+		count, err := importer.ApplyNodes(nodes, importer.ApplyOptions{
+			ConfigPath:   opts.configPath,
+			Source:       sub.Name,
+			Subscription: true,
+			Replace:      true,
+		})
+		if err != nil {
+			return fmt.Errorf("subscription %s: %w", sub.Name, err)
+		}
+		fmt.Printf("subscription %s: imported nodes: %d\n", sub.Name, count)
+		updated += count
+	}
+	if matched == 0 {
+		if opts.name != "" {
+			return fmt.Errorf("subscription %q not found", opts.name)
+		}
+		return fmt.Errorf("no subscriptions configured")
+	}
+	fmt.Printf("subscriptions updated nodes: %d\n", updated)
+	return nil
+}
+
 func commandDebug(opts options) error {
 	cfg, err := config.LoadFile(opts.configPath)
 	if err != nil {
@@ -254,6 +384,123 @@ func debugList(values []string) string {
 		return "-"
 	}
 	return strings.Join(values, ",")
+}
+
+func fetchSubscription(cfg config.Config, sub config.Subscription) ([]byte, error) {
+	switch sub.UpdateVia {
+	case "", "direct":
+		return fetchURLWithCurl(sub.URL, "")
+	case "proxy":
+		return fetchURLViaProxy(cfg, sub)
+	default:
+		return nil, fmt.Errorf("unsupported update_via %q", sub.UpdateVia)
+	}
+}
+
+func fetchURLViaProxy(cfg config.Config, sub config.Subscription) ([]byte, error) {
+	if !singbox.BinaryExists(cfg.Main.SingBoxBin) {
+		return nil, fmt.Errorf("sing-box binary is missing or not executable: %s", cfg.Main.SingBoxBin)
+	}
+	port, err := freeLocalPort()
+	if err != nil {
+		return nil, err
+	}
+	proxyJSON, err := singbox.GenerateProxyClient(cfg, sub.UpdateOutbound, port)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp("", "neto-subscription-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "sing-box.json")
+	if err := os.WriteFile(path, append(proxyJSON, '\n'), 0600); err != nil {
+		return nil, err
+	}
+	if err := singbox.CheckBinary(cfg.Main.SingBoxBin, path); err != nil {
+		return nil, err
+	}
+
+	var stderr bytes.Buffer
+	cmd := exec.Command(cfg.Main.SingBoxBin, "run", "-c", path)
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+	if err := waitForPort(port, 5*time.Second); err != nil {
+		return nil, fmt.Errorf("temporary sing-box did not start: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+
+	return fetchURLWithCurl(sub.URL, fmt.Sprintf("http://127.0.0.1:%d", port))
+}
+
+func fetchURLWithCurl(rawURL string, proxy string) ([]byte, error) {
+	if err := requireCommand("curl"); err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp("", "neto-subscription-curl-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+
+	const maxBody = 16 << 20
+	outPath := filepath.Join(dir, "subscription.txt")
+	args := []string{
+		"-fsSL",
+		"--connect-timeout", "15",
+		"--max-time", "60",
+		"--max-filesize", strconv.Itoa(maxBody),
+		"--user-agent", "neto/1",
+		"--output", outPath,
+	}
+	if proxy != "" {
+		args = append(args, "--proxy", proxy)
+	} else {
+		args = append(args, "--noproxy", "*")
+	}
+	args = append(args, rawURL)
+
+	out, err := command("curl", args...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("curl failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	st, err := os.Stat(outPath)
+	if err != nil {
+		return nil, err
+	}
+	if st.Size() > maxBody {
+		return nil, fmt.Errorf("subscription response is too large")
+	}
+	return os.ReadFile(outPath)
+}
+
+func freeLocalPort() (int, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+func waitForPort(port int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for %s", addr)
 }
 
 func compile(opts options) (config.Config, string, string, error) {

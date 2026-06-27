@@ -46,3 +46,26 @@ func TestInitScriptManagesDNSMasqUCI(t *testing.T) {
 		}
 	}
 }
+
+func TestInitScriptManagesSubscriptionCron(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/etc/init.d/neto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		`CRON_FILE="/etc/crontabs/root"`,
+		`CRON_BEGIN="# neto subscriptions begin"`,
+		"config_get_bool auto_update \"$section\" auto_update 0",
+		"config_get hour \"$section\" update_hour \"0\"",
+		"config_foreach neto_append_subscription_cron subscription",
+		"/usr/bin/netod subscriptions update %s",
+		"/etc/init.d/neto restart",
+		"neto_write_cron",
+		"neto_remove_cron",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q in init script:\n%s", want, s)
+		}
+	}
+}

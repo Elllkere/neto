@@ -213,6 +213,50 @@ Outbound profiles must not change nft routing policy. nftables still decides
 which LAN client packets reach sing-box before sing-box executes the selected
 outbound.
 
+## Imports and Subscriptions
+
+Manual imports and subscriptions are configuration management features. They
+must create, replace, or delete ordinary `config outbound` sections only. They
+must not create rules, providers, nftables rules, client policies, or a new
+runtime routing authority.
+
+Supported imported node schemes:
+
+- `vless://`
+- `hysteria2://` and `hy2://`
+- `ss://`
+- `trojan://`
+
+Subscription sections use:
+
+- `enabled`
+- `label`
+- `url`
+- `auto_update`
+- `update_hour`: hour of day, `0` through `23`
+- `update_via`: `direct` or `proxy`
+- `update_outbound`: optional outbound tag for proxy-based updates
+
+`netod subscriptions update [name]` downloads subscription content, parses
+base64 or plain share-link lists, and replaces only imported outbounds that
+belong to that subscription. Imported nodes carry `option imported '1'`; nodes
+from subscriptions also carry `option subscription '<name>'`. Subscription
+nodes are still ordinary editable outbounds; a later update of the same
+subscription overwrites those nodes from the downloaded source again.
+
+Subscription downloads use the system `curl` binary instead of Go `net/http` so
+the embedded archive does not carry Go's TLS/HTTP dependency graph once per CPU
+target. `update_via=direct` uses curl with proxy bypass. `update_via=proxy`
+starts a temporary sing-box client with a local mixed inbound and calls curl
+through that local proxy. This is intentionally separate from nft/TProxy and
+must not route router-self traffic through neto.
+
+When `auto_update=1`, the init script writes neto-owned cron entries in
+`/etc/crontabs/root` for the selected `update_hour`. These entries run
+`netod subscriptions update <name>` and restart neto after the update so the
+generated sing-box config sees replaced nodes. Stop/reload removes or rewrites
+only the marked neto cron block.
+
 ## Client Policy Model
 
 - absent/default: follow `routing_mode`

@@ -41,6 +41,17 @@ tag in the rule outbound field. In LuCI, the first Add input becomes the stable
 tag and later edits change only the `label`. See `docs/OUTBOUNDS.md` for VLESS
 + REALITY, Hysteria2, Shadowsocks 2022, and Trojan TLS examples.
 
+Imported nodes are normal outbound sections too. After importing a share link or
+running a subscription update, select the imported node tag in the rule outbound
+field:
+
+```sh
+netod import-uri -file /tmp/neto-import.txt
+netod subscriptions update my_sub
+/etc/init.d/neto restart
+uci show neto | grep "=outbound"
+```
+
 Rules are for explicit domain/IP/provider matches only. To proxy everything
 globally, use General -> `routing_mode=global`. To proxy one client entirely,
 use client `policy=proxy`.

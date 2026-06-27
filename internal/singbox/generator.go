@@ -120,6 +120,58 @@ func Generate(cfg config.Config) ([]byte, error) {
 	return json.MarshalIndent(doc, "", "  ")
 }
 
+func GenerateProxyClient(cfg config.Config, outboundTag string, listenPort int) ([]byte, error) {
+	if listenPort <= 0 || listenPort > 65535 {
+		return nil, fmt.Errorf("invalid listen port %d", listenPort)
+	}
+	outbound, err := findClientOutbound(cfg, outboundTag)
+	if err != nil {
+		return nil, err
+	}
+	doc := map[string]any{
+		"log": map[string]any{
+			"level":     "warn",
+			"timestamp": true,
+		},
+		"inbounds": []any{
+			map[string]any{
+				"type":        "mixed",
+				"tag":         "mixed-in",
+				"listen":      "127.0.0.1",
+				"listen_port": listenPort,
+			},
+		},
+		"outbounds": []any{
+			map[string]any{"type": "direct", "tag": config.BuiltinDirectOutbound},
+			encodeOutbound(outbound),
+		},
+		"route": map[string]any{
+			"final": outbound.Tag,
+		},
+	}
+	return json.MarshalIndent(doc, "", "  ")
+}
+
+func findClientOutbound(cfg config.Config, outboundTag string) (config.Outbound, error) {
+	outboundTag = strings.TrimSpace(outboundTag)
+	var first config.Outbound
+	for i, outbound := range cfg.EnabledCustomOutbounds() {
+		if i == 0 {
+			first = outbound
+		}
+		if outboundTag != "" && outbound.Tag == outboundTag {
+			return outbound, nil
+		}
+	}
+	if outboundTag != "" {
+		return config.Outbound{}, fmt.Errorf("update_outbound %q not found", outboundTag)
+	}
+	if first.Tag == "" {
+		return config.Outbound{}, fmt.Errorf("update_via proxy requires update_outbound or at least one custom outbound")
+	}
+	return first, nil
+}
+
 func generateOutbounds(cfg config.Config) ([]any, error) {
 	used := map[string]struct{}{}
 	var out []any

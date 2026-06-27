@@ -10,10 +10,76 @@ DNSMASQ_SNIPPET="neto.conf"
 DNSMASQ_STATE_DIR="/var/lib/neto"
 DNSMASQ_NORESOLV_STATE="$DNSMASQ_STATE_DIR/dnsmasq-noresolv.prev"
 DNSMASQ_ADDSUBNET_STATE="$DNSMASQ_STATE_DIR/dnsmasq-addsubnet.prev"
+CRON_FILE="/etc/crontabs/root"
+CRON_BEGIN="# neto subscriptions begin"
+CRON_END="# neto subscriptions end"
 
 neto_reload_dnsmasq() {
 	[ -x /etc/init.d/dnsmasq ] || return 0
 	/etc/init.d/dnsmasq reload >/dev/null 2>&1 || /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+}
+
+neto_reload_cron() {
+	[ -x /etc/init.d/cron ] || return 0
+	/etc/init.d/cron reload >/dev/null 2>&1 || /etc/init.d/cron restart >/dev/null 2>&1 || true
+}
+
+neto_remove_cron() {
+	local tmp
+	[ -f "$CRON_FILE" ] || return 0
+	tmp="/tmp/neto-cron.$$"
+	awk -v begin="$CRON_BEGIN" -v end="$CRON_END" '
+		$0 == begin { skip = 1; next }
+		$0 == end { skip = 0; next }
+		!skip { print }
+	' "$CRON_FILE" >"$tmp"
+	cat "$tmp" >"$CRON_FILE"
+	rm -f "$tmp"
+	neto_reload_cron
+}
+
+neto_append_subscription_cron() {
+	local section="$1" enabled auto_update hour
+	config_get_bool enabled "$section" enabled 1
+	config_get_bool auto_update "$section" auto_update 0
+	[ "$enabled" -eq 1 ] && [ "$auto_update" -eq 1 ] || return 0
+	case "$section" in
+		""|*[!A-Za-z0-9_]*)
+			return 0
+			;;
+	esac
+	config_get hour "$section" update_hour "0"
+	case "$hour" in
+		""|*[!0-9]*)
+			hour="0"
+			;;
+	esac
+	[ "$hour" -ge 0 ] && [ "$hour" -le 23 ] || hour="0"
+	printf "0 %s * * * /usr/bin/netod subscriptions update %s >/dev/null 2>&1 && /etc/init.d/neto restart >/dev/null 2>&1\n" "$hour" "$section" >>"$NETO_CRON_LINES"
+}
+
+neto_write_cron() {
+	local tmp lines
+	mkdir -p "$(dirname "$CRON_FILE")"
+	touch "$CRON_FILE"
+	tmp="/tmp/neto-cron.$$"
+	lines="/tmp/neto-cron-lines.$$"
+	awk -v begin="$CRON_BEGIN" -v end="$CRON_END" '
+		$0 == begin { skip = 1; next }
+		$0 == end { skip = 0; next }
+		!skip { print }
+	' "$CRON_FILE" >"$tmp"
+	: >"$lines"
+	NETO_CRON_LINES="$lines"
+	config_foreach neto_append_subscription_cron subscription
+	if [ -s "$lines" ]; then
+		printf "%s\n" "$CRON_BEGIN" >>"$tmp"
+		cat "$lines" >>"$tmp"
+		printf "%s\n" "$CRON_END" >>"$tmp"
+	fi
+	cat "$tmp" >"$CRON_FILE"
+	rm -f "$tmp" "$lines"
+	neto_reload_cron
 }
 
 neto_write_dnsmasq() {
@@ -89,7 +155,10 @@ start_service() {
 
 	local enabled singbox_bin
 	config_get_bool enabled main enabled 1
-	[ "$enabled" -eq 1 ] || return 0
+	if [ "$enabled" -ne 1 ]; then
+		neto_remove_cron
+		return 0
+	fi
 	config_get singbox_bin main singbox_bin "/usr/libexec/neto/sing-box"
 
 	"$NETOD" check || return 1
@@ -112,6 +181,7 @@ start_service() {
 	procd_close_instance
 
 	neto_write_dnsmasq
+	neto_write_cron
 }
 
 stop_service() {
@@ -127,6 +197,7 @@ stop_service() {
 	done
 	ip -4 route del local default dev lo table "$table" 2>/dev/null || true
 	neto_remove_dnsmasq
+	neto_remove_cron
 }
 
 reload_service() {

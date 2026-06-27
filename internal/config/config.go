@@ -17,11 +17,12 @@ const (
 )
 
 type Config struct {
-	Main      Main
-	Clients   []Client
-	Rules     []Rule
-	Outbounds []Outbound
-	Warnings  []string
+	Main          Main
+	Clients       []Client
+	Rules         []Rule
+	Outbounds     []Outbound
+	Subscriptions []Subscription
+	Warnings      []string
 }
 
 type Main struct {
@@ -110,6 +111,20 @@ type Outbound struct {
 	HysteriaObfsPassword string
 	HysteriaUpMbps       int
 	HysteriaDownMbps     int
+}
+
+type Subscription struct {
+	Name           string
+	Label          string
+	Enabled        bool
+	URL            string
+	AutoUpdate     bool
+	UpdateHour     int
+	UpdateInterval string
+	UpdateVia      string
+	UpdateOutbound string
+	LastUpdate     string
+	NodeCount      int
 }
 
 type section struct {
@@ -214,6 +229,8 @@ func Parse(data string) (Config, error) {
 			outbound, warnings := parseOutbound(s)
 			cfg.Outbounds = append(cfg.Outbounds, outbound)
 			cfg.Warnings = append(cfg.Warnings, warnings...)
+		case "subscription":
+			cfg.Subscriptions = append(cfg.Subscriptions, parseSubscription(s))
 		}
 	}
 	sort.SliceStable(cfg.Rules, func(i, j int) bool {
@@ -340,6 +357,39 @@ func (c Config) Validate() error {
 			}
 		default:
 			return fmt.Errorf("outbound %q has unsupported type %q", outbound.Tag, outbound.Type)
+		}
+	}
+	seenSubscriptions := map[string]struct{}{}
+	for _, sub := range c.Subscriptions {
+		name := strings.TrimSpace(sub.Name)
+		if name == "" {
+			return fmt.Errorf("subscription name must not be empty")
+		}
+		if _, ok := seenSubscriptions[name]; ok {
+			return fmt.Errorf("duplicate subscription %q", name)
+		}
+		seenSubscriptions[name] = struct{}{}
+		if !sub.Enabled {
+			continue
+		}
+		if strings.TrimSpace(sub.URL) == "" {
+			return fmt.Errorf("subscription %q url is required", name)
+		}
+		switch sub.UpdateVia {
+		case "direct", "proxy":
+		default:
+			return fmt.Errorf("subscription %q has unsupported update_via %q", name, sub.UpdateVia)
+		}
+		if sub.UpdateHour < 0 || sub.UpdateHour > 23 {
+			return fmt.Errorf("subscription %q has invalid update_hour %d", name, sub.UpdateHour)
+		}
+		if sub.UpdateVia == "proxy" && strings.TrimSpace(sub.UpdateOutbound) != "" {
+			if _, ok := seenOutboundTags[sub.UpdateOutbound]; !ok {
+				return fmt.Errorf("subscription %q has unsupported update_outbound %q", name, sub.UpdateOutbound)
+			}
+			if sub.UpdateOutbound == BuiltinBlockedOutbound {
+				return fmt.Errorf("subscription %q update_outbound must not be blocked", name)
+			}
 		}
 	}
 	for _, r := range c.Rules {
@@ -555,6 +605,37 @@ func parseOutbound(s section) (Outbound, []string) {
 	return outbound, warnings
 }
 
+func parseSubscription(s section) Subscription {
+	sub := Subscription{
+		Name:           strings.TrimSpace(s.name),
+		Label:          strings.TrimSpace(firstNonEmpty(s.options["label"], s.options["name"], s.name)),
+		Enabled:        true,
+		URL:            strings.TrimSpace(s.options["url"]),
+		AutoUpdate:     false,
+		UpdateInterval: strings.TrimSpace(s.options["update_interval"]),
+		UpdateVia:      strings.TrimSpace(firstNonEmpty(s.options["update_via"], "direct")),
+		UpdateOutbound: strings.TrimSpace(s.options["update_outbound"]),
+		LastUpdate:     strings.TrimSpace(s.options["last_update"]),
+	}
+	if v, ok := s.options["enabled"]; ok {
+		sub.Enabled = parseBool(v, sub.Enabled)
+	}
+	if v, ok := s.options["auto_update"]; ok {
+		sub.AutoUpdate = parseBool(v, sub.AutoUpdate)
+	}
+	if v := firstNonEmpty(s.options["update_hour"], s.options["update_interval"], "0"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(v), "h")); err == nil {
+			sub.UpdateHour = n
+		}
+	}
+	if v := s.options["node_count"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			sub.NodeCount = n
+		}
+	}
+	return sub
+}
+
 func reservedCustomOutboundTag(tag string) bool {
 	switch tag {
 	case BuiltinDirectOutbound, BuiltinBlockedOutbound, "block", "proxy_default":
@@ -712,9 +793,18 @@ func parseSections(data string) ([]section, error) {
 
 func stripComment(s string) string {
 	var quote rune
+	escaped := false
 	for i, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
 		switch {
 		case quote != 0:
+			if r == '\\' {
+				escaped = true
+				continue
+			}
 			if r == quote {
 				quote = 0
 			}
@@ -731,6 +821,7 @@ func splitUCIFields(s string) ([]string, error) {
 	var fields []string
 	var b strings.Builder
 	var quote rune
+	escaped := false
 	inField := false
 
 	flush := func() {
@@ -742,8 +833,19 @@ func splitUCIFields(s string) ([]string, error) {
 	}
 
 	for _, r := range s {
+		if escaped {
+			b.WriteRune(r)
+			inField = true
+			escaped = false
+			continue
+		}
 		switch {
 		case quote != 0:
+			if r == '\\' {
+				escaped = true
+				inField = true
+				continue
+			}
 			if r == quote {
 				quote = 0
 				continue

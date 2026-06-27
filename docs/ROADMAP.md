@@ -16,6 +16,9 @@ Milestone 1 has working core runtime pieces:
 - sing-box config generation
 - netod DNS listener
 - dnsmasq integration
+- native outbound manual profiles
+- manual share-link imports and subscription updates for VLESS, Hysteria2,
+  Shadowsocks, and Trojan nodes
 - OpenWrt/ImmortalWrt embedded installer
 - minimal LuCI app
 
@@ -65,7 +68,7 @@ Treat these as active until verified on router:
 - More robust provider management.
 - Optional provider update support.
 - More complete LuCI validation and summaries.
-- Additional outbound UX, imports, and selectors beyond native manual profiles.
+- Additional outbound selectors beyond native manual/imported profiles.
 - Better block behavior for packet phase.
 - IPv6 design, only after v1 IPv4 path is stable.
 

@@ -5,6 +5,8 @@
 'require uci';
 'require view';
 
+var importPath = '/tmp/neto-import.txt';
+
 function isReservedTag(tag) {
 	return tag == 'direct' || tag == 'blocked' || tag == 'block' || tag == 'proxy_default';
 }
@@ -35,6 +37,67 @@ function dependsTransport(option, transport) {
 	option.depends({ 'type': 'trojan', 'transport': transport });
 }
 
+function addProxyOutboundChoices(option) {
+	option.value('', _('Auto'));
+
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var tag = String(section.tag || sid || section['.name'] || '').trim();
+		var label = String(section.label || section.name || tag).trim();
+
+		if (tag == '' || isReservedTag(tag))
+			return;
+
+		option.value(tag, label || tag);
+	});
+}
+
+function outboundTagExists(tag) {
+	var found = false;
+
+	tag = String(tag || '').trim();
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var existing = String(section.tag || sid || section['.name'] || '').trim();
+
+		if (existing == tag)
+			found = true;
+	});
+
+	return found;
+}
+
+function addNamedSectionValidator(el, section, reservedMessage, checkOutboundTags) {
+	var nameEl = el.querySelector('.cbi-section-create-name');
+
+	ui.addValidator(nameEl, 'uciname', true, L.bind(function(value) {
+		var button = el.querySelector('.cbi-section-create > .cbi-button-add');
+		var config = this.uciconfig || this.map.config;
+		var name = String(value || '').trim();
+
+		if (name == '') {
+			button.disabled = true;
+			return true;
+		}
+
+		if (isReservedTag(name)) {
+			button.disabled = true;
+			return reservedMessage;
+		}
+
+		if (uci.get(config, name)) {
+			button.disabled = true;
+			return _('Expecting: %s').format(_('unique UCI identifier'));
+		}
+
+		if (checkOutboundTags && outboundTagExists(name)) {
+			button.disabled = true;
+			return _('Expecting: %s').format(_('unique outbound tag'));
+		}
+
+		button.disabled = null;
+		return true;
+	}, section), 'blur', 'keyup');
+}
+
 function normalizeOutbounds() {
 	uci.sections('neto', 'outbound', function(section, sid) {
 		var tag = String(uci.get('neto', sid, 'tag') || '').trim();
@@ -54,13 +117,37 @@ function normalizeOutbounds() {
 	});
 }
 
+function normalizeSubscriptions() {
+	uci.sections('neto', 'subscription', function(section, sid) {
+		if (uci.get('neto', sid, 'enabled') == null)
+			uci.set('neto', sid, 'enabled', '1');
+
+		if (uci.get('neto', sid, 'label') == null)
+			uci.set('neto', sid, 'label', sid);
+
+		if (uci.get('neto', sid, 'auto_update') == null)
+			uci.set('neto', sid, 'auto_update', '0');
+
+		if (uci.get('neto', sid, 'update_hour') == null)
+			uci.set('neto', sid, 'update_hour', '0');
+
+		if (uci.get('neto', sid, 'update_via') == null)
+			uci.set('neto', sid, 'update_via', 'direct');
+	});
+}
+
+function normalizeAll() {
+	normalizeOutbounds();
+	normalizeSubscriptions();
+}
+
 return view.extend({
 	load: function() {
 		return uci.load('neto');
 	},
 
 	handleSave: function() {
-		return this.map.save(normalizeOutbounds).then(function() {
+		return this.map.save(normalizeAll).then(function() {
 			return ui.changes.init();
 		});
 	},
@@ -78,11 +165,87 @@ return view.extend({
 			});
 	},
 
+	showImportModal: function() {
+		var textarea = E('textarea', {
+			'class': 'cbi-input-textarea',
+			'style': 'width:100%',
+			'rows': 8,
+			'placeholder': 'vless://...\nhysteria2://...\nss://...\ntrojan://...'
+		});
+
+		ui.showModal(_('Import outbounds'), [
+			E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' }, _('Links')),
+				E('div', { 'class': 'cbi-value-field' }, textarea)
+			]),
+			E('div', { 'class': 'right' }, [
+				E('button', {
+					'class': 'cbi-button cbi-button-neutral',
+					'click': ui.hideModal
+				}, _('Cancel')),
+				' ',
+				E('button', {
+					'class': 'cbi-button cbi-button-action',
+					'click': L.bind(function(ev) {
+						ev.preventDefault();
+						return this.handleManualImport(String(textarea.value || '')).catch(function(err) {
+							ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+						});
+					}, this)
+				}, _('Import'))
+			])
+		]);
+	},
+
+	handleManualImport: function(value) {
+		value = String(value || '').trim();
+
+		if (value == '')
+			return Promise.resolve();
+
+		return fs.write(importPath, value + '\n', 384)
+			.then(function() {
+				return fs.exec('/usr/bin/netod', [ 'import-uri', '-file', importPath ]);
+			})
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Import failed'));
+
+				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
+			})
+			.then(function() {
+				window.location.reload();
+			});
+	},
+
+	handleSubscriptionUpdate: function(section_id) {
+		return this.handleSave()
+			.then(function() {
+				return fs.exec('/sbin/uci', [ 'commit', 'neto' ]);
+			})
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Commit failed'));
+
+				return fs.exec('/usr/bin/netod', [ 'subscriptions', 'update', section_id ]);
+			})
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Update failed'));
+
+				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
+			})
+			.then(function() {
+				window.location.reload();
+			});
+	},
+
 	render: function() {
-		var m, s, o;
+		var m, s, o, self, sub;
 
 		m = new form.Map('neto', _('neto'));
 		this.map = m;
+		self = this;
 
 		s = m.section(form.GridSection, 'outbound', _('Outbounds'));
 		s.anonymous = false;
@@ -97,31 +260,14 @@ return view.extend({
 		};
 		s.renderSectionAdd = function() {
 			var el = form.GridSection.prototype.renderSectionAdd.apply(this, arguments);
-			var nameEl = el.querySelector('.cbi-section-create-name');
-
-			ui.addValidator(nameEl, 'uciname', true, L.bind(function(value) {
-				var button = el.querySelector('.cbi-section-create > .cbi-button-add');
-				var config = this.uciconfig || this.map.config;
-				var tag = String(value || '').trim();
-
-				if (tag == '') {
-					button.disabled = true;
-					return true;
+			addNamedSectionValidator(el, this, _('This tag is reserved'), true);
+			el.appendChild(E('button', {
+				'class': 'cbi-button cbi-button-action',
+				'click': function(ev) {
+					ev.preventDefault();
+					return self.showImportModal();
 				}
-
-				if (isReservedTag(tag)) {
-					button.disabled = true;
-					return _('This tag is reserved');
-				}
-
-				if (uci.get(config, tag)) {
-					button.disabled = true;
-					return _('Expecting: %s').format(_('unique UCI identifier'));
-				}
-
-				button.disabled = null;
-				return true;
-			}, this), 'blur', 'keyup');
+			}, _('Import')));
 
 			return el;
 		};
@@ -152,23 +298,20 @@ return view.extend({
 		o.value('trojan', _('Trojan'));
 		o.default = 'vless';
 		o.rmempty = false;
-		o.editable = true;
 
 		o = s.option(form.Value, 'server', _('Address'));
+		o.cfgvalue = function(section_id) {
+			return uci.get('neto', section_id, 'server') || uci.get('neto', section_id, 'address');
+		};
+		o.write = function(section_id, formvalue) {
+			uci.set('neto', section_id, 'server', String(formvalue || '').trim());
+		};
 		o.datatype = 'host';
-		o.depends('type', 'vless');
-		o.depends('type', 'hysteria2');
-		o.depends('type', 'shadowsocks');
-		o.depends('type', 'trojan');
 		o.rmempty = false;
 		o.editable = true;
 
 		o = s.option(form.Value, 'port', _('Port'));
 		o.datatype = 'port';
-		o.depends('type', 'vless');
-		o.depends('type', 'hysteria2');
-		o.depends('type', 'shadowsocks');
-		o.depends('type', 'trojan');
 		o.rmempty = false;
 		o.editable = true;
 
@@ -401,6 +544,94 @@ return view.extend({
 		o.default = '2022-blake3-aes-128-gcm';
 		o.rmempty = true;
 		o.modalonly = true;
+
+		sub = m.section(form.GridSection, 'subscription', _('Subscriptions'));
+		sub.anonymous = false;
+		sub.addremove = true;
+		sub.modaltitle = _('Subscription details');
+		sub.sectiontitle = function(section_id) {
+			return uci.get('neto', section_id, 'label') || uci.get('neto', section_id, 'name') || section_id;
+		};
+		sub.renderSectionAdd = function() {
+			var el = form.GridSection.prototype.renderSectionAdd.apply(this, arguments);
+			addNamedSectionValidator(el, this, _('This name is reserved'));
+			return el;
+		};
+
+		o = sub.option(form.Flag, 'enabled', _('Enabled'));
+		o.enabled = '1';
+		o.disabled = '0';
+		o.default = '1';
+		o.rmempty = false;
+		o.editable = true;
+
+		o = sub.option(form.Value, 'label', _('Name'));
+		o.cfgvalue = function(section_id) {
+			return uci.get('neto', section_id, 'label') || uci.get('neto', section_id, 'name') || section_id;
+		};
+		o.write = function(section_id, formvalue) {
+			var label = String(formvalue || '').trim();
+			uci.set('neto', section_id, 'label', label || section_id);
+		};
+		o.rmempty = false;
+		o.modalonly = true;
+
+		o = sub.option(form.Value, 'url', _('URL'));
+		o.datatype = 'url';
+		o.rmempty = false;
+		o.editable = true;
+
+		o = sub.option(form.Flag, 'auto_update', _('Auto update'));
+		o.enabled = '1';
+		o.disabled = '0';
+		o.default = '0';
+		o.rmempty = false;
+		o.editable = true;
+
+		o = sub.option(form.ListValue, 'update_hour', _('Update time'));
+		for (var hour = 0; hour < 24; hour++)
+			o.value(String(hour), _('%d hours').format(hour));
+		o.default = '0';
+		o.depends('auto_update', '1');
+		o.rmempty = false;
+		o.modalonly = true;
+
+		o = sub.option(form.ListValue, 'update_via', _('Update via'));
+		o.value('direct', _('Direct'));
+		o.value('proxy', _('Proxy'));
+		o.default = 'direct';
+		o.rmempty = false;
+		o.editable = true;
+
+		o = sub.option(form.ListValue, 'update_outbound', _('Update outbound'));
+		addProxyOutboundChoices(o);
+		o.depends('update_via', 'proxy');
+		o.modalonly = true;
+
+		o = sub.option(form.DummyValue, 'node_count', _('Nodes'));
+		o.cfgvalue = function(section_id) {
+			return uci.get('neto', section_id, 'node_count') || '-';
+		};
+
+		o = sub.option(form.DummyValue, 'last_update', _('Updated'));
+		o.cfgvalue = function(section_id) {
+			var value = uci.get('neto', section_id, 'last_update');
+			var timestamp = Number(value);
+
+			if (!timestamp)
+				return '-';
+
+			return new Date(timestamp * 1000).toLocaleString();
+		};
+		o.modalonly = true;
+
+		o = sub.option(form.Button, '_update', _('Update'));
+		o.inputstyle = 'action';
+		o.onclick = L.bind(function(ev, section_id) {
+			return this.handleSubscriptionUpdate(section_id).catch(function(err) {
+				ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+			});
+		}, this);
 
 		return m.render();
 	}
