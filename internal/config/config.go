@@ -13,6 +13,7 @@ import (
 )
 
 const DefaultPath = "/etc/config/neto"
+const ProviderCacheDir = "/var/lib/neto/providers"
 
 const (
 	BuiltinDirectOutbound  = "direct"
@@ -23,6 +24,7 @@ type Config struct {
 	Main          Main
 	Clients       []Client
 	Rules         []Rule
+	Providers     []Provider
 	Outbounds     []Outbound
 	Subscriptions []Subscription
 	Warnings      []string
@@ -80,6 +82,46 @@ type Rule struct {
 	DomainFiles             []string
 	IPCIDRs                 []string
 	Files                   []string
+	DomainProviders         []string
+	IPProviders             []string
+	Providers               []string
+}
+
+type Provider struct {
+	Name           string
+	Label          string
+	Enabled        bool
+	Type           string
+	URL            string
+	LocalPath      string
+	AutoUpdate     bool
+	UpdateHour     int
+	UpdateVia      string
+	UpdateOutbound string
+	LastUpdate     string
+	ItemCount      int
+	Files          []string
+}
+
+func (p Provider) CachePath() string {
+	if strings.TrimSpace(p.LocalPath) != "" {
+		return strings.TrimSpace(p.LocalPath)
+	}
+	name := safeProviderName(p.Name)
+	if name == "" {
+		name = "provider"
+	}
+	return ProviderCacheDir + "/" + name + ".txt"
+}
+
+func (c Config) ProviderByName(name string) (Provider, bool) {
+	name = strings.TrimSpace(name)
+	for _, provider := range c.Providers {
+		if provider.Name == name {
+			return provider, true
+		}
+	}
+	return Provider{}, false
 }
 
 type Outbound struct {
@@ -299,6 +341,8 @@ func Parse(data string) (Config, error) {
 			rule, warnings := parseRule(s, len(cfg.Rules))
 			cfg.Rules = append(cfg.Rules, rule)
 			cfg.Warnings = append(cfg.Warnings, warnings...)
+		case "provider":
+			cfg.Providers = append(cfg.Providers, parseProvider(s))
 		case "outbound":
 			if !hasOutboundSection {
 				cfg.Outbounds = nil
@@ -460,6 +504,44 @@ func (c Config) Validate() error {
 		}
 	}
 	seenSubscriptions := map[string]struct{}{}
+	seenProviders := map[string]Provider{}
+	for _, p := range c.Providers {
+		name := strings.TrimSpace(p.Name)
+		if name == "" {
+			return fmt.Errorf("provider name must not be empty")
+		}
+		if _, ok := seenProviders[name]; ok {
+			return fmt.Errorf("duplicate provider %q", name)
+		}
+		seenProviders[name] = p
+		if !p.Enabled {
+			continue
+		}
+		switch p.Type {
+		case "domain", "ip":
+		default:
+			return fmt.Errorf("provider %q has unsupported type %q", name, p.Type)
+		}
+		if strings.TrimSpace(p.URL) == "" && len(p.Files) == 0 && strings.TrimSpace(p.LocalPath) == "" {
+			return fmt.Errorf("provider %q url is required", name)
+		}
+		switch p.UpdateVia {
+		case "direct", "proxy":
+		default:
+			return fmt.Errorf("provider %q has unsupported update_via %q", name, p.UpdateVia)
+		}
+		if p.UpdateHour < 0 || p.UpdateHour > 23 {
+			return fmt.Errorf("provider %q has invalid update_hour %d", name, p.UpdateHour)
+		}
+		if p.UpdateVia == "proxy" && strings.TrimSpace(p.UpdateOutbound) != "" {
+			if _, ok := seenOutboundTags[p.UpdateOutbound]; !ok {
+				return fmt.Errorf("provider %q has unsupported update_outbound %q", name, p.UpdateOutbound)
+			}
+			if p.UpdateOutbound == BuiltinBlockedOutbound {
+				return fmt.Errorf("provider %q update_outbound must not be blocked", name)
+			}
+		}
+	}
 	for _, sub := range c.Subscriptions {
 		name := strings.TrimSpace(sub.Name)
 		if name == "" {
@@ -523,6 +605,16 @@ func (c Config) Validate() error {
 		for _, cidr := range r.IPCIDRs {
 			if _, err := policy.ParseIPv4CIDR(cidr); err != nil {
 				return fmt.Errorf("rule %q contains invalid IPv4 CIDR %q: %w", r.Name, cidr, err)
+			}
+		}
+		for _, providerName := range appendList(appendList(r.DomainProviders, r.IPProviders), r.Providers) {
+			providerName = strings.TrimSpace(providerName)
+			p, ok := seenProviders[providerName]
+			if !ok {
+				return fmt.Errorf("rule %q references unknown provider %q", r.Name, providerName)
+			}
+			if !p.Enabled {
+				return fmt.Errorf("rule %q references disabled provider %q", r.Name, providerName)
 			}
 		}
 	}
@@ -668,7 +760,44 @@ func parseRule(s section, order int) (Rule, []string) {
 	r.DomainFiles = cleanList(appendList(s.lists["domain_file"], splitListOption(s.options["domain_file"])))
 	r.IPCIDRs = cleanList(appendList(s.lists["ip_cidr"], splitListOption(s.options["ip_cidr"])))
 	r.Files = cleanList(appendList(appendList(s.lists["ip_file"], s.lists["file"]), splitListOption(s.options["ip_file"])))
+	r.DomainProviders = cleanList(appendList(s.lists["domain_provider"], splitListOption(s.options["domain_provider"])))
+	r.IPProviders = cleanList(appendList(s.lists["ip_provider"], splitListOption(s.options["ip_provider"])))
+	r.Providers = cleanList(appendList(s.lists["provider"], splitListOption(s.options["provider"])))
 	return r, warnings
+}
+
+func parseProvider(s section) Provider {
+	name := strings.TrimSpace(firstNonEmpty(s.name, s.options["name"], s.options["label"]))
+	p := Provider{
+		Name:           safeProviderName(name),
+		Label:          strings.TrimSpace(firstNonEmpty(s.options["label"], s.options["name"], name)),
+		Enabled:        true,
+		Type:           strings.TrimSpace(firstNonEmpty(s.options["type"], "ip")),
+		URL:            strings.TrimSpace(s.options["url"]),
+		LocalPath:      strings.TrimSpace(s.options["local_path"]),
+		AutoUpdate:     false,
+		UpdateVia:      strings.TrimSpace(firstNonEmpty(s.options["update_via"], "direct")),
+		UpdateOutbound: strings.TrimSpace(s.options["update_outbound"]),
+		LastUpdate:     strings.TrimSpace(s.options["last_update"]),
+		Files:          cleanList(appendList(s.lists["file"], splitListOption(s.options["file"]))),
+	}
+	if v, ok := s.options["enabled"]; ok {
+		p.Enabled = parseBool(v, p.Enabled)
+	}
+	if v, ok := s.options["auto_update"]; ok {
+		p.AutoUpdate = parseBool(v, p.AutoUpdate)
+	}
+	if v := firstNonEmpty(s.options["update_hour"], s.options["update_interval"], "0"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(v), "h")); err == nil {
+			p.UpdateHour = n
+		}
+	}
+	if v := firstNonEmpty(s.options["item_count"], s.options["node_count"]); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			p.ItemCount = n
+		}
+	}
+	return p
 }
 
 func LoadRuleDomainFiles(cfg *Config) error {
@@ -681,6 +810,17 @@ func LoadRuleDomainFiles(cfg *Config) error {
 			values, err := loadDomainFile(path)
 			if err != nil {
 				return err
+			}
+			domains = append(domains, values...)
+		}
+		for _, providerName := range appendList(cfg.Rules[i].DomainProviders, cfg.Rules[i].Providers) {
+			provider, ok := cfg.ProviderByName(providerName)
+			if !ok || !provider.Enabled || provider.Type != "domain" {
+				continue
+			}
+			values, err := loadDomainFile(provider.CachePath())
+			if err != nil {
+				return fmt.Errorf("provider %q: %w", provider.Name, err)
 			}
 			domains = append(domains, values...)
 		}
@@ -910,6 +1050,26 @@ func cleanDomainList(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func safeProviderName(value string) string {
+	value = strings.TrimSpace(value)
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 func splitListOption(value string) []string {

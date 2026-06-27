@@ -120,6 +120,48 @@ config subscription 'sub1'
 	}
 }
 
+func TestCommandProvidersUpdateDirect(t *testing.T) {
+	dir := t.TempDir()
+	listPath := filepath.Join(dir, "domains.txt")
+	if err := os.WriteFile(listPath, []byte("Example.COM.\nexample.org\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	argsPath := installFakeCurl(t, listPath)
+	cachePath := filepath.Join(dir, "cache.txt")
+	cfgPath := filepath.Join(dir, "neto")
+	if err := os.WriteFile(cfgPath, []byte(`
+config provider 'domains'
+	option type 'domain'
+	option url 'https://example.com/domains.txt'
+	option local_path '`+cachePath+`'
+	option update_via 'direct'
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commandProvidersUpdate(providerOptions{configPath: cfgPath, name: "domains"}); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cache) != "example.com\nexample.org\n" {
+		t.Fatalf("unexpected provider cache:\n%s", cache)
+	}
+	raw, _ := os.ReadFile(cfgPath)
+	if !strings.Contains(string(raw), `option item_count "2"`) || !strings.Contains(string(raw), `option local_path "`+cachePath+`"`) {
+		t.Fatalf("provider metadata was not written:\n%s", raw)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--noproxy\n*\n") || !strings.Contains(string(args), "https://example.com/domains.txt") {
+		t.Fatalf("curl was not called for provider download as expected:\n%s", args)
+	}
+}
+
 func installFakeCurl(t *testing.T, responsePath string) string {
 	t.Helper()
 

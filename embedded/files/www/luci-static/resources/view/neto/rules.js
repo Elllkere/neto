@@ -28,39 +28,36 @@ function rewriteRuleState() {
 		if (outbound == null || outbound == '' || outbound == 'proxy_default')
 			uci.set('neto', sid, 'outbound', 'direct');
 
-		if (domainInput == '' && optionValues(sid, 'domain_file').length > 0)
-			domainInput = 'file';
-		if (domainInput != 'text' && domainInput != 'file')
+		if (domainInput == '' && optionValues(sid, 'domain_provider').length > 0)
+			domainInput = 'provider';
+		if (domainInput != 'text' && domainInput != 'provider')
 			domainInput = 'fields';
 		uci.set('neto', sid, 'domain_input', domainInput);
 
-		if (domainInput == 'file') {
+		if (domainInput == 'provider') {
 			unsetRuleOptions(sid, [
 				'domain_equals', 'domain_contains', 'domain_starts_with', 'domain_ends_with',
 				'exclude_domain_equals', 'exclude_domain_contains', 'exclude_domain_starts_with', 'exclude_domain_ends_with'
 			]);
 		} else {
-			uci.unset('neto', sid, 'domain_file');
+			uci.unset('neto', sid, 'domain_provider');
 		}
 
 		if (ipInput == '') {
-			if (optionValues(sid, 'ip_file').length > 0 || optionValues(sid, 'file').length > 0)
-				ipInput = 'file';
+			if (optionValues(sid, 'ip_provider').length > 0)
+				ipInput = 'provider';
 			else
 				ipInput = 'list';
 		}
-		if (ipInput != 'text' && ipInput != 'file')
+		if (ipInput != 'text' && ipInput != 'provider')
 			ipInput = 'list';
 		uci.set('neto', sid, 'ip_input', ipInput);
 
-		if (ipInput == 'file') {
-			if (optionValues(sid, 'ip_file').length == 0 && optionValues(sid, 'file').length > 0)
-				setListOption(sid, 'ip_file', optionValues(sid, 'file'));
+		if (ipInput == 'provider') {
 			uci.unset('neto', sid, 'ip_cidr');
 		} else {
-			uci.unset('neto', sid, 'ip_file');
+			uci.unset('neto', sid, 'ip_provider');
 		}
-		uci.unset('neto', sid, 'file');
 	});
 }
 
@@ -170,20 +167,26 @@ function addTextList(section, option, target, title, modeOption, modeValue, plac
 	return o;
 }
 
-function addIPFileList(section) {
-	var o = section.option(form.DynamicList, 'ip_file', _('IP/CIDR file paths'));
+function addProviderChoices(option, type) {
+	uci.sections('neto', 'provider', function(section, sid) {
+		var name = String(sid || section['.name'] || '').trim();
+		var label = String(section.label || section.name || name).trim();
+		var providerType = String(section.type || '').trim();
+
+		if (name == '' || providerType != type)
+			return;
+
+		option.value(name, label || name);
+	});
+}
+
+function addProviderList(section, option, title, providerType, modeOption, modeValue) {
+	var o = section.option(form.DynamicList, option, title);
 
 	o.rmempty = true;
 	o.modalonly = true;
-	o.placeholder = '/etc/neto/providers/cloudflare-v4.txt';
-	o.depends('ip_input', 'file');
-	o.cfgvalue = function(section_id) {
-		return cleanValues(optionValues(section_id, 'ip_file').concat(optionValues(section_id, 'file')));
-	};
-	o.write = function(section_id, formvalue) {
-		setListOption(section_id, 'ip_file', formvalue);
-		uci.unset('neto', section_id, 'file');
-	};
+	o.depends(modeOption, modeValue);
+	addProviderChoices(o, providerType);
 
 	return o;
 }
@@ -253,7 +256,7 @@ return view.extend({
 		o = s.option(form.ListValue, 'domain_input', _('Domain input'));
 		o.value('fields', _('Fields'));
 		o.value('text', _('Textbox'));
-		o.value('file', _('File paths'));
+		o.value('provider', _('Providers'));
 		o.default = 'fields';
 		o.rmempty = false;
 		o.modalonly = true;
@@ -262,8 +265,8 @@ return view.extend({
 
 			if (value != '')
 				return value;
-			if (optionValues(section_id, 'domain_file').length > 0)
-				return 'file';
+			if (optionValues(section_id, 'domain_provider').length > 0)
+				return 'provider';
 			return 'fields';
 		};
 
@@ -285,12 +288,12 @@ return view.extend({
 		addTextList(s, '_exclude_domain_starts_with_text', 'exclude_domain_starts_with', _('Exclude starts with text'), 'domain_input', 'text');
 		addTextList(s, '_exclude_domain_ends_with_text', 'exclude_domain_ends_with', _('Exclude ends with text'), 'domain_input', 'text');
 
-		addDynamicList(s, 'domain_file', _('Domain file paths'), 'domain_input', 'file', '/etc/neto/domains/youtube.txt');
+		addProviderList(s, 'domain_provider', _('Domain providers'), 'domain', 'domain_input', 'provider');
 
 		o = s.option(form.ListValue, 'ip_input', _('IP input'));
 		o.value('list', _('List'));
 		o.value('text', _('Textbox'));
-		o.value('file', _('File paths'));
+		o.value('provider', _('Providers'));
 		o.default = 'list';
 		o.rmempty = false;
 		o.modalonly = true;
@@ -299,14 +302,14 @@ return view.extend({
 
 			if (value != '')
 				return value;
-			if (optionValues(section_id, 'ip_file').length > 0 || optionValues(section_id, 'file').length > 0)
-				return 'file';
+			if (optionValues(section_id, 'ip_provider').length > 0)
+				return 'provider';
 			return 'list';
 		};
 
 		addDynamicList(s, 'ip_cidr', _('IP/CIDR list'), 'ip_input', 'list', '1.1.1.1');
 		addTextList(s, '_ip_cidr_text', 'ip_cidr', _('IP/CIDR text'), 'ip_input', 'text', '1.1.1.1\n8.8.8.0/24');
-		addIPFileList(s);
+		addProviderList(s, 'ip_provider', _('IP providers'), 'ip', 'ip_input', 'provider');
 
 		return m.render();
 	}

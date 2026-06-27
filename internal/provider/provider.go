@@ -29,6 +29,17 @@ func LoadRuleCIDRs(cfg config.Config) (map[int][]*net.IPNet, error) {
 			}
 			all = append(all, cidrs...)
 		}
+		for _, providerName := range append(rule.IPProviders, rule.Providers...) {
+			provider, ok := cfg.ProviderByName(providerName)
+			if !ok || !provider.Enabled || provider.Type != "ip" {
+				continue
+			}
+			cidrs, err := policy.LoadIPv4CIDRsFile(provider.CachePath())
+			if err != nil {
+				return nil, err
+			}
+			all = append(all, cidrs...)
+		}
 		out[i] = policy.NormalizeIPv4CIDRs(all)
 	}
 	return out, nil

@@ -143,9 +143,24 @@ semantics:
 
 - domain fields: current `domain_*` and `exclude_domain_*` list fields
 - domain textbox: writes the same `domain_*` and `exclude_domain_*` UCI lists
-- domain files: `list domain_file`, one exact domain per line, comments with `#`
+- domain providers: `list domain_provider`, selected from remote provider cache
 - IP/CIDR list/textbox: `list ip_cidr`, IPv4 addresses become `/32`
-- IP/CIDR files: `list ip_file`; legacy `list file` is accepted as an alias
+- IP/CIDR providers: `list ip_provider`, selected from remote provider cache
+- local `domain_file`, `ip_file`, and legacy `file` are parser compatibility
+  paths, not the primary LuCI UX
+
+## Current Provider Model
+
+- Provider is a reusable remote data source.
+- Provider types are `domain` and `ip`.
+- Providers download plain text lists from `url` into `/var/lib/neto/providers/`.
+- `netod providers update [name]` updates providers using `curl`.
+- `auto_update=1` creates neto-owned cron entries, similar to protocol
+  subscriptions.
+- `update_via=direct|proxy` follows the subscription update model and must not
+  route router-self traffic through nftables.
+- Rules reference providers with `domain_provider` or `ip_provider`.
+- Creating or updating a provider must not create rules.
 
 ## Current Outbound Model
 

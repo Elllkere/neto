@@ -14,8 +14,17 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 	s := string(data)
 	for _, want := range []string{
 		"form.GridSection, 'provider'",
-		"form.Value, 'name'",
-		"form.DynamicList, 'file'",
+		"form.Flag, 'enabled'",
+		"form.Value, 'label'",
+		"form.ListValue, 'type'",
+		"form.Value, 'url'",
+		"form.Flag, 'auto_update'",
+		"form.ListValue, 'update_hour'",
+		"form.ListValue, 'update_via'",
+		"form.ListValue, 'update_outbound'",
+		"form.DummyValue, 'item_count'",
+		"form.Button, '_update'",
+		"fs.exec('/usr/bin/netod', [ 'providers', 'update', section_id ])",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("providers.js missing %q:\n%s", want, s)
@@ -23,6 +32,7 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 	}
 	for _, forbidden := range []string{
 		"form.GridSection, 'rule'",
+		"form.DynamicList, 'file'",
 		"form.Value, 'priority'",
 		"form.ListValue, 'action'",
 		"form.ListValue, 'dns_mode'",

@@ -19,6 +19,7 @@ Milestone 1 has working core runtime pieces:
 - native outbound manual profiles
 - manual share-link imports and subscription updates for VLESS, Hysteria2,
   Shadowsocks, and Trojan nodes
+- remote domain/IP provider updates
 - OpenWrt/ImmortalWrt embedded installer
 - minimal LuCI app
 
@@ -66,7 +67,7 @@ Treat these as active until verified on router:
 ## Later Tasks
 
 - More robust provider management.
-- Optional provider update support.
+- More complete provider validation and status reporting.
 - More complete LuCI validation and summaries.
 - Additional outbound selectors beyond native manual/imported profiles.
 - Better block behavior for packet phase.

@@ -53,7 +53,7 @@ The archive should have a top-level `neto/` directory.
 - `internal/config`: UCI parser and config validation.
 - `internal/ruleengine`: ordered rule/domain matcher logic.
 - `internal/dnsproxy`: UDP/TCP DNS listener and forwarding policy.
-- `internal/provider`: provider CIDR file loading.
+- `internal/provider`: remote provider normalization, cache metadata, and CIDR loading.
 - `internal/policy`: IPv4 CIDR normalization/dedup/collapse.
 - `internal/nft`: nftables generation.
 - `internal/singbox`: sing-box config generation/check support.
@@ -177,16 +177,19 @@ same effective upstream. DoT uses DNS-over-TLS, and DoH uses POST
 
 Provider is data source only. Rule is routing policy only.
 
-Provider files:
+Providers:
 
-- contain IPv4 CIDRs
-- are loaded by rule references
-- must compile into nft interval sets
-- must not generate thousands of nft rules
+- are reusable remote data sources
+- have type `domain` or `ip`
+- download plain text lists from `url` to `/var/lib/neto/providers/`
+- support manual update with `netod providers update [name]`
+- support `auto_update`, `update_hour`, `update_via`, and `update_outbound`
+- do not create policy by themselves
 
-Providers are only reusable IPv4 CIDR file definitions/data sources. They do
-not create policy by themselves. A provider affects routing only after a rule
-references its file path through `ip_file` or legacy `file`.
+A provider affects routing only after a rule references it with
+`domain_provider` or `ip_provider`. IP providers must compile into nft interval
+sets and must not generate thousands of nft rules. Domain providers are loaded
+as exact domain matcher entries.
 
 Rules:
 
@@ -195,17 +198,17 @@ Rules:
 - have `action`: `proxy`, `direct`, `block`
 - have `dns_mode`: `fakeip`, `real_ip`, `auto`
 - match domains with `domain_*` and `exclude_domain_*` lists
-- optionally reference domain files with `list domain_file`
+- optionally reference domain providers with `list domain_provider`
 - match IP/CIDR values with `list ip_cidr`
-- reference IPv4 CIDR files with `list ip_file`
+- reference IP/CIDR providers with `list ip_provider`
 - are evaluated by ascending priority
 - use first-match-wins semantics
 
-Legacy `list file` is accepted as an alias for `list ip_file`. Domain files are
-loaded by `netod` at config load time and each non-empty, non-comment line is
-treated as an exact domain matcher. For root plus subdomains, keep using the
-explicit matcher fields or textbox mode to write both `domain_equals` and
-`domain_ends_with`.
+Local `domain_file`, `ip_file`, and legacy `file` fields remain parser
+compatibility paths, but LuCI should prefer provider references. For root plus
+subdomains, keep using the explicit matcher fields or textbox mode to write both
+`domain_equals` and `domain_ends_with`; provider domain lines are exact matcher
+entries.
 
 Creating a provider must not create a rule. Creating a rule must not create a
 provider.
@@ -329,9 +332,9 @@ Domain matchers are literal string operations:
 - `domain_ends_with`: `strings.HasSuffix`
 
 Rules LuCI exposes separate domain and IP input selectors. Domain input can be
-field lists, textboxes backed by the same UCI lists, or `domain_file` paths. IP
-input can be inline `ip_cidr` lists, a textbox backed by `ip_cidr`, or `ip_file`
-paths.
+field lists, textboxes backed by the same UCI lists, or remote domain providers.
+IP input can be inline `ip_cidr` lists, a textbox backed by `ip_cidr`, or remote
+IP providers.
 
 Exclude fields use the same semantics.
 

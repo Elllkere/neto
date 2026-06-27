@@ -51,6 +51,11 @@ type subscriptionOptions struct {
 	name       string
 }
 
+type providerOptions struct {
+	configPath string
+	name       string
+}
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "netod:", err)
@@ -117,6 +122,12 @@ func run(args []string) error {
 			return err
 		}
 		return commandSubscriptionsUpdate(opts)
+	case "providers":
+		opts, err := parseProviderOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		return commandProvidersUpdate(opts)
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
@@ -183,8 +194,28 @@ func parseSubscriptionOptions(args []string) (subscriptionOptions, error) {
 	return opts, nil
 }
 
+func parseProviderOptions(args []string) (providerOptions, error) {
+	if len(args) == 0 || args[0] != "update" {
+		return providerOptions{}, fmt.Errorf("usage: netod providers update [name] [options]")
+	}
+	fs := flag.NewFlagSet("netod providers update", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	opts := providerOptions{configPath: config.DefaultPath}
+	fs.StringVar(&opts.configPath, "config", opts.configPath, "path to UCI config")
+	if err := fs.Parse(args[1:]); err != nil {
+		return providerOptions{}, err
+	}
+	if fs.NArg() > 1 {
+		return providerOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(1))
+	}
+	if fs.NArg() == 1 {
+		opts.name = fs.Arg(0)
+	}
+	return opts, nil
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions> [options]")
+	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions|providers> [options]")
 }
 
 func commandCheck(opts options) error {
@@ -350,6 +381,53 @@ func commandSubscriptionsUpdate(opts subscriptionOptions) error {
 	return nil
 }
 
+func commandProvidersUpdate(opts providerOptions) error {
+	cfg, err := loadConfigForManagement(opts.configPath)
+	if err != nil {
+		return err
+	}
+	var matched int
+	var updated int
+	for _, p := range cfg.Providers {
+		if opts.name != "" && p.Name != opts.name {
+			continue
+		}
+		matched++
+		if !p.Enabled {
+			fmt.Printf("provider %s is disabled; skipped\n", p.Name)
+			continue
+		}
+		if strings.TrimSpace(p.URL) == "" {
+			return fmt.Errorf("provider %s: url is required", p.Name)
+		}
+		body, err := fetchProvider(cfg, p)
+		if err != nil {
+			return fmt.Errorf("provider %s: %w", p.Name, err)
+		}
+		items, err := provider.NormalizeDownloadedList(p, body)
+		if err != nil {
+			return fmt.Errorf("provider %s: %w", p.Name, err)
+		}
+		path, err := provider.WriteCache(p, items)
+		if err != nil {
+			return fmt.Errorf("provider %s: %w", p.Name, err)
+		}
+		if err := provider.UpdateMetadata(opts.configPath, p.Name, path, len(items)); err != nil {
+			return fmt.Errorf("provider %s: %w", p.Name, err)
+		}
+		fmt.Printf("provider %s: updated items: %d\n", p.Name, len(items))
+		updated += len(items)
+	}
+	if matched == 0 {
+		if opts.name != "" {
+			return fmt.Errorf("provider %q not found", opts.name)
+		}
+		return fmt.Errorf("no providers configured")
+	}
+	fmt.Printf("providers updated items: %d\n", updated)
+	return nil
+}
+
 func commandDebug(opts options) error {
 	cfg, err := config.LoadFile(opts.configPath)
 	if err != nil {
@@ -396,13 +474,24 @@ func fetchSubscription(cfg config.Config, sub config.Subscription) ([]byte, erro
 	case "", "direct":
 		return fetchURLWithCurl(sub.URL, "")
 	case "proxy":
-		return fetchURLViaProxy(cfg, sub)
+		return fetchURLViaProxy(cfg, sub.URL, sub.UpdateOutbound)
 	default:
 		return nil, fmt.Errorf("unsupported update_via %q", sub.UpdateVia)
 	}
 }
 
-func fetchURLViaProxy(cfg config.Config, sub config.Subscription) ([]byte, error) {
+func fetchProvider(cfg config.Config, p config.Provider) ([]byte, error) {
+	switch p.UpdateVia {
+	case "", "direct":
+		return fetchURLWithCurl(p.URL, "")
+	case "proxy":
+		return fetchURLViaProxy(cfg, p.URL, p.UpdateOutbound)
+	default:
+		return nil, fmt.Errorf("unsupported update_via %q", p.UpdateVia)
+	}
+}
+
+func fetchURLViaProxy(cfg config.Config, rawURL string, updateOutbound string) ([]byte, error) {
 	if !singbox.BinaryExists(cfg.Main.SingBoxBin) {
 		return nil, fmt.Errorf("sing-box binary is missing or not executable: %s", cfg.Main.SingBoxBin)
 	}
@@ -410,7 +499,7 @@ func fetchURLViaProxy(cfg config.Config, sub config.Subscription) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	proxyJSON, err := singbox.GenerateProxyClient(cfg, sub.UpdateOutbound, port)
+	proxyJSON, err := singbox.GenerateProxyClient(cfg, updateOutbound, port)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +530,7 @@ func fetchURLViaProxy(cfg config.Config, sub config.Subscription) ([]byte, error
 		return nil, fmt.Errorf("temporary sing-box did not start: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
-	return fetchURLWithCurl(sub.URL, fmt.Sprintf("http://127.0.0.1:%d", port))
+	return fetchURLWithCurl(rawURL, fmt.Sprintf("http://127.0.0.1:%d", port))
 }
 
 func fetchURLWithCurl(rawURL string, proxy string) ([]byte, error) {
@@ -506,6 +595,14 @@ func waitForPort(port int, timeout time.Duration) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for %s", addr)
+}
+
+func loadConfigForManagement(path string) (config.Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return config.Config{}, err
+	}
+	return config.Parse(string(data))
 }
 
 func compile(opts options) (config.Config, string, string, error) {

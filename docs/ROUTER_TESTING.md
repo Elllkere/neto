@@ -32,27 +32,52 @@ Exclude fields use the same semantics:
 `exclude_domain_equals`, `exclude_domain_contains`,
 `exclude_domain_starts_with`, and `exclude_domain_ends_with`.
 
-Provider rules use `list file` with IPv4 CIDR files and compile into nft
-interval sets in rule order.
-
-New configs should prefer `list ip_file` for IPv4 CIDR files. The old
-`list file` name is still accepted as an alias. Rules can also use inline
-IPv4 addresses/CIDRs:
+Provider rules use remote provider caches and compile IP providers into nft
+interval sets in rule order. Rules can also use inline IPv4 addresses/CIDRs:
 
 ```uci
 list ip_cidr '1.1.1.1'
 list ip_cidr '8.8.8.0/24'
-list ip_file '/etc/neto/providers/google.txt'
 ```
 
-Domain files are exact-domain lists, one domain per line, with `#` comments:
+Remote providers are configured like this:
 
 ```uci
-list domain_file '/etc/neto/domains/youtube.txt'
+config provider 'youtube_domains'
+	option enabled '1'
+	option label 'YouTube domains'
+	option type 'domain'
+	option url 'https://example.com/youtube-domains.txt'
+	option auto_update '1'
+	option update_hour '3'
+	option update_via 'direct'
+
+config provider 'google_ips'
+	option enabled '1'
+	option label 'Google IPs'
+	option type 'ip'
+	option url 'https://example.com/google-cidrs.txt'
+```
+
+Update providers manually:
+
+```sh
+netod providers update
+netod providers update youtube_domains
+/etc/init.d/neto restart
 ```
 
 Use LuCI Rules -> Domain input / IP input to choose between field lists,
-textboxes, and file paths.
+textboxes, and providers:
+
+```uci
+list domain_provider 'youtube_domains'
+list ip_provider 'google_ips'
+```
+
+Provider domain lists are exact-domain lists, one domain per line, with `#`
+comments. Provider IP lists contain IPv4 addresses or CIDRs; single IPv4
+addresses become `/32`.
 
 Rules default to built-in `option outbound 'direct'`. Built-in `blocked` is also
 available. After adding a custom native sing-box outbound profile, select its
@@ -67,6 +92,7 @@ field:
 ```sh
 netod import-uri -file /tmp/neto-import.txt
 netod subscriptions update my_sub
+netod providers update
 /etc/init.d/neto restart
 uci show neto | grep "=outbound"
 ```

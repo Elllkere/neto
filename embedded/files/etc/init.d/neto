@@ -58,6 +58,26 @@ neto_append_subscription_cron() {
 	printf "0 %s * * * /usr/bin/netod subscriptions update %s >/dev/null 2>&1 && /etc/init.d/neto restart >/dev/null 2>&1\n" "$hour" "$section" >>"$NETO_CRON_LINES"
 }
 
+neto_append_provider_cron() {
+	local section="$1" enabled auto_update hour
+	config_get_bool enabled "$section" enabled 1
+	config_get_bool auto_update "$section" auto_update 0
+	[ "$enabled" -eq 1 ] && [ "$auto_update" -eq 1 ] || return 0
+	case "$section" in
+		""|*[!A-Za-z0-9_]*)
+			return 0
+			;;
+	esac
+	config_get hour "$section" update_hour "0"
+	case "$hour" in
+		""|*[!0-9]*)
+			hour="0"
+			;;
+	esac
+	[ "$hour" -ge 0 ] && [ "$hour" -le 23 ] || hour="0"
+	printf "5 %s * * * /usr/bin/netod providers update %s >/dev/null 2>&1 && /etc/init.d/neto restart >/dev/null 2>&1\n" "$hour" "$section" >>"$NETO_CRON_LINES"
+}
+
 neto_write_cron() {
 	local tmp lines
 	mkdir -p "$(dirname "$CRON_FILE")"
@@ -72,6 +92,7 @@ neto_write_cron() {
 	: >"$lines"
 	NETO_CRON_LINES="$lines"
 	config_foreach neto_append_subscription_cron subscription
+	config_foreach neto_append_provider_cron provider
 	if [ -s "$lines" ]; then
 		printf "%s\n" "$CRON_BEGIN" >>"$tmp"
 		cat "$lines" >>"$tmp"

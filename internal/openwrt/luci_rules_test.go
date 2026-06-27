@@ -92,9 +92,9 @@ func TestRulesLuCICompactTableFields(t *testing.T) {
 		"exclude_domain_contains",
 		"exclude_domain_starts_with",
 		"exclude_domain_ends_with",
-		"domain_file",
 		"ip_cidr",
-		"ip_file",
+		"domain_provider",
+		"ip_provider",
 	} {
 		needle := "'" + field + "'"
 		if !strings.Contains(s, needle) {
@@ -107,7 +107,8 @@ func TestRulesLuCICompactTableFields(t *testing.T) {
 		"form.TextValue, option",
 		"addTextList(s, '_domain_equals_text'",
 		"addTextList(s, '_ip_cidr_text'",
-		"addIPFileList(s)",
+		"addProviderList(s, 'domain_provider'",
+		"addProviderList(s, 'ip_provider'",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("rules.js missing input mode UI %q:\n%s", want, s)
@@ -179,9 +180,9 @@ func TestRulesLuCIInputModesNormalizePersistence(t *testing.T) {
 	for _, want := range []string{
 		"uci.set('neto', sid, 'domain_input', domainInput)",
 		"uci.set('neto', sid, 'ip_input', ipInput)",
-		"uci.unset('neto', sid, 'domain_file')",
-		"setListOption(sid, 'ip_file', optionValues(sid, 'file'))",
-		"uci.unset('neto', sid, 'file')",
+		"uci.unset('neto', sid, 'domain_provider')",
+		"uci.unset('neto', sid, 'ip_provider')",
+		"addProviderChoices(o, providerType)",
 		"setListOption(section_id, target, splitTextValues(formvalue))",
 		"uci.set('neto', section_id, option, values)",
 	} {

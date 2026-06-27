@@ -220,7 +220,7 @@ config rule
 	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "match_all is deprecated and ignored") {
 		t.Fatalf("expected match_all warning, got %+v", cfg.Warnings)
 	}
-	if len(cfg.Rules[0].DomainEquals)+len(cfg.Rules[0].DomainContains)+len(cfg.Rules[0].DomainStartsWith)+len(cfg.Rules[0].DomainEndsWith)+len(cfg.Rules[0].DomainFiles)+len(cfg.Rules[0].IPCIDRs)+len(cfg.Rules[0].Files) != 0 {
+	if len(cfg.Rules[0].DomainEquals)+len(cfg.Rules[0].DomainContains)+len(cfg.Rules[0].DomainStartsWith)+len(cfg.Rules[0].DomainEndsWith)+len(cfg.Rules[0].DomainFiles)+len(cfg.Rules[0].IPCIDRs)+len(cfg.Rules[0].Files)+len(cfg.Rules[0].DomainProviders)+len(cfg.Rules[0].IPProviders)+len(cfg.Rules[0].Providers) != 0 {
 		t.Fatalf("match_all should not create include conditions: %+v", cfg.Rules[0])
 	}
 }
@@ -236,6 +236,21 @@ config rule
 	list ip_cidr '8.8.8.0/24'
 	list ip_file '/etc/neto/providers/google.txt'
 	list file '/etc/neto/providers/legacy.txt'
+	list domain_provider 'youtube_domains'
+	list ip_provider 'google_ips'
+	list provider 'legacy_provider'
+
+config provider 'youtube_domains'
+	option type 'domain'
+	option url 'https://example.com/youtube.txt'
+
+config provider 'google_ips'
+	option type 'ip'
+	option url 'https://example.com/google.txt'
+
+config provider 'legacy_provider'
+	option type 'ip'
+	option url 'https://example.com/legacy.txt'
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -249,6 +264,9 @@ config rule
 	}
 	if len(r.Files) != 2 || r.Files[0] != "/etc/neto/providers/google.txt" || r.Files[1] != "/etc/neto/providers/legacy.txt" {
 		t.Fatalf("ip_file/file aliases were not parsed: %+v", r)
+	}
+	if len(r.DomainProviders) != 1 || r.DomainProviders[0] != "youtube_domains" || len(r.IPProviders) != 1 || r.IPProviders[0] != "google_ips" || len(r.Providers) != 1 || r.Providers[0] != "legacy_provider" {
+		t.Fatalf("provider refs were not parsed: %+v", r)
 	}
 }
 
@@ -279,6 +297,38 @@ config rule
 	}
 }
 
+func TestLoadFileExpandsDomainProviderCacheAsEquals(t *testing.T) {
+	dir := t.TempDir()
+	cache := filepath.Join(dir, "provider.txt")
+	cfgPath := filepath.Join(dir, "neto")
+
+	if err := os.WriteFile(cache, []byte("YouTube.COM.\nwww.youtube.com\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`
+config provider 'youtube'
+	option type 'domain'
+	option url 'https://example.com/youtube.txt'
+	option local_path '`+cache+`'
+
+config rule
+	option name 'youtube'
+	option action 'proxy'
+	option dns_mode 'fakeip'
+	list domain_provider 'youtube'
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(cfg.Rules[0].DomainEquals, ",")
+	if got != "youtube.com,www.youtube.com" {
+		t.Fatalf("unexpected provider domain expansion: %q", got)
+	}
+}
+
 func TestParseRejectsInvalidInlineIPCIDR(t *testing.T) {
 	if _, err := Parse(`
 config rule
@@ -287,6 +337,85 @@ config rule
 	list ip_cidr '2001:db8::/32'
 `); err == nil {
 		t.Fatal("expected invalid inline IPv4 CIDR to be rejected")
+	}
+}
+
+func TestParseProvider(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'updater'
+	option type 'trojan'
+	option server 'example.com'
+	option port '443'
+	option password 'secret'
+
+config provider 'youtube'
+	option label 'YouTube'
+	option type 'domain'
+	option url 'https://example.com/youtube.txt'
+	option auto_update '1'
+	option update_hour '3'
+	option update_via 'proxy'
+	option update_outbound 'updater'
+	option local_path '/var/lib/neto/providers/youtube.txt'
+	option last_update '1710000000'
+	option item_count '2'
+
+config rule
+	option name 'youtube'
+	option action 'proxy'
+	list domain_provider 'youtube'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 {
+		t.Fatalf("unexpected providers: %+v", cfg.Providers)
+	}
+	p := cfg.Providers[0]
+	if p.Name != "youtube" || p.Label != "YouTube" || p.Type != "domain" || p.URL == "" || !p.AutoUpdate || p.UpdateHour != 3 || p.UpdateVia != "proxy" || p.UpdateOutbound != "updater" || p.ItemCount != 2 {
+		t.Fatalf("unexpected provider: %+v", p)
+	}
+}
+
+func TestParseRejectsInvalidProvider(t *testing.T) {
+	tests := []struct {
+		name string
+		uci  string
+		want string
+	}{
+		{
+			name: "missing_url",
+			uci: `
+config provider 'p'
+`,
+			want: "url is required",
+		},
+		{
+			name: "type",
+			uci: `
+config provider 'p'
+	option type 'cidr'
+	option url 'https://example.com/list.txt'
+`,
+			want: "unsupported type",
+		},
+		{
+			name: "unknown_ref",
+			uci: `
+config rule
+	option name 'unknown'
+	list domain_provider 'missing'
+`,
+			want: "unknown provider",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(tc.uci)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got error %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

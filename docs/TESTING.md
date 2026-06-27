@@ -48,6 +48,7 @@ netod status
 netod debug
 netod import-uri -file /tmp/neto-import.txt
 netod subscriptions update
+netod providers update
 netod rules list
 netod test-domain 192.168.8.100 youtube.com A
 nft list table inet neto
@@ -150,9 +151,9 @@ Manually verify on router:
 - Rules page does not write `match_all`
 - Rules page does not write deprecated matcher fields
 - Rules page has separate Domain input and IP input selectors
-- Domain input supports fields, textbox, and `domain_file` paths
-- IP input supports inline IP/CIDR list, textbox, and `ip_file` paths
-- editing IP file paths migrates old `list file` values to `list ip_file`
+- Domain input supports fields, textbox, and domain providers
+- IP input supports inline IP/CIDR list, textbox, and IP providers
+- Providers page supports URL, manual update, auto-update hour, update_via, and item count
 - Rules page hides DNS mode selection and writes `dns_mode=fakeip` for proxy rules
 - Providers page does not create rules unless explicitly intended
 - Rules page does not create providers

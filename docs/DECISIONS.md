@@ -65,13 +65,14 @@ Never overwrite `/usr/bin/sing-box`.
 
 ## D8: Provider Is Data, Rule Is Policy
 
-Provider files are data sources. Rules are routing policy.
+Providers are remote data sources. Rules are routing policy.
 
 Consequences:
 
 - creating a provider must not create a rule
 - creating a rule must not create a provider
-- provider CIDRs are compiled into nft sets referenced by rules
+- provider IP/CIDRs are compiled into nft sets referenced by rules
+- provider domains are loaded into rule domain matchers
 
 ## D9: Ordered Rules, First Match Wins
 
@@ -121,4 +122,3 @@ Consequence:
 
 - AAAA for FakeIP-matched domains must not leak real IPv6 while IPv6 routing is
   absent
-
