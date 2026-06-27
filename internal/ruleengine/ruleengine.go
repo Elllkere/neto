@@ -58,6 +58,12 @@ func HasDomainIncludes(r config.Rule) bool {
 }
 
 func effectiveDNSMode(r config.Rule) string {
+	if r.Action == "direct" {
+		return "real_ip"
+	}
+	if r.Action == "block" {
+		return "block"
+	}
 	if r.DNSMode != "auto" {
 		return r.DNSMode
 	}

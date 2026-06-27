@@ -437,6 +437,8 @@ func commandDebug(opts options) error {
 	fmt.Printf("config: %s\n", opts.configPath)
 	fmt.Printf("outbounds: %s\n", status.OutboundsSummary(cfg))
 	printWarnings(cfg)
+	fmt.Println("=== DNS summary ===")
+	printDNSSummary(cfg)
 	fmt.Println("=== generated files ===")
 	printPath("nft", nftPath(opts))
 	printPath("sing-box", singBoxPath(opts))
@@ -455,11 +457,28 @@ func commandDebug(opts options) error {
 	printCommand("sh", "-c", "ps w | grep -E 'netod|sing-box' | grep -v grep")
 	fmt.Println("=== listeners ===")
 	if _, err := exec.LookPath("ss"); err == nil {
-		printCommand("sh", "-c", "ss -lnp | grep -E '5353|15353|16001' || true")
+		printCommand("sh", "-c", "ss -lnp | grep -E '5353|15353|15354|15355|16001' || true")
 	} else {
-		printCommand("sh", "-c", "netstat -lnp 2>/dev/null | grep -E '5353|15353|16001' || netstat -ln 2>/dev/null | grep -E '5353|15353|16001' || true")
+		printCommand("sh", "-c", "netstat -lnp 2>/dev/null | grep -E '5353|15353|15354|15355|16001' || netstat -ln 2>/dev/null | grep -E '5353|15353|15354|15355|16001' || true")
 	}
 	return nil
+}
+
+func printDNSSummary(cfg config.Config) {
+	upstream := cfg.Main.DNSUpstream()
+	fmt.Printf("dns_listen: %s\n", cfg.Main.DNSListen)
+	fmt.Printf("real_dns_mode: %s\n", cfg.Main.RealDNSMode)
+	fmt.Printf("real_dns_transport: %s\n", upstream.Protocol)
+	fmt.Printf("real_dns_server: %s\n", upstream.Address())
+	if upstream.TLSName != "" {
+		fmt.Printf("real_dns_server_name: %s\n", upstream.TLSName)
+	}
+	if upstream.Protocol == "https" {
+		fmt.Printf("real_dns_path: %s\n", upstream.Path)
+	}
+	fmt.Printf("dns_server fakeip: listener=%s tag=fakeip\n", cfg.Main.SingBoxDNSFakeIPAddr())
+	fmt.Printf("dns_server real-direct: listener=%s tag=real-direct detour=direct\n", cfg.Main.SingBoxDNSRealDirectAddr())
+	fmt.Printf("dns_server real-proxy: listener=%s tag=real-proxy detour=%s\n", cfg.Main.SingBoxDNSRealProxyAddr(), singbox.SelectedProxyOutbound(cfg))
 }
 
 func debugList(values []string) string {

@@ -228,15 +228,20 @@ config rule
 func TestParseRuleAlternateDomainAndIPInputs(t *testing.T) {
 	cfg, err := Parse(`
 config rule
-	option name 'alternate'
+	option name 'alternate_domains'
 	option action 'proxy'
-	option dns_mode 'fakeip'
+	option dns_mode 'auto'
 	list domain_file '/etc/neto/domains/youtube.txt'
+	list domain_provider 'youtube_domains'
+
+config rule
+	option name 'alternate_ips'
+	option action 'proxy'
+	option dns_mode 'auto'
 	list ip_cidr '1.1.1.1'
 	list ip_cidr '8.8.8.0/24'
 	list ip_file '/etc/neto/providers/google.txt'
 	list file '/etc/neto/providers/legacy.txt'
-	list domain_provider 'youtube_domains'
 	list ip_provider 'google_ips'
 	list provider 'legacy_provider'
 
@@ -255,18 +260,22 @@ config provider 'legacy_provider'
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := cfg.Rules[0]
-	if len(r.DomainFiles) != 1 || r.DomainFiles[0] != "/etc/neto/domains/youtube.txt" {
-		t.Fatalf("domain files were not parsed: %+v", r)
+	domainRule := cfg.Rules[0]
+	if len(domainRule.DomainFiles) != 1 || domainRule.DomainFiles[0] != "/etc/neto/domains/youtube.txt" {
+		t.Fatalf("domain files were not parsed: %+v", domainRule)
 	}
-	if len(r.IPCIDRs) != 2 || r.IPCIDRs[0] != "1.1.1.1" || r.IPCIDRs[1] != "8.8.8.0/24" {
-		t.Fatalf("inline IP CIDRs were not parsed: %+v", r)
+	if len(domainRule.DomainProviders) != 1 || domainRule.DomainProviders[0] != "youtube_domains" {
+		t.Fatalf("domain provider refs were not parsed: %+v", domainRule)
 	}
-	if len(r.Files) != 2 || r.Files[0] != "/etc/neto/providers/google.txt" || r.Files[1] != "/etc/neto/providers/legacy.txt" {
-		t.Fatalf("ip_file/file aliases were not parsed: %+v", r)
+	ipRule := cfg.Rules[1]
+	if len(ipRule.IPCIDRs) != 2 || ipRule.IPCIDRs[0] != "1.1.1.1" || ipRule.IPCIDRs[1] != "8.8.8.0/24" {
+		t.Fatalf("inline IP CIDRs were not parsed: %+v", ipRule)
 	}
-	if len(r.DomainProviders) != 1 || r.DomainProviders[0] != "youtube_domains" || len(r.IPProviders) != 1 || r.IPProviders[0] != "google_ips" || len(r.Providers) != 1 || r.Providers[0] != "legacy_provider" {
-		t.Fatalf("provider refs were not parsed: %+v", r)
+	if len(ipRule.Files) != 2 || ipRule.Files[0] != "/etc/neto/providers/google.txt" || ipRule.Files[1] != "/etc/neto/providers/legacy.txt" {
+		t.Fatalf("ip_file/file aliases were not parsed: %+v", ipRule)
+	}
+	if len(ipRule.IPProviders) != 1 || ipRule.IPProviders[0] != "google_ips" || len(ipRule.Providers) != 1 || ipRule.Providers[0] != "legacy_provider" {
+		t.Fatalf("provider refs were not parsed: %+v", ipRule)
 	}
 }
 
@@ -337,6 +346,41 @@ config rule
 	list ip_cidr '2001:db8::/32'
 `); err == nil {
 		t.Fatal("expected invalid inline IPv4 CIDR to be rejected")
+	}
+}
+
+func TestParseRejectsProviderCIDRFakeIP(t *testing.T) {
+	_, err := Parse(`
+config provider 'cloudflare'
+	option type 'ip'
+	option url 'https://example.com/cloudflare.txt'
+
+config rule
+	option name 'cloudflare'
+	option action 'proxy'
+	option dns_mode 'fakeip'
+	list ip_provider 'cloudflare'
+`)
+	if err == nil || !strings.Contains(err.Error(), "provider/CIDR rules require real DNS because FakeIP hides destination IP") {
+		t.Fatalf("got error %v, want provider/CIDR fakeip rejection", err)
+	}
+}
+
+func TestParseRejectsMixedDomainAndProviderCIDRRule(t *testing.T) {
+	_, err := Parse(`
+config provider 'cloudflare'
+	option type 'ip'
+	option url 'https://example.com/cloudflare.txt'
+
+config rule
+	option name 'mixed'
+	option action 'proxy'
+	option dns_mode 'auto'
+	list domain_contains 'youtube'
+	list ip_provider 'cloudflare'
+`)
+	if err == nil || !strings.Contains(err.Error(), "Mixed domain and provider/CIDR matchers are not supported; split into separate rules") {
+		t.Fatalf("got error %v, want mixed rule rejection", err)
 	}
 }
 
@@ -458,6 +502,23 @@ config main 'main'
 	upstream := cfg.Main.DNSUpstream()
 	if upstream.Protocol != "https" || upstream.Host != "8.8.8.8" || upstream.Port != 443 || upstream.TLSName != "dns.google" || upstream.Path != "/dns-query" {
 		t.Fatalf("unexpected DNS upstream: %+v", upstream)
+	}
+}
+
+func TestParseRealDNSTransportDefaultsPort(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option real_dns_transport 'https'
+	option real_dns_server '1.1.1.1'
+	option real_dns_server_name 'cloudflare-dns.com'
+	option real_dns_path '/dns-query'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := cfg.Main.DNSUpstream()
+	if upstream.Protocol != "https" || upstream.Port != 443 {
+		t.Fatalf("unexpected real DNS upstream: %+v", upstream)
 	}
 }
 

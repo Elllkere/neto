@@ -39,9 +39,37 @@ type Route struct {
 }
 
 func Generate(cfg config.Config) ([]byte, error) {
-	dnsHost, dnsPort, err := splitHostPort(cfg.Main.SingBoxDNS)
+	fakeDNSHost, fakeDNSPort, err := splitHostPort(cfg.Main.SingBoxDNSFakeIPAddr())
 	if err != nil {
 		return nil, err
+	}
+	realDirectDNSHost, realDirectDNSPort, err := splitHostPort(cfg.Main.SingBoxDNSRealDirectAddr())
+	if err != nil {
+		return nil, err
+	}
+	realProxyDNSHost, realProxyDNSPort, err := splitHostPort(cfg.Main.SingBoxDNSRealProxyAddr())
+	if err != nil {
+		return nil, err
+	}
+
+	upstream := cfg.Main.DNSUpstream()
+	dnsServers := []any{
+		encodeDNSServer("real-direct", upstream, config.BuiltinDirectOutbound),
+		encodeDNSServer("real-proxy", upstream, SelectedProxyOutbound(cfg)),
+		map[string]any{
+			"tag":         "fakeip",
+			"type":        "fakeip",
+			"inet4_range": cfg.Main.FakeIPRange,
+		},
+	}
+	if needsBootstrap(upstream) {
+		dnsServers = append(dnsServers, map[string]any{
+			"tag":         "bootstrap",
+			"type":        "udp",
+			"server":      "1.1.1.1",
+			"server_port": 53,
+			"detour":      config.BuiltinDirectOutbound,
+		})
 	}
 
 	doc := Config{
@@ -50,30 +78,46 @@ func Generate(cfg config.Config) ([]byte, error) {
 			"timestamp": true,
 		},
 		DNS: DNS{
-			Servers: []any{
-				encodeDNSServer("local", cfg.Main.DNSUpstream()),
-				map[string]any{
-					"tag":         "fakeip",
-					"type":        "fakeip",
-					"inet4_range": cfg.Main.FakeIPRange,
-				},
-			},
+			Servers: dnsServers,
 			Rules: []any{
 				map[string]any{
-					"query_type": []string{"A", "AAAA"},
-					"server":     "fakeip",
+					"inbound": []string{"dns-fakeip-in"},
+					"action":  "route",
+					"server":  "fakeip",
+				},
+				map[string]any{
+					"inbound": []string{"dns-real-direct-in"},
+					"action":  "route",
+					"server":  "real-direct",
+				},
+				map[string]any{
+					"inbound": []string{"dns-real-proxy-in"},
+					"action":  "route",
+					"server":  "real-proxy",
 				},
 			},
-			Final:            "local",
+			Final:            "real-direct",
 			Strategy:         "prefer_ipv4",
 			IndependentCache: true,
 		},
 		Inbounds: []any{
 			map[string]any{
 				"type":        "direct",
-				"tag":         "dns-in",
-				"listen":      dnsHost,
-				"listen_port": dnsPort,
+				"tag":         "dns-fakeip-in",
+				"listen":      fakeDNSHost,
+				"listen_port": fakeDNSPort,
+			},
+			map[string]any{
+				"type":        "direct",
+				"tag":         "dns-real-direct-in",
+				"listen":      realDirectDNSHost,
+				"listen_port": realDirectDNSPort,
+			},
+			map[string]any{
+				"type":        "direct",
+				"tag":         "dns-real-proxy-in",
+				"listen":      realProxyDNSHost,
+				"listen_port": realProxyDNSPort,
 			},
 			map[string]any{
 				"type":        "tproxy",
@@ -88,8 +132,8 @@ func Generate(cfg config.Config) ([]byte, error) {
 				map[string]any{"action": "sniff"},
 				map[string]any{"protocol": "dns", "action": "hijack-dns"},
 			},
-			Final:                 selectedProxyOutbound(cfg),
-			DefaultDomainResolver: "local",
+			Final:                 SelectedProxyOutbound(cfg),
+			DefaultDomainResolver: "real-direct",
 		},
 	}
 	if cfg.Main.FakeIPEnabled {
@@ -143,12 +187,19 @@ func GenerateProxyClient(cfg config.Config, outboundTag string, listenPort int) 
 	return json.MarshalIndent(doc, "", "  ")
 }
 
-func encodeDNSServer(tag string, upstream config.DNSUpstream) map[string]any {
+func encodeDNSServer(tag string, upstream config.DNSUpstream, detour string) map[string]any {
 	item := map[string]any{
 		"tag":         tag,
 		"type":        upstream.Protocol,
 		"server":      upstream.Host,
 		"server_port": upstream.Port,
+	}
+	if detour != "" {
+		item["detour"] = detour
+	}
+	if needsBootstrap(upstream) {
+		item["domain_resolver"] = "bootstrap"
+		item["domain_strategy"] = "prefer_ipv4"
 	}
 	switch upstream.Protocol {
 	case "tls":
@@ -164,6 +215,10 @@ func encodeDNSServer(tag string, upstream config.DNSUpstream) map[string]any {
 		}
 	}
 	return item
+}
+
+func needsBootstrap(upstream config.DNSUpstream) bool {
+	return upstream.Host != "" && net.ParseIP(strings.Trim(upstream.Host, "[]")) == nil
 }
 
 func findClientOutbound(cfg config.Config, outboundTag string) (config.Outbound, error) {
@@ -209,7 +264,7 @@ func generateOutbounds(cfg config.Config) ([]any, error) {
 	return out, nil
 }
 
-func selectedProxyOutbound(cfg config.Config) string {
+func SelectedProxyOutbound(cfg config.Config) string {
 	allowed := cfg.AllowedOutboundTags()
 	for _, rule := range cfg.Rules {
 		if !rule.Enabled || rule.Action != "proxy" {

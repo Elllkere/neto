@@ -16,7 +16,12 @@ func Summary(cfg config.Config) string {
 	lines := []string{
 		fmt.Sprintf("enabled: %t", cfg.Main.Enabled),
 		fmt.Sprintf("singbox_bin: %s", cfg.Main.SingBoxBin),
-		fmt.Sprintf("singbox_dns: %s", cfg.Main.SingBoxDNS),
+		fmt.Sprintf("real_dns_mode: %s", cfg.Main.RealDNSMode),
+		fmt.Sprintf("real_dns_transport: %s", cfg.Main.DNSUpstream().Protocol),
+		fmt.Sprintf("real_dns_server: %s", cfg.Main.DNSUpstream().Address()),
+		fmt.Sprintf("singbox_dns_fakeip: %s", cfg.Main.SingBoxDNSFakeIPAddr()),
+		fmt.Sprintf("singbox_dns_real_direct: %s", cfg.Main.SingBoxDNSRealDirectAddr()),
+		fmt.Sprintf("singbox_dns_real_proxy: %s", cfg.Main.SingBoxDNSRealProxyAddr()),
 		fmt.Sprintf("tproxy_port: %d", cfg.Main.TProxyPort),
 		fmt.Sprintf("mark: %s", cfg.Main.Mark),
 		fmt.Sprintf("table: %d", cfg.Main.Table),
@@ -29,7 +34,9 @@ func Summary(cfg config.Config) string {
 		fmt.Sprintf("ip_rule: %s", ipRuleStatus(cfg)),
 		fmt.Sprintf("local_route: %s", localRouteStatus(cfg)),
 		fmt.Sprintf("dns_listener: %s", listenerStatus(cfg.Main.DNSListen)),
-		fmt.Sprintf("singbox_dns_listener: %s", listenerStatus(cfg.Main.SingBoxDNS)),
+		fmt.Sprintf("fakeip_dns_listener: %s", listenerStatus(cfg.Main.SingBoxDNSFakeIPAddr())),
+		fmt.Sprintf("real_direct_dns_listener: %s", listenerStatus(cfg.Main.SingBoxDNSRealDirectAddr())),
+		fmt.Sprintf("real_proxy_dns_listener: %s", listenerStatus(cfg.Main.SingBoxDNSRealProxyAddr())),
 		fmt.Sprintf("tproxy_listener: %s", listenerStatus("127.0.0.1:"+strconv.Itoa(cfg.Main.TProxyPort))),
 	}
 	return strings.Join(lines, "\n")

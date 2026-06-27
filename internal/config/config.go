@@ -34,6 +34,12 @@ type Main struct {
 	Enabled               bool
 	DNSListen             string
 	RealDNSUpstream       string
+	RealDNSMode           string
+	RealDNSTransport      string
+	RealDNSServer         string
+	RealDNSServerPort     int
+	RealDNSServerName     string
+	RealDNSPath           string
 	DNSUpstreamPreset     string
 	DNSUpstreamProtocol   string
 	DNSUpstreamHost       string
@@ -44,6 +50,9 @@ type Main struct {
 	FilterAAAAForFakeIP   bool
 	SingBoxBin            string
 	SingBoxDNS            string
+	SingBoxDNSFakeIP      string
+	SingBoxDNSRealDirect  string
+	SingBoxDNSRealProxy   string
 	TProxyPort            int
 	Mark                  string
 	Table                 int
@@ -206,6 +215,12 @@ func Defaults() Config {
 			Enabled:               true,
 			DNSListen:             "127.0.0.1:5353",
 			RealDNSUpstream:       "1.1.1.1:53",
+			RealDNSMode:           "direct",
+			RealDNSTransport:      "udp",
+			RealDNSServer:         "1.1.1.1",
+			RealDNSServerPort:     53,
+			RealDNSServerName:     "cloudflare-dns.com",
+			RealDNSPath:           "/dns-query",
 			DNSUpstreamPreset:     "cloudflare",
 			DNSUpstreamProtocol:   "udp",
 			DNSUpstreamHost:       "1.1.1.1",
@@ -216,6 +231,9 @@ func Defaults() Config {
 			FilterAAAAForFakeIP:   true,
 			SingBoxBin:            "/usr/libexec/neto/sing-box",
 			SingBoxDNS:            "127.0.0.1:15353",
+			SingBoxDNSFakeIP:      "127.0.0.1:15353",
+			SingBoxDNSRealDirect:  "127.0.0.1:15354",
+			SingBoxDNSRealProxy:   "127.0.0.1:15355",
 			TProxyPort:            16001,
 			Mark:                  "0x101",
 			Table:                 101,
@@ -255,6 +273,71 @@ func (c Config) AllowedOutboundTags() map[string]struct{} {
 }
 
 func (m Main) DNSUpstream() DNSUpstream {
+	protocol := normalizeDNSProtocol(firstNonEmpty(m.RealDNSTransport, m.DNSUpstreamProtocol))
+	if protocol == "" {
+		protocol = "udp"
+	}
+	preset := strings.TrimSpace(firstNonEmpty(m.DNSUpstreamPreset, "custom"))
+	if preset == "" {
+		preset = "custom"
+	}
+
+	host := strings.TrimSpace(m.RealDNSServer)
+	port := m.RealDNSServerPort
+	if h, p, ok := splitOptionalHostPort(host); ok {
+		host = h
+		if port == 0 {
+			port = p
+		}
+	}
+	u := DNSUpstream{
+		Preset:   preset,
+		Protocol: protocol,
+		Host:     host,
+		Port:     port,
+		TLSName:  strings.TrimSpace(m.RealDNSServerName),
+		Path:     strings.TrimSpace(m.RealDNSPath),
+	}
+
+	if u.Host == "" {
+		legacy := legacyDNSUpstream(m)
+		u.Host = legacy.Host
+		u.Port = legacy.Port
+		u.TLSName = legacy.TLSName
+		u.Path = legacy.Path
+		u.Preset = legacy.Preset
+	}
+	if u.Host == "" {
+		host, port, ok := splitHostPortValue(m.RealDNSUpstream)
+		if ok {
+			u.Host = host
+			if u.Port == 0 {
+				u.Port = port
+			}
+		}
+	}
+	if u.Port == 0 {
+		u.Port = defaultDNSPort(protocol)
+	}
+	if protocol == "https" && u.Path == "" {
+		u.Path = "/dns-query"
+	}
+	return u
+}
+
+func (m Main) SingBoxDNSFakeIPAddr() string {
+	return firstNonEmpty(strings.TrimSpace(m.SingBoxDNSFakeIP), strings.TrimSpace(m.SingBoxDNS), "127.0.0.1:15353")
+}
+
+func (m Main) SingBoxDNSRealDirectAddr() string {
+	return firstNonEmpty(strings.TrimSpace(m.SingBoxDNSRealDirect), "127.0.0.1:15354")
+}
+
+func (m Main) SingBoxDNSRealProxyAddr() string {
+	return firstNonEmpty(strings.TrimSpace(m.SingBoxDNSRealProxy), "127.0.0.1:15355")
+}
+
+func legacyDNSUpstream(m Main) DNSUpstream {
 	protocol := normalizeDNSProtocol(m.DNSUpstreamProtocol)
 	if protocol == "" {
 		protocol = "udp"
@@ -412,22 +495,41 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Main.SingBoxBin) == "" {
 		return fmt.Errorf("singbox_bin must not be empty")
 	}
-	if _, _, err := net.SplitHostPort(c.Main.SingBoxDNS); err != nil {
-		return fmt.Errorf("invalid singbox_dns %q: %w", c.Main.SingBoxDNS, err)
-	}
 	if _, _, err := net.SplitHostPort(c.Main.DNSListen); err != nil {
 		return fmt.Errorf("invalid dns_listen %q: %w", c.Main.DNSListen, err)
+	}
+	dnsListeners := map[string]string{
+		"singbox_dns_fakeip":      c.Main.SingBoxDNSFakeIPAddr(),
+		"singbox_dns_real_direct": c.Main.SingBoxDNSRealDirectAddr(),
+		"singbox_dns_real_proxy":  c.Main.SingBoxDNSRealProxyAddr(),
+	}
+	seenDNSListeners := map[string]string{
+		c.Main.DNSListen: "dns_listen",
+	}
+	for name, addr := range dnsListeners {
+		if _, _, err := net.SplitHostPort(addr); err != nil {
+			return fmt.Errorf("invalid %s %q: %w", name, addr, err)
+		}
+		if previous := seenDNSListeners[addr]; previous != "" {
+			return fmt.Errorf("%s must not duplicate %s", name, previous)
+		}
+		seenDNSListeners[addr] = name
 	}
 	if c.Main.RealDNSUpstream != "" {
 		if _, _, err := net.SplitHostPort(c.Main.RealDNSUpstream); err != nil {
 			return fmt.Errorf("invalid real_dns_upstream %q: %w", c.Main.RealDNSUpstream, err)
 		}
 	}
+	switch c.Main.RealDNSMode {
+	case "direct", "proxy":
+	default:
+		return fmt.Errorf("unsupported real_dns_mode %q", c.Main.RealDNSMode)
+	}
 	dnsUpstream := c.Main.DNSUpstream()
 	switch dnsUpstream.Protocol {
 	case "udp", "tcp", "tls", "https":
 	default:
-		return fmt.Errorf("unsupported dns_upstream_protocol %q", c.Main.DNSUpstreamProtocol)
+		return fmt.Errorf("unsupported real_dns_transport %q", firstNonEmpty(c.Main.RealDNSTransport, c.Main.DNSUpstreamProtocol))
 	}
 	switch dnsUpstream.Preset {
 	case "cloudflare", "google", "custom":
@@ -441,13 +543,10 @@ func (c Config) Validate() error {
 		return fmt.Errorf("invalid dns upstream port %d", dnsUpstream.Port)
 	}
 	if dnsUpstream.Protocol == "https" && !strings.HasPrefix(dnsUpstream.Path, "/") {
-		return fmt.Errorf("dns_upstream_path must start with /")
+		return fmt.Errorf("real_dns_path must start with /")
 	}
-	if (dnsUpstream.Protocol == "udp" || dnsUpstream.Protocol == "tcp") && dnsUpstream.Address() == c.Main.DNSListen {
-		return fmt.Errorf("real_dns_upstream must not point back to dns_listen")
-	}
-	if c.Main.SingBoxDNS == c.Main.DNSListen {
-		return fmt.Errorf("singbox_dns must not point back to dns_listen")
+	if err := c.validateRealDNSNoLoop(dnsUpstream); err != nil {
+		return err
 	}
 
 	for i, cl := range c.Clients {
@@ -588,6 +687,17 @@ func (c Config) Validate() error {
 		default:
 			return fmt.Errorf("rule %q has unsupported dns_mode %q", r.Name, r.DNSMode)
 		}
+		hasDomainSelectors := ruleHasDomainSelectors(r, seenProviders)
+		hasIPSelectors := ruleHasIPSelectors(r, seenProviders)
+		if hasDomainSelectors && hasIPSelectors {
+			return fmt.Errorf("rule %q: Mixed domain and provider/CIDR matchers are not supported; split into separate rules", r.Name)
+		}
+		if hasIPSelectors && r.DNSMode == "fakeip" {
+			return fmt.Errorf("rule %q: provider/CIDR rules require real DNS because FakeIP hides destination IP", r.Name)
+		}
+		if r.Action == "direct" && r.DNSMode == "fakeip" {
+			return fmt.Errorf("rule %q: direct rules require real DNS", r.Name)
+		}
 		outboundTag := strings.TrimSpace(firstNonEmpty(r.Outbound, BuiltinDirectOutbound))
 		if _, ok := seenOutboundTags[outboundTag]; !ok {
 			return fmt.Errorf("rule %q has unsupported outbound %q", r.Name, outboundTag)
@@ -618,20 +728,92 @@ func (c Config) Validate() error {
 			}
 		}
 	}
+	if c.Main.RealDNSMode == "proxy" && !hasEnabledCustomOutbound(c) {
+		return fmt.Errorf("real_dns_mode=proxy requires at least one custom outbound")
+	}
+	return nil
+}
+
+func (c Config) validateRealDNSNoLoop(upstream DNSUpstream) error {
+	host := strings.Trim(strings.TrimSpace(upstream.Host), "[]")
+	hostLower := strings.ToLower(host)
+	port := upstream.Port
+
+	if hostLower == "localhost" {
+		return fmt.Errorf("real_dns_server must not point to localhost")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() {
+			return fmt.Errorf("real_dns_server must not point to loopback address %s", host)
+		}
+		if routerLANIP(c.Main.LANSubnets, ip) {
+			return fmt.Errorf("real_dns_server must not point to router LAN IP %s", host)
+		}
+	}
+
+	for name, addr := range map[string]string{
+		"dns_listen":               c.Main.DNSListen,
+		"singbox_dns_fakeip":       c.Main.SingBoxDNSFakeIPAddr(),
+		"singbox_dns_real_direct":  c.Main.SingBoxDNSRealDirectAddr(),
+		"singbox_dns_real_proxy":   c.Main.SingBoxDNSRealProxyAddr(),
+		"dnsmasq loopback default": "127.0.0.1:53",
+	} {
+		addrHost, addrPortValue, err := net.SplitHostPort(addr)
+		if err != nil {
+			continue
+		}
+		addrPort, err := strconv.Atoi(addrPortValue)
+		if err != nil {
+			continue
+		}
+		if port == addrPort && sameHost(host, addrHost) {
+			return fmt.Errorf("real_dns_server must not point back to %s", name)
+		}
+	}
 	return nil
 }
 
 func applyMain(m *Main, s section) {
 	hasDNSUpstreamPreset := false
 	hasDNSUpstreamFields := false
+	hasRealDNSFields := false
+	hasRealDNSPort := false
+	hasRealDNSUpstream := false
 	if v, ok := s.options["enabled"]; ok {
 		m.Enabled = parseBool(v, m.Enabled)
 	}
 	if v := s.options["dns_listen"]; v != "" {
 		m.DNSListen = v
 	}
-	if v := s.options["real_dns_upstream"]; v != "" {
+	if v, ok := s.options["real_dns_upstream"]; ok && v != "" {
 		m.RealDNSUpstream = v
+		hasRealDNSUpstream = true
+	}
+	if v := s.options["real_dns_mode"]; v != "" {
+		m.RealDNSMode = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := s.options["real_dns_transport"]; v != "" {
+		m.RealDNSTransport = normalizeDNSProtocol(v)
+		hasRealDNSFields = true
+	}
+	if v := s.options["real_dns_server"]; v != "" {
+		m.RealDNSServer = strings.TrimSpace(v)
+		hasRealDNSFields = true
+	}
+	if v := s.options["real_dns_port"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			m.RealDNSServerPort = n
+			hasRealDNSFields = true
+			hasRealDNSPort = true
+		}
+	}
+	if v := s.options["real_dns_server_name"]; v != "" {
+		m.RealDNSServerName = strings.TrimSpace(v)
+		hasRealDNSFields = true
+	}
+	if v := s.options["real_dns_path"]; v != "" {
+		m.RealDNSPath = strings.TrimSpace(v)
+		hasRealDNSFields = true
 	}
 	if v := s.options["dns_upstream_preset"]; v != "" {
 		m.DNSUpstreamPreset = v
@@ -660,15 +842,33 @@ func applyMain(m *Main, s section) {
 		m.DNSUpstreamPath = v
 		hasDNSUpstreamFields = true
 	}
-	if !hasDNSUpstreamPreset && !hasDNSUpstreamFields && s.options["real_dns_upstream"] != "" {
+	if !hasRealDNSFields && (hasDNSUpstreamPreset || hasDNSUpstreamFields) {
+		upstream := legacyDNSUpstream(*m)
+		m.RealDNSTransport = upstream.Protocol
+		m.RealDNSServer = upstream.Host
+		m.RealDNSServerPort = upstream.Port
+		m.RealDNSServerName = upstream.TLSName
+		m.RealDNSPath = upstream.Path
+	} else if !hasRealDNSFields && hasRealDNSUpstream {
 		host, port, ok := splitHostPortValue(m.RealDNSUpstream)
 		if ok {
+			m.RealDNSTransport = "udp"
+			m.RealDNSServer = host
+			m.RealDNSServerPort = port
+			m.RealDNSServerName = ""
+			m.RealDNSPath = "/dns-query"
 			m.DNSUpstreamPreset = "custom"
 			m.DNSUpstreamHost = host
 			m.DNSUpstreamPort = port
 			m.DNSUpstreamProtocol = "udp"
 		}
 	}
+	if hasRealDNSFields && !hasRealDNSPort {
+		if _, _, ok := splitOptionalHostPort(m.RealDNSServer); !ok {
+			m.RealDNSServerPort = defaultDNSPort(m.RealDNSTransport)
+		}
+	}
+	syncLegacyDNSFields(m)
 	if v, ok := s.options["manage_dnsmasq"]; ok {
 		m.ManageDNSMasq = parseBool(v, m.ManageDNSMasq)
 	}
@@ -680,6 +880,19 @@ func applyMain(m *Main, s section) {
 	}
 	if v := s.options["singbox_dns"]; v != "" {
 		m.SingBoxDNS = v
+		if s.options["singbox_dns_fakeip"] == "" {
+			m.SingBoxDNSFakeIP = v
+		}
+	}
+	if v := s.options["singbox_dns_fakeip"]; v != "" {
+		m.SingBoxDNSFakeIP = v
+		m.SingBoxDNS = v
+	}
+	if v := s.options["singbox_dns_real_direct"]; v != "" {
+		m.SingBoxDNSRealDirect = v
+	}
+	if v := s.options["singbox_dns_real_proxy"]; v != "" {
+		m.SingBoxDNSRealProxy = v
 	}
 	if v := s.options["tproxy_port"]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -1113,6 +1326,34 @@ func defaultDNSPort(protocol string) int {
 	}
 }
 
+func syncLegacyDNSFields(m *Main) {
+	upstream := m.DNSUpstream()
+	if upstream.Host == "" {
+		return
+	}
+	m.RealDNSUpstream = upstream.Address()
+	m.DNSUpstreamProtocol = upstream.Protocol
+	m.DNSUpstreamHost = upstream.Host
+	m.DNSUpstreamPort = upstream.Port
+	m.DNSUpstreamTLSName = upstream.TLSName
+	m.DNSUpstreamPath = upstream.Path
+	if strings.TrimSpace(m.DNSUpstreamPreset) == "" {
+		m.DNSUpstreamPreset = "custom"
+	}
+	if strings.TrimSpace(m.RealDNSTransport) == "" {
+		m.RealDNSTransport = upstream.Protocol
+	}
+	if strings.TrimSpace(m.RealDNSServer) == "" {
+		m.RealDNSServer = upstream.Host
+	}
+	if m.RealDNSServerPort == 0 {
+		m.RealDNSServerPort = upstream.Port
+	}
+	if strings.TrimSpace(m.RealDNSPath) == "" && upstream.Protocol == "https" {
+		m.RealDNSPath = upstream.Path
+	}
+}
+
 func splitHostPortValue(value string) (string, int, bool) {
 	host, portValue, err := net.SplitHostPort(strings.TrimSpace(value))
 	if err != nil {
@@ -1123,6 +1364,91 @@ func splitHostPortValue(value string) (string, int, bool) {
 		return "", 0, false
 	}
 	return host, port, true
+}
+
+func splitOptionalHostPort(value string) (string, int, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", 0, false
+	}
+	host, port, ok := splitHostPortValue(value)
+	if ok {
+		return host, port, true
+	}
+	if strings.Count(value, ":") == 1 {
+		parts := strings.Split(value, ":")
+		if p, err := strconv.Atoi(parts[1]); err == nil && p > 0 {
+			return parts[0], p, true
+		}
+	}
+	return value, 0, false
+}
+
+func sameHost(a string, b string) bool {
+	a = strings.Trim(strings.ToLower(strings.TrimSpace(a)), "[]")
+	b = strings.Trim(strings.ToLower(strings.TrimSpace(b)), "[]")
+	if a == b {
+		return true
+	}
+	aIP := net.ParseIP(a)
+	bIP := net.ParseIP(b)
+	return aIP != nil && bIP != nil && aIP.Equal(bIP)
+}
+
+func routerLANIP(lanSubnets []string, ip net.IP) bool {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	for _, cidr := range lanSubnets {
+		base, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		base4 := base.To4()
+		if base4 == nil {
+			continue
+		}
+		router := append(net.IP(nil), base4...)
+		router[3]++
+		if network.Contains(router) && router.Equal(ip4) {
+			return true
+		}
+	}
+	return false
+}
+
+func ruleHasDomainSelectors(r Rule, providers map[string]Provider) bool {
+	if len(r.DomainEquals)+len(r.DomainContains)+len(r.DomainStartsWith)+len(r.DomainEndsWith)+len(r.DomainFiles)+len(r.DomainProviders) > 0 {
+		return true
+	}
+	for _, name := range r.Providers {
+		if provider, ok := providers[strings.TrimSpace(name)]; ok && provider.Type == "domain" {
+			return true
+		}
+	}
+	return false
+}
+
+func ruleHasIPSelectors(r Rule, providers map[string]Provider) bool {
+	if len(r.IPCIDRs)+len(r.Files)+len(r.IPProviders) > 0 {
+		return true
+	}
+	for _, name := range r.Providers {
+		if provider, ok := providers[strings.TrimSpace(name)]; ok && provider.Type == "ip" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasEnabledCustomOutbound(c Config) bool {
+	for _, outbound := range c.Outbounds {
+		if outbound.Enabled && strings.TrimSpace(outbound.Tag) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeClientPolicy(policy string) (string, string) {

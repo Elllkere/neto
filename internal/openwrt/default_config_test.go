@@ -26,6 +26,14 @@ func TestEmbeddedDefaultConfigHasNoSampleClientsOrRules(t *testing.T) {
 	}
 	for _, want := range []string{
 		"option fakeip_enabled '1'",
+		"option real_dns_mode 'direct'",
+		"option real_dns_transport 'udp'",
+		"option real_dns_server '1.1.1.1'",
+		"option real_dns_server_name 'cloudflare-dns.com'",
+		"option real_dns_path '/dns-query'",
+		"option singbox_dns_fakeip '127.0.0.1:15353'",
+		"option singbox_dns_real_direct '127.0.0.1:15354'",
+		"option singbox_dns_real_proxy '127.0.0.1:15355'",
 		"option dns_upstream_preset 'cloudflare'",
 		"option dns_upstream_protocol 'udp'",
 		"option dns_upstream_host '1.1.1.1'",

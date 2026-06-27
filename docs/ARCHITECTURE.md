@@ -150,28 +150,39 @@ DNS behavior:
 - direct clients always use real upstream DNS
 - no FakeIP for direct clients
 - custom mode evaluates ordered domain rules
-- global mode defaults to real DNS unless client policy forces proxy
+- domain proxy rules in custom mode use FakeIP by default
+- provider/CIDR/subnet rules use real DNS so nftables can see the real
+  destination IP
+- direct rules always use real DNS
+- global mode returns real DNS by default because nftables enforces the proxy
+  path
 - FakeIP A answers come from sing-box DNS
 - FakeIP-matched AAAA should return prompt NODATA/empty NOERROR when IPv6
   routing is absent
 - block rules may return NXDOMAIN in DNS phase
 
-sing-box owns FakeIP allocation and FakeIP-to-domain mapping.
+sing-box owns FakeIP allocation, FakeIP-to-domain mapping, and real DNS
+transport. netod decides only `fakeip`, `real-direct`, `real-proxy`, or `block`,
+then forwards the original DNS wire query to a local sing-box DNS listener.
 
 `dns_listen` is the local netod DNS server address used by dnsmasq. It is not an
-external resolver. The real resolver is configured by the DNS upstream fields:
+external resolver. The real resolver is configured by:
 
-- `dns_upstream_preset`: `cloudflare`, `google`, or `custom`
-- `dns_upstream_protocol`: `udp`, `tcp`, `tls`, or `https`
-- `dns_upstream_host`
-- `dns_upstream_port`
-- `dns_upstream_tls_name`
-- `dns_upstream_path`
+- `real_dns_mode`: `direct` or `proxy`
+- `real_dns_transport`: `udp`, `tcp`, `tls`, or `https`
+- `real_dns_server`
+- `real_dns_server_name`
+- `real_dns_path`
 
-`real_dns_upstream` remains as a legacy `host:port` mirror/fallback. netod DNS
-forwarding and the generated sing-box DNS server tagged `local` must use the
-same effective upstream. DoT uses DNS-over-TLS, and DoH uses POST
-`application/dns-message` to the configured path.
+sing-box exposes local DNS listeners:
+
+- `singbox_dns_fakeip`: `127.0.0.1:15353`
+- `singbox_dns_real_direct`: `127.0.0.1:15354`
+- `singbox_dns_real_proxy`: `127.0.0.1:15355`
+
+`real_dns_upstream` and `dns_upstream_*` remain legacy mirrors/fallbacks.
+Normal DNS transport must not be implemented in netod with Go `net/http` DoH or
+DoT clients.
 
 ## Providers and Rules
 
@@ -196,7 +207,7 @@ Rules:
 - have `enabled`
 - have `priority`
 - have `action`: `proxy`, `direct`, `block`
-- have `dns_mode`: `fakeip`, `real_ip`, `auto`
+- may have legacy `dns_mode`: `fakeip`, `real_ip`, `auto`
 - match domains with `domain_*` and `exclude_domain_*` lists
 - optionally reference domain providers with `list domain_provider`
 - match IP/CIDR values with `list ip_cidr`
@@ -209,6 +220,16 @@ compatibility paths, but LuCI should prefer provider references. For root plus
 subdomains, keep using the explicit matcher fields or textbox mode to write both
 `domain_equals` and `domain_ends_with`; provider domain lines are exact matcher
 entries.
+
+DNS behavior is derived automatically for current LuCI-created rules:
+
+- domain proxy rule: FakeIP in custom mode
+- provider/CIDR proxy rule: real DNS
+- direct rule: real DNS
+- block rule: local block response
+
+Rules with both domain and provider/CIDR matchers are rejected; split them into
+separate rules.
 
 Creating a provider must not create a rule. Creating a rule must not create a
 provider.

@@ -87,19 +87,24 @@ Routing modes:
 ## Current DNS Model
 
 - `dns_listen` is the local netod DNS server/listener used by dnsmasq.
-- `real_dns_upstream` is a legacy compatibility `host:port` mirror of the real
-  upstream.
-- New configs should use `dns_upstream_preset`, `dns_upstream_protocol`,
-  `dns_upstream_host`, `dns_upstream_port`, `dns_upstream_tls_name`, and
-  `dns_upstream_path`.
-- Supported real upstream transports are `udp`, `tcp`, `tls` (DoT), and
-  `https` (DoH).
-- Built-in DNS presets are `cloudflare` and `google`; `custom` uses explicit
-  host/port/SNI/path fields.
-- The same effective real DNS upstream must be used by netod DNS forwarding and
-  generated sing-box DNS server `local`.
-- FakeIP DNS decisions still route to sing-box FakeIP DNS; direct/real DNS
-  decisions use the real upstream.
+- netod is a DNS policy forwarder only. It must not implement normal-path DoH,
+  DoT, or DoQ transport clients.
+- sing-box handles DNS transport through three local DNS listeners:
+  `singbox_dns_fakeip` (`127.0.0.1:15353`),
+  `singbox_dns_real_direct` (`127.0.0.1:15354`), and
+  `singbox_dns_real_proxy` (`127.0.0.1:15355`).
+- `real_dns_mode` is `direct` or `proxy`.
+- `real_dns_transport` is `udp`, `tcp`, `tls`, or `https`.
+- `real_dns_server`, `real_dns_server_name`, and `real_dns_path` describe the
+  upstream used by generated sing-box DNS servers.
+- `real_dns_upstream` and `dns_upstream_*` are legacy compatibility mirrors.
+- FakeIP DNS decisions forward raw DNS wire queries to sing-box FakeIP DNS.
+  Direct/real DNS decisions forward raw DNS wire queries to the selected
+  sing-box real DNS listener.
+- Domain proxy rules in custom mode may use FakeIP. Direct clients, direct
+  rules, provider/CIDR rules, and global mode use real DNS.
+- Mixed domain and provider/CIDR matchers are not supported; split them into
+  separate rules.
 
 ## Rule Matcher Semantics
 

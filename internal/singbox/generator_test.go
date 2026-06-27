@@ -25,11 +25,18 @@ func TestGenerateUsesModernFakeIPServer(t *testing.T) {
 	if strings.Contains(raw, `"fake-ip"`) || strings.Contains(raw, `"fake_ip"`) {
 		t.Fatalf("legacy fake-ip config detected:\n%s", raw)
 	}
-	if !strings.Contains(raw, `"listen_port": 15353`) || !strings.Contains(raw, `"listen_port": 16001`) {
-		t.Fatalf("expected DNS and TProxy listeners:\n%s", raw)
+	for _, want := range []string{`"listen_port": 15353`, `"listen_port": 15354`, `"listen_port": 15355`, `"listen_port": 16001`} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("expected DNS and TProxy listeners %q:\n%s", want, raw)
+		}
 	}
-	if !strings.Contains(raw, `"default_domain_resolver": "local"`) {
+	if !strings.Contains(raw, `"default_domain_resolver": "real-direct"`) {
 		t.Fatalf("expected route.default_domain_resolver:\n%s", raw)
+	}
+	for _, want := range []string{`"tag": "real-direct"`, `"tag": "real-proxy"`, `"tag": "fakeip"`} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("expected DNS server %q:\n%s", want, raw)
+		}
 	}
 	if strings.Contains(raw, `"override_destination"`) || strings.Contains(raw, `"sniff": true`) {
 		t.Fatalf("generated config contains sing-box 1.13-incompatible sniff fields:\n%s", raw)
@@ -53,11 +60,16 @@ func TestGenerateBuiltinOutbounds(t *testing.T) {
 
 func TestGenerateDoTDNSServer(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.Main.DNSUpstreamPreset = "google"
-	cfg.Main.DNSUpstreamProtocol = "tls"
-	local := generatedDNSServer(t, cfg, "local")
+	cfg.Main.RealDNSTransport = "tls"
+	cfg.Main.RealDNSServer = "8.8.8.8"
+	cfg.Main.RealDNSServerPort = 853
+	cfg.Main.RealDNSServerName = "dns.google"
+	local := generatedDNSServer(t, cfg, "real-direct")
 	if local["type"] != "tls" || local["server"] != "8.8.8.8" || local["server_port"].(float64) != 853 {
 		t.Fatalf("unexpected DoT DNS server: %+v", local)
+	}
+	if local["detour"] != "direct" {
+		t.Fatalf("unexpected DoT detour: %+v", local)
 	}
 	tls := local["tls"].(map[string]any)
 	if tls["server_name"] != "dns.google" {
@@ -67,15 +79,44 @@ func TestGenerateDoTDNSServer(t *testing.T) {
 
 func TestGenerateDoHDNSServer(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.Main.DNSUpstreamPreset = "cloudflare"
-	cfg.Main.DNSUpstreamProtocol = "https"
-	local := generatedDNSServer(t, cfg, "local")
+	cfg.Main.RealDNSTransport = "https"
+	cfg.Main.RealDNSServer = "1.1.1.1"
+	cfg.Main.RealDNSServerPort = 443
+	cfg.Main.RealDNSServerName = "cloudflare-dns.com"
+	cfg.Main.RealDNSPath = "/dns-query"
+	local := generatedDNSServer(t, cfg, "real-direct")
 	if local["type"] != "https" || local["server"] != "1.1.1.1" || local["server_port"].(float64) != 443 || local["path"] != "/dns-query" {
 		t.Fatalf("unexpected DoH DNS server: %+v", local)
 	}
 	tls := local["tls"].(map[string]any)
 	if tls["server_name"] != "cloudflare-dns.com" {
 		t.Fatalf("unexpected DoH TLS config: %+v", tls)
+	}
+}
+
+func TestGenerateRealProxyDNSServerDetoursThroughProxyOutbound(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Outbounds = []config.Outbound{{
+		Enabled: true,
+		Tag:     "test",
+		Type:    "vless",
+		Server:  "example.com",
+		Port:    443,
+		UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
+		TLS:     true,
+	}}
+	cfg.Rules = []config.Rule{{
+		Name:           "test",
+		Enabled:        true,
+		Priority:       100,
+		Action:         "proxy",
+		Outbound:       "test",
+		DNSMode:        "auto",
+		DomainContains: []string{"check-host"},
+	}}
+	realProxy := generatedDNSServer(t, cfg, "real-proxy")
+	if realProxy["detour"] != "test" {
+		t.Fatalf("real-proxy DNS should detour through selected proxy outbound: %+v", realProxy)
 	}
 }
 

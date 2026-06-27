@@ -2,6 +2,7 @@ package dnsproxy
 
 import (
 	"encoding/binary"
+	"os"
 	"strings"
 	"testing"
 
@@ -91,28 +92,28 @@ func TestFakeIPAStillForwards(t *testing.T) {
 
 func TestDNSPolicyCustomDefaultFakeIP(t *testing.T) {
 	p := Proxy{
-		Rules:        []config.Rule{fakeRule("youtube.com")},
-		RoutingMode:  "custom",
-		FakeUpstream: "127.0.0.1:15353",
-		RealUpstream: "1.1.1.1:53",
+		Rules:              []config.Rule{fakeRule("youtube.com")},
+		RoutingMode:        "custom",
+		FakeUpstream:       "127.0.0.1:15353",
+		RealDirectUpstream: "127.0.0.1:15354",
 	}
 	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.10"); got != p.FakeUpstream {
 		t.Fatalf("got %s, want fake upstream", got)
 	}
-	if got := p.upstreamFor(testQueryName(qTypeA, "example.org"), "192.168.8.10"); got != p.RealUpstream {
+	if got := p.upstreamFor(testQueryName(qTypeA, "example.org"), "192.168.8.10"); got != p.RealDirectUpstream {
 		t.Fatalf("got %s, want real upstream", got)
 	}
 }
 
 func TestDNSPolicyCustomDirectNoFakeIP(t *testing.T) {
 	p := Proxy{
-		Rules:          []config.Rule{fakeRule("youtube.com")},
-		RoutingMode:    "custom",
-		FakeUpstream:   "127.0.0.1:15353",
-		RealUpstream:   "1.1.1.1:53",
-		ClientPolicies: map[string]string{"192.168.8.50": "direct"},
+		Rules:              []config.Rule{fakeRule("youtube.com")},
+		RoutingMode:        "custom",
+		FakeUpstream:       "127.0.0.1:15353",
+		RealDirectUpstream: "127.0.0.1:15354",
+		ClientPolicies:     map[string]string{"192.168.8.50": "direct"},
 	}
-	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.50"); got != p.RealUpstream {
+	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.50"); got != p.RealDirectUpstream {
 		t.Fatalf("got %s, want real upstream for direct client", got)
 	}
 	if _, ok := p.localResponse(testQuery(qTypeAAAA), "192.168.8.50"); ok {
@@ -122,26 +123,69 @@ func TestDNSPolicyCustomDirectNoFakeIP(t *testing.T) {
 
 func TestDNSPolicyGlobalDefaultReal(t *testing.T) {
 	p := Proxy{
-		Rules:        []config.Rule{fakeRule("youtube.com")},
-		RoutingMode:  "global",
-		FakeUpstream: "127.0.0.1:15353",
-		RealUpstream: "1.1.1.1:53",
+		Rules:              []config.Rule{fakeRule("youtube.com")},
+		RoutingMode:        "global",
+		FakeUpstream:       "127.0.0.1:15353",
+		RealDirectUpstream: "127.0.0.1:15354",
 	}
-	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.10"); got != p.RealUpstream {
+	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.10"); got != p.RealDirectUpstream {
 		t.Fatalf("got %s, want real upstream in global default", got)
 	}
 }
 
-func TestDNSPolicyGlobalProxyCanUseFakeIP(t *testing.T) {
+func TestDNSPolicyGlobalProxyUsesRealDNS(t *testing.T) {
 	p := Proxy{
-		Rules:          []config.Rule{fakeRule("youtube.com")},
-		RoutingMode:    "global",
-		FakeUpstream:   "127.0.0.1:15353",
-		RealUpstream:   "1.1.1.1:53",
-		ClientPolicies: map[string]string{"192.168.8.100": "proxy"},
+		Rules:              []config.Rule{fakeRule("youtube.com")},
+		RoutingMode:        "global",
+		FakeUpstream:       "127.0.0.1:15353",
+		RealDirectUpstream: "127.0.0.1:15354",
+		ClientPolicies:     map[string]string{"192.168.8.100": "proxy"},
 	}
-	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.100"); got != p.FakeUpstream {
-		t.Fatalf("got %s, want fake upstream for proxy client matched domain", got)
+	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.100"); got != p.RealDirectUpstream {
+		t.Fatalf("got %s, want real upstream in global mode", got)
+	}
+}
+
+func TestDNSPolicyIPProviderRuleUsesRealDNS(t *testing.T) {
+	p := Proxy{
+		Rules: []config.Rule{{
+			Name:        "cloudflare",
+			Enabled:     true,
+			Action:      "proxy",
+			DNSMode:     "auto",
+			IPProviders: []string{"cloudflare"},
+		}},
+		RoutingMode:        "custom",
+		FakeUpstream:       "127.0.0.1:15353",
+		RealDirectUpstream: "127.0.0.1:15354",
+	}
+	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.10"); got != p.RealDirectUpstream {
+		t.Fatalf("got %s, want real DNS for provider/CIDR rule", got)
+	}
+}
+
+func TestDNSPolicyRealDNSModeProxyUsesProxyListener(t *testing.T) {
+	p := Proxy{
+		RoutingMode:        "custom",
+		RealDNSMode:        "proxy",
+		RealDirectUpstream: "127.0.0.1:15354",
+		RealProxyUpstream:  "127.0.0.1:15355",
+	}
+	if got := p.upstreamFor(testQueryName(qTypeA, "example.org"), "192.168.8.10"); got != p.RealProxyUpstream {
+		t.Fatalf("got %s, want real-proxy upstream", got)
+	}
+}
+
+func TestDNSProxyDoesNotUseGoHTTPDoHPath(t *testing.T) {
+	data, err := os.ReadFile("dnsproxy.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, forbidden := range []string{`"net/http"`, "forwardHTTPS", "DoH upstream"} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("dnsproxy normal path must not contain Go DoH client code %q", forbidden)
+		}
 	}
 }
 

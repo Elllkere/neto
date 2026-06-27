@@ -1,14 +1,11 @@
 package dnsproxy
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"strings"
 	"time"
 
@@ -19,8 +16,9 @@ import (
 type Proxy struct {
 	Listen              string
 	FakeUpstream        string
-	RealUpstream        string
-	RealResolver        config.DNSUpstream
+	RealDirectUpstream  string
+	RealProxyUpstream   string
+	RealDNSMode         string
 	RoutingMode         string
 	ClientPolicies      map[string]string
 	Rules               []config.Rule
@@ -46,9 +44,10 @@ func New(cfg config.Config) Proxy {
 	}
 	return Proxy{
 		Listen:              cfg.Main.DNSListen,
-		FakeUpstream:        cfg.Main.SingBoxDNS,
-		RealUpstream:        cfg.Main.DNSUpstream().Address(),
-		RealResolver:        cfg.Main.DNSUpstream(),
+		FakeUpstream:        cfg.Main.SingBoxDNSFakeIPAddr(),
+		RealDirectUpstream:  cfg.Main.SingBoxDNSRealDirectAddr(),
+		RealProxyUpstream:   cfg.Main.SingBoxDNSRealProxyAddr(),
+		RealDNSMode:         cfg.Main.RealDNSMode,
 		RoutingMode:         cfg.Main.RoutingMode,
 		ClientPolicies:      clientPolicies,
 		Rules:               append([]config.Rule(nil), cfg.Rules...),
@@ -58,8 +57,14 @@ func New(cfg config.Config) Proxy {
 }
 
 func (p Proxy) Run(ctx context.Context) error {
-	if p.RealUpstream == p.Listen {
-		return fmt.Errorf("real DNS upstream points back to neto DNS listener")
+	for label, upstream := range map[string]string{
+		"fakeip":      p.FakeUpstream,
+		"real-direct": p.RealDirectUpstream,
+		"real-proxy":  p.RealProxyUpstream,
+	} {
+		if upstream == p.Listen {
+			return fmt.Errorf("%s DNS upstream points back to neto DNS listener", label)
+		}
 	}
 
 	lc := net.ListenConfig{}
@@ -156,20 +161,14 @@ func (p Proxy) handleUDP(ctx context.Context, msg []byte, clientIP string) ([]by
 	if resp, ok := p.localResponse(msg, clientIP); ok {
 		return resp, nil
 	}
-	if p.useFakeUpstream(msg, clientIP) {
-		return p.forwardUDP(ctx, msg, p.FakeUpstream)
-	}
-	return p.forwardReal(ctx, msg)
+	return p.forwardUDP(ctx, msg, p.upstreamFor(msg, clientIP))
 }
 
 func (p Proxy) handleTCPQuery(ctx context.Context, msg []byte, clientIP string) ([]byte, error) {
 	if resp, ok := p.localResponse(msg, clientIP); ok {
 		return resp, nil
 	}
-	if p.useFakeUpstream(msg, clientIP) {
-		return p.forwardTCP(ctx, msg, p.FakeUpstream)
-	}
-	return p.forwardReal(ctx, msg)
+	return p.forwardTCP(ctx, msg, p.upstreamFor(msg, clientIP))
 }
 
 func (p Proxy) forwardUDP(ctx context.Context, msg []byte, upstream string) ([]byte, error) {
@@ -207,93 +206,14 @@ func (p Proxy) forwardTCP(ctx context.Context, msg []byte, upstream string) ([]b
 	return readTCPDNS(conn)
 }
 
-func (p Proxy) forwardReal(ctx context.Context, msg []byte) ([]byte, error) {
-	upstream := p.realResolver()
-	switch upstream.Protocol {
-	case "tcp":
-		return p.forwardTCP(ctx, msg, upstream.Address())
-	case "tls":
-		return p.forwardTLS(ctx, msg, upstream)
-	case "https":
-		return p.forwardHTTPS(ctx, msg, upstream)
-	default:
-		return p.forwardUDP(ctx, msg, upstream.Address())
-	}
-}
-
-func (p Proxy) forwardTLS(ctx context.Context, msg []byte, upstream config.DNSUpstream) ([]byte, error) {
-	d := &net.Dialer{}
-	conn, err := tls.DialWithDialer(d, "tcp", upstream.Address(), &tls.Config{
-		ServerName: serverName(upstream),
-		MinVersion: tls.VersionTLS12,
-	})
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(p.Timeout))
-
-	if err := writeTCPDNS(conn, msg); err != nil {
-		return nil, err
-	}
-	return readTCPDNS(conn)
-}
-
-func (p Proxy) forwardHTTPS(ctx context.Context, msg []byte, upstream config.DNSUpstream) ([]byte, error) {
-	address := upstream.Address()
-	path := upstream.Path
-	if path == "" {
-		path = "/dns-query"
-	}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network string, addr string) (net.Conn, error) {
-			d := &net.Dialer{}
-			return d.DialContext(ctx, "tcp", address)
-		},
-		TLSClientConfig: &tls.Config{
-			ServerName: serverName(upstream),
-			MinVersion: tls.VersionTLS12,
-		},
-	}
-	defer transport.CloseIdleConnections()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+address+path, bytes.NewReader(msg))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("accept", "application/dns-message")
-	req.Header.Set("content-type", "application/dns-message")
-	if upstream.TLSName != "" {
-		req.Host = upstream.TLSName
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   p.Timeout,
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("DoH upstream returned HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4097))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > 4096 {
-		return nil, fmt.Errorf("DoH response too large")
-	}
-	return body, nil
-}
-
 func (p Proxy) upstreamFor(msg []byte, clientIP string) string {
 	if p.useFakeUpstream(msg, clientIP) {
 		return p.FakeUpstream
 	}
-	return p.realResolver().Address()
+	if p.RealDNSMode == "proxy" {
+		return p.RealProxyUpstream
+	}
+	return p.RealDirectUpstream
 }
 
 func (p Proxy) useFakeUpstream(msg []byte, clientIP string) bool {
@@ -302,51 +222,7 @@ func (p Proxy) useFakeUpstream(msg []byte, clientIP string) bool {
 		return false
 	}
 	decision := p.domainDecision(query.Name, clientIP)
-	if decision.Action == "proxy" && decision.DNSMode == "fakeip" {
-		return true
-	}
-	return false
-}
-
-func (p Proxy) realResolver() config.DNSUpstream {
-	if p.RealResolver.Host != "" {
-		return p.RealResolver
-	}
-	return config.DNSUpstream{
-		Protocol: "udp",
-		Host:     hostOnly(p.RealUpstream),
-		Port:     portOnly(p.RealUpstream, 53),
-	}
-}
-
-func serverName(upstream config.DNSUpstream) string {
-	if upstream.TLSName != "" {
-		return upstream.TLSName
-	}
-	if net.ParseIP(upstream.Host) != nil {
-		return ""
-	}
-	return upstream.Host
-}
-
-func hostOnly(address string) string {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return address
-	}
-	return host
-}
-
-func portOnly(address string, fallback int) int {
-	_, portValue, err := net.SplitHostPort(address)
-	if err != nil {
-		return fallback
-	}
-	var port int
-	if _, err := fmt.Sscanf(portValue, "%d", &port); err != nil || port <= 0 {
-		return fallback
-	}
-	return port
+	return decision.Action == "proxy" && decision.DNSMode == "fakeip"
 }
 
 func (p Proxy) localResponse(msg []byte, clientIP string) ([]byte, bool) {
@@ -369,7 +245,7 @@ func (p Proxy) domainDecision(name string, clientIP string) ruleengine.Decision 
 	if policy == "direct" {
 		return ruleengine.Decision{Action: "direct", DNSMode: "real_ip"}
 	}
-	if p.RoutingMode == "global" && policy != "proxy" {
+	if p.RoutingMode == "global" {
 		return ruleengine.Decision{Action: "direct", DNSMode: "real_ip"}
 	}
 	return ruleengine.DomainDecision(p.Rules, name)

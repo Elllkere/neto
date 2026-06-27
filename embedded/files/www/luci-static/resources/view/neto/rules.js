@@ -22,8 +22,7 @@ function rewriteRuleState() {
 		if (uci.get('neto', sid, 'enabled') == null)
 			uci.set('neto', sid, 'enabled', '1');
 
-		if (uci.get('neto', sid, 'action') == 'proxy')
-			uci.set('neto', sid, 'dns_mode', 'fakeip');
+		uci.set('neto', sid, 'dns_mode', 'auto');
 
 		if (outbound == null || outbound == '' || outbound == 'proxy_default')
 			uci.set('neto', sid, 'outbound', 'direct');

@@ -101,14 +101,17 @@ Rules are for explicit domain/IP/provider matches only. To proxy everything
 globally, use General -> `routing_mode=global`. To proxy one client entirely,
 use client `policy=proxy`.
 
-For domain proxy rules in custom mode, use `dns_mode=fakeip`. A domain rule with
-`dns_mode=real_ip` can prove that DNS matching works, but it returns a real
-destination IP, so nftables cannot later identify that packet as a domain match
-unless a provider/IP rule also matches that destination.
+LuCI hides DNS mode and writes `dns_mode=auto`. netod derives DNS behavior:
 
-`dns_mode=auto` is a backend compatibility mode: proxy rules with domain include
-fields are treated as `fakeip`; other rules use `real_ip`. LuCI defaults new
-proxy rules to explicit `fakeip` and does not expose DNS mode selection.
+- domain proxy rules in custom mode use FakeIP
+- provider/CIDR proxy rules use real DNS so nftables can match real
+  destination IPs
+- direct rules and direct clients always use real DNS
+- global mode returns real DNS by default because nftables already enforces the
+  global proxy path
+
+Do not mix domain and provider/CIDR matchers in one rule. netod check rejects
+mixed rules; split them into separate rules.
 
 Example:
 
@@ -119,7 +122,7 @@ config rule
 	option priority '100'
 	option action 'proxy'
 	option outbound 'my_vless'
-	option dns_mode 'fakeip'
+	option dns_mode 'auto'
 	list domain_contains 'youtube'
 	list exclude_domain_equals 'youtube.kz'
 	list exclude_domain_ends_with '.youtube.kz'
@@ -174,21 +177,22 @@ DNS terminology:
 
 - `dns_listen` / General -> DNS server is the local netod listener used by
   dnsmasq.
-- DNS upstream is the external resolver used for real DNS answers and sing-box
-  outbound domain resolution.
-- Supported upstream protocols are UDP, TCP, DoT, and DoH.
-- Presets are Cloudflare and Google; custom mode uses explicit host, port, TLS
-  server name, and DoH path.
+- netod forwards DNS wire queries to local sing-box DNS listeners:
+  `127.0.0.1:15353` for FakeIP, `127.0.0.1:15354` for real-direct, and
+  `127.0.0.1:15355` for real-proxy.
+- `real_dns_mode` selects direct or proxy real-DNS forwarding.
+- `real_dns_transport` selects UDP, TCP, DoT, or DoH. sing-box handles that
+  transport; netod does not implement encrypted DNS clients.
 
 Example DoH upstream:
 
 ```uci
-option dns_upstream_preset 'cloudflare'
-option dns_upstream_protocol 'https'
-option dns_upstream_host '1.1.1.1'
-option dns_upstream_port '443'
-option dns_upstream_tls_name 'cloudflare-dns.com'
-option dns_upstream_path '/dns-query'
+option real_dns_mode 'direct'
+option real_dns_transport 'https'
+option real_dns_server '1.1.1.1'
+option real_dns_port '443'
+option real_dns_server_name 'cloudflare-dns.com'
+option real_dns_path '/dns-query'
 ```
 
 LAN client DNS test from Windows:

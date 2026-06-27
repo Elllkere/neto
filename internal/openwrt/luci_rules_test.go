@@ -44,8 +44,7 @@ func TestRulesLuCIExplicitEnabledAndPriorityRewrite(t *testing.T) {
 		"o.disabled = '0'",
 		"o.rmempty = false",
 		"uci.set('neto', sid, 'enabled', '1')",
-		"uci.get('neto', sid, 'action') == 'proxy'",
-		"uci.set('neto', sid, 'dns_mode', 'fakeip')",
+		"uci.set('neto', sid, 'dns_mode', 'auto')",
 		"uci.set('neto', sid, 'priority', String(n * 100))",
 		"this.map.save(rewriteRuleState)",
 	} {
@@ -58,7 +57,7 @@ func TestRulesLuCIExplicitEnabledAndPriorityRewrite(t *testing.T) {
 	}
 }
 
-func TestRulesLuCIDNSModeHiddenAndForcedToFakeIP(t *testing.T) {
+func TestRulesLuCIDNSModeHiddenAndAutomatic(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +67,10 @@ func TestRulesLuCIDNSModeHiddenAndForcedToFakeIP(t *testing.T) {
 		t.Fatalf("rules.js must not expose dns_mode in LuCI:\n%s", s)
 	}
 	for _, want := range []string{
-		"uci.get('neto', sid, 'action') == 'proxy'",
-		"uci.set('neto', sid, 'dns_mode', 'fakeip')",
+		"uci.set('neto', sid, 'dns_mode', 'auto')",
 	} {
 		if !strings.Contains(s, want) {
-			t.Fatalf("rules.js missing forced fakeip behavior %q:\n%s", want, s)
+			t.Fatalf("rules.js missing automatic dns_mode behavior %q:\n%s", want, s)
 		}
 	}
 }

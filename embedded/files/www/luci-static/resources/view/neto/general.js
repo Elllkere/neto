@@ -60,37 +60,55 @@ function normalizeDNSProtocol(protocol) {
 	}
 }
 
+function normalizeDNSMode(mode) {
+	mode = String(mode || '').trim();
+	return mode == 'proxy' ? 'proxy' : 'direct';
+}
+
+function splitHostPort(value) {
+	value = String(value || '').trim();
+	var idx = value.lastIndexOf(':');
+
+	if (idx > 0 && value.indexOf(':') == idx)
+		return [ value.slice(0, idx), value.slice(idx + 1) ];
+
+	return [ value, '' ];
+}
+
 function normalizeDNSState() {
-	var preset = String(uci.get('neto', 'main', 'dns_upstream_preset') || 'cloudflare').trim();
-	var protocol = normalizeDNSProtocol(uci.get('neto', 'main', 'dns_upstream_protocol'));
-	var host = String(uci.get('neto', 'main', 'dns_upstream_host') || '').trim();
-	var port = String(uci.get('neto', 'main', 'dns_upstream_port') || '').trim();
-	var tlsName = String(uci.get('neto', 'main', 'dns_upstream_tls_name') || '').trim();
-	var path = String(uci.get('neto', 'main', 'dns_upstream_path') || '').trim();
-
-	if (preset != 'google' && preset != 'custom')
-		preset = 'cloudflare';
-
-	if (preset == 'cloudflare') {
-		host = '1.1.1.1';
-		port = defaultDNSPort(protocol);
-		tlsName = 'cloudflare-dns.com';
-		path = '/dns-query';
-	} else if (preset == 'google') {
-		host = '8.8.8.8';
-		port = defaultDNSPort(protocol);
-		tlsName = 'dns.google';
-		path = '/dns-query';
-	}
+	var mode = normalizeDNSMode(uci.get('neto', 'main', 'real_dns_mode'));
+	var protocol = normalizeDNSProtocol(uci.get('neto', 'main', 'real_dns_transport') || uci.get('neto', 'main', 'dns_upstream_protocol'));
+	var host = String(uci.get('neto', 'main', 'real_dns_server') || uci.get('neto', 'main', 'dns_upstream_host') || '').trim();
+	var port = String(uci.get('neto', 'main', 'real_dns_port') || uci.get('neto', 'main', 'dns_upstream_port') || '').trim();
+	var tlsName = String(uci.get('neto', 'main', 'real_dns_server_name') || uci.get('neto', 'main', 'dns_upstream_tls_name') || '').trim();
+	var path = String(uci.get('neto', 'main', 'real_dns_path') || uci.get('neto', 'main', 'dns_upstream_path') || '').trim();
+	var legacy = splitHostPort(uci.get('neto', 'main', 'real_dns_upstream'));
+	var serverParts;
 
 	if (host == '')
-		host = '1.1.1.1';
+		host = legacy[0] || '1.1.1.1';
+	serverParts = splitHostPort(host);
+	if (serverParts[1] != '') {
+		host = serverParts[0];
+		if (port == '')
+			port = serverParts[1];
+	}
 	if (port == '')
 		port = defaultDNSPort(protocol);
+	if (tlsName == '' && host == '1.1.1.1')
+		tlsName = 'cloudflare-dns.com';
+	if (tlsName == '' && host == '8.8.8.8')
+		tlsName = 'dns.google';
 	if (protocol == 'https' && path == '')
 		path = '/dns-query';
 
-	uci.set('neto', 'main', 'dns_upstream_preset', preset);
+	uci.set('neto', 'main', 'real_dns_mode', mode);
+	uci.set('neto', 'main', 'real_dns_transport', protocol);
+	uci.set('neto', 'main', 'real_dns_server', host);
+	uci.set('neto', 'main', 'real_dns_port', port);
+	uci.set('neto', 'main', 'real_dns_server_name', tlsName);
+	uci.set('neto', 'main', 'real_dns_path', path);
+	uci.set('neto', 'main', 'dns_upstream_preset', 'custom');
 	uci.set('neto', 'main', 'dns_upstream_protocol', protocol);
 	uci.set('neto', 'main', 'dns_upstream_host', host);
 	uci.set('neto', 'main', 'dns_upstream_port', port);
@@ -255,14 +273,13 @@ return view.extend({
 		o.placeholder = '127.0.0.1:5353';
 		o.rmempty = false;
 
-		o = s.option(form.ListValue, 'dns_upstream_preset', _('DNS upstream'));
-		o.value('cloudflare', _('Cloudflare'));
-		o.value('google', _('Google'));
-		o.value('custom', _('Custom'));
-		o.default = 'cloudflare';
+		o = s.option(form.ListValue, 'real_dns_mode', _('Real DNS mode'));
+		o.value('direct', _('Direct'));
+		o.value('proxy', _('Proxy'));
+		o.default = 'direct';
 		o.rmempty = false;
 
-		o = s.option(form.ListValue, 'dns_upstream_protocol', _('DNS protocol'));
+		o = s.option(form.ListValue, 'real_dns_transport', _('Real DNS transport'));
 		o.value('udp', _('UDP'));
 		o.value('tcp', _('TCP'));
 		o.value('tls', _('DNS over TLS'));
@@ -270,25 +287,28 @@ return view.extend({
 		o.default = 'udp';
 		o.rmempty = false;
 
-		o = s.option(form.Value, 'dns_upstream_host', _('Custom DNS host'));
-		o.depends('dns_upstream_preset', 'custom');
+		o = s.option(form.Value, 'real_dns_server', _('Server'));
 		o.placeholder = '1.1.1.1';
 		o.rmempty = false;
 
-		o = s.option(form.Value, 'dns_upstream_port', _('Custom DNS port'));
-		o.depends('dns_upstream_preset', 'custom');
-		o.datatype = 'port';
-		o.placeholder = '53';
-		o.rmempty = false;
-
-		o = s.option(form.Value, 'dns_upstream_tls_name', _('TLS server name'));
-		o.depends({ 'dns_upstream_preset': 'custom', 'dns_upstream_protocol': 'tls' });
-		o.depends({ 'dns_upstream_preset': 'custom', 'dns_upstream_protocol': 'https' });
+		o = s.option(form.Value, 'real_dns_server_name', _('Server name'));
+		o.depends('real_dns_transport', 'tls');
+		o.depends('real_dns_transport', 'https');
 		o.placeholder = 'cloudflare-dns.com';
 
-		o = s.option(form.Value, 'dns_upstream_path', _('DoH path'));
-		o.depends({ 'dns_upstream_preset': 'custom', 'dns_upstream_protocol': 'https' });
+		o = s.option(form.Value, 'real_dns_path', _('Path'));
+		o.depends('real_dns_transport', 'https');
 		o.placeholder = '/dns-query';
+
+		o = s.option(form.Value, 'fakeip_range', _('FakeIP range'));
+		o.datatype = 'cidr4';
+		o.placeholder = '198.18.0.0/15';
+
+		o = s.option(form.Flag, 'filter_aaaa_for_fakeip', _('Filter FakeIP AAAA'));
+		o.enabled = '1';
+		o.disabled = '0';
+		o.default = '1';
+		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'routing_mode', _('Routing mode'));
 		o.value('custom', _('Custom'));
