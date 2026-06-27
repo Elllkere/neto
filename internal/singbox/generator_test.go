@@ -41,6 +41,12 @@ func TestGenerateUsesModernFakeIPServer(t *testing.T) {
 	if strings.Contains(raw, `"override_destination"`) || strings.Contains(raw, `"sniff": true`) {
 		t.Fatalf("generated config contains sing-box 1.13-incompatible sniff fields:\n%s", raw)
 	}
+	if strings.Contains(raw, `"detour": "direct"`) {
+		t.Fatalf("DNS servers must not detour to empty direct outbound:\n%s", raw)
+	}
+	if strings.Contains(raw, "rule_set") || strings.Contains(raw, "rule-set") || strings.Contains(raw, "/tmp/sing-box/rulesets") {
+		t.Fatalf("generated config must not reference external rule-set files:\n%s", raw)
+	}
 	if !strings.Contains(raw, `"store_fakeip": true`) {
 		t.Fatalf("expected fakeip cache persistence:\n%s", raw)
 	}
@@ -60,6 +66,7 @@ func TestGenerateBuiltinOutbounds(t *testing.T) {
 
 func TestGenerateDoTDNSServer(t *testing.T) {
 	cfg := config.Defaults()
+	cfg.Main.DNSUpstreamPreset = "custom"
 	cfg.Main.RealDNSTransport = "tls"
 	cfg.Main.RealDNSServer = "8.8.8.8"
 	cfg.Main.RealDNSServerPort = 853
@@ -68,8 +75,8 @@ func TestGenerateDoTDNSServer(t *testing.T) {
 	if local["type"] != "tls" || local["server"] != "8.8.8.8" || local["server_port"].(float64) != 853 {
 		t.Fatalf("unexpected DoT DNS server: %+v", local)
 	}
-	if local["detour"] != "direct" {
-		t.Fatalf("unexpected DoT detour: %+v", local)
+	if _, ok := local["detour"]; ok {
+		t.Fatalf("real-direct DNS should not detour to direct outbound: %+v", local)
 	}
 	tls := local["tls"].(map[string]any)
 	if tls["server_name"] != "dns.google" {
@@ -79,6 +86,7 @@ func TestGenerateDoTDNSServer(t *testing.T) {
 
 func TestGenerateDoHDNSServer(t *testing.T) {
 	cfg := config.Defaults()
+	cfg.Main.DNSUpstreamPreset = "custom"
 	cfg.Main.RealDNSTransport = "https"
 	cfg.Main.RealDNSServer = "1.1.1.1"
 	cfg.Main.RealDNSServerPort = 443
@@ -92,31 +100,79 @@ func TestGenerateDoHDNSServer(t *testing.T) {
 	if tls["server_name"] != "cloudflare-dns.com" {
 		t.Fatalf("unexpected DoH TLS config: %+v", tls)
 	}
+	if _, ok := local["detour"]; ok {
+		t.Fatalf("real-direct DNS should not detour to direct outbound: %+v", local)
+	}
 }
 
-func TestGenerateRealProxyDNSServerDetoursThroughProxyOutbound(t *testing.T) {
+func TestGenerateBootstrapDNSServerDoesNotDetourToDirect(t *testing.T) {
 	cfg := config.Defaults()
-	cfg.Outbounds = []config.Outbound{{
-		Enabled: true,
-		Tag:     "test",
-		Type:    "vless",
-		Server:  "example.com",
-		Port:    443,
-		UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
-		TLS:     true,
-	}}
+	cfg.Main.DNSUpstreamPreset = "custom"
+	cfg.Main.RealDNSTransport = "https"
+	cfg.Main.RealDNSServer = "dns.example.com"
+	cfg.Main.RealDNSServerPort = 443
+	cfg.Main.RealDNSServerName = "dns.example.com"
+	cfg.Main.RealDNSPath = "/dns-query"
+	bootstrap := generatedDNSServer(t, cfg, "bootstrap")
+	if bootstrap["type"] != "udp" || bootstrap["server"] != "1.1.1.1" {
+		t.Fatalf("unexpected bootstrap DNS server: %+v", bootstrap)
+	}
+	if _, ok := bootstrap["detour"]; ok {
+		t.Fatalf("bootstrap DNS should not detour to direct outbound: %+v", bootstrap)
+	}
+}
+
+func TestGenerateGoogleDoHUsesDomainResolver(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.DNSUpstreamPreset = "google"
+	cfg.Main.RealDNSTransport = "https"
+	local := generatedDNSServer(t, cfg, "real-direct")
+	if local["type"] != "https" || local["server"] != "dns.google" || local["server_port"].(float64) != 443 {
+		t.Fatalf("unexpected Google DoH DNS server: %+v", local)
+	}
+	if local["domain_resolver"] != "bootstrap" {
+		t.Fatalf("Google DoH hostname should use bootstrap resolver: %+v", local)
+	}
+	if _, ok := local["detour"]; ok {
+		t.Fatalf("Google DoH direct DNS should not detour to direct outbound: %+v", local)
+	}
+}
+
+func TestGenerateRealProxyDNSServerDetoursThroughSelectedDNSOutbound(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.RealDNSOutbound = "dns_proxy"
+	cfg.Outbounds = []config.Outbound{
+		{
+			Enabled: true,
+			Tag:     "dns_proxy",
+			Type:    "vless",
+			Server:  "dns.example.com",
+			Port:    443,
+			UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
+			TLS:     true,
+		},
+		{
+			Enabled: true,
+			Tag:     "rule_proxy",
+			Type:    "vless",
+			Server:  "rule.example.com",
+			Port:    443,
+			UUID:    "a3482e88-686a-4a58-8126-99c9df64b061",
+			TLS:     true,
+		},
+	}
 	cfg.Rules = []config.Rule{{
 		Name:           "test",
 		Enabled:        true,
 		Priority:       100,
 		Action:         "proxy",
-		Outbound:       "test",
+		Outbound:       "rule_proxy",
 		DNSMode:        "auto",
 		DomainContains: []string{"check-host"},
 	}}
 	realProxy := generatedDNSServer(t, cfg, "real-proxy")
-	if realProxy["detour"] != "test" {
-		t.Fatalf("real-proxy DNS should detour through selected proxy outbound: %+v", realProxy)
+	if realProxy["detour"] != "dns_proxy" {
+		t.Fatalf("real-proxy DNS should detour through selected DNS outbound: %+v", realProxy)
 	}
 }
 

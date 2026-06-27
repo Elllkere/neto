@@ -50,6 +50,16 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 
+		o = s.option(form.Value, 'dns_listen', _('DNS server'));
+		o.placeholder = '127.0.0.1:5353';
+		o.rmempty = false;
+
+		o = s.option(form.Flag, 'filter_aaaa_for_fakeip', _('Filter FakeIP AAAA'));
+		o.enabled = '1';
+		o.disabled = '0';
+		o.default = '1';
+		o.rmempty = false;
+
 		o = s.option(form.DynamicList, 'lan_subnet', _('LAN IPv4 subnets'));
 		o.datatype = 'cidr4';
 		o.placeholder = '192.168.8.0/24';
@@ -79,6 +89,10 @@ return view.extend({
 		o = s.option(form.Value, 'table', _('Table'));
 		o.datatype = 'uinteger';
 		o.placeholder = '101';
+
+		o = s.option(form.Value, 'fakeip_range', _('FakeIP range'));
+		o.datatype = 'cidr4';
+		o.placeholder = '198.18.0.0/15';
 
 		o = s.option(form.Flag, 'resolve_for_subnet_rules', _('Resolve subnet rules'));
 		o.enabled = '1';

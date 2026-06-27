@@ -623,8 +623,8 @@ return view.extend({
 		o.modalonly = true;
 
 		o = sub.option(form.ListValue, 'update_via', _('Update via'));
-		o.value('direct', _('Direct'));
-		o.value('proxy', _('Proxy'));
+		o.value('direct', 'direct');
+		o.value('proxy', 'proxy');
 		o.default = 'direct';
 		o.rmempty = false;
 		o.editable = true;

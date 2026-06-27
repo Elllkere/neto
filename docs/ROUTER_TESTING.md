@@ -175,12 +175,14 @@ dig @127.0.0.1 -p 5353 example.org
 
 DNS terminology:
 
-- `dns_listen` / General -> DNS server is the local netod listener used by
+- `dns_listen` / Advanced -> DNS server is the local netod listener used by
   dnsmasq.
 - netod forwards DNS wire queries to local sing-box DNS listeners:
   `127.0.0.1:15353` for FakeIP, `127.0.0.1:15354` for real-direct, and
   `127.0.0.1:15355` for real-proxy.
 - `real_dns_mode` selects direct or proxy real-DNS forwarding.
+- `real_dns_outbound` is required when `real_dns_mode=proxy` and selects the
+  custom outbound used by the real-proxy DNS listener.
 - `real_dns_transport` selects UDP, TCP, DoT, or DoH. sing-box handles that
   transport; netod does not implement encrypted DNS clients.
 
@@ -189,8 +191,7 @@ Example DoH upstream:
 ```uci
 option real_dns_mode 'direct'
 option real_dns_transport 'https'
-option real_dns_server '1.1.1.1'
-option real_dns_port '443'
+option real_dns_server '1.1.1.1:443'
 option real_dns_server_name 'cloudflare-dns.com'
 option real_dns_path '/dns-query'
 ```
@@ -234,6 +235,9 @@ When `manage_dnsmasq=1`, neto also sets dnsmasq `addsubnet=32` while running
 so netod can see the original LAN client IPv4 through EDNS Client Subnet and
 apply `policy=direct` DNS bypass correctly. Stop/uninstall restores the previous
 dnsmasq `addsubnet` and `noresolv` values.
+netod strips the EDNS Client Subnet option before forwarding queries to
+sing-box DNS listeners, so public upstreams do not receive private LAN client
+addresses.
 
 Local archive testing on a router:
 

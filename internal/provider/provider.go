@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"fmt"
 	"net"
+	"os"
 
 	"github.com/elllkere/neto/internal/config"
 	"github.com/elllkere/neto/internal/policy"
@@ -34,8 +36,12 @@ func LoadRuleCIDRs(cfg config.Config) (map[int][]*net.IPNet, error) {
 			if !ok || !provider.Enabled || provider.Type != "ip" {
 				continue
 			}
-			cidrs, err := policy.LoadIPv4CIDRsFile(provider.CachePath())
+			cachePath := provider.CachePath()
+			cidrs, err := policy.LoadIPv4CIDRsFile(cachePath)
 			if err != nil {
+				if os.IsNotExist(err) {
+					return nil, fmt.Errorf("provider %q cache %q is missing; run netod providers update %s before compiling rules", provider.Name, cachePath, provider.Name)
+				}
 				return nil, err
 			}
 			all = append(all, cidrs...)

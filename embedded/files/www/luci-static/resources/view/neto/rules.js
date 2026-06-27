@@ -12,6 +12,7 @@ function rewriteRuleState() {
 	var n = 0;
 
 	uci.sections('neto', 'rule', function(section, sid) {
+		var action = String(uci.get('neto', sid, 'action') || 'proxy').trim();
 		var outbound = uci.get('neto', sid, 'outbound');
 		var domainInput = String(uci.get('neto', sid, 'domain_input') || '').trim();
 		var ipInput = String(uci.get('neto', sid, 'ip_input') || '').trim();
@@ -24,8 +25,11 @@ function rewriteRuleState() {
 
 		uci.set('neto', sid, 'dns_mode', 'auto');
 
-		if (outbound == null || outbound == '' || outbound == 'proxy_default')
+		if (action != 'proxy') {
 			uci.set('neto', sid, 'outbound', 'direct');
+		} else if (outbound == null || outbound == '' || outbound == 'direct' || outbound == 'blocked' || outbound == 'block' || outbound == 'proxy_default') {
+			uci.unset('neto', sid, 'outbound');
+		}
 
 		if (domainInput == '' && optionValues(sid, 'domain_provider').length > 0)
 			domainInput = 'provider';
@@ -61,8 +65,7 @@ function rewriteRuleState() {
 }
 
 function addOutboundChoices(option) {
-	option.value('direct', _('Direct'));
-	option.value('blocked', _('Blocked'));
+	option.value('', _('Select outbound'));
 
 	uci.sections('neto', 'outbound', function(section, sid) {
 		var tag = String(section.tag || sid || section['.name'] || '').trim();
@@ -239,17 +242,18 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'action', _('Action'));
-		o.value('proxy', _('Proxy'));
-		o.value('direct', _('Direct'));
-		o.value('block', _('Block'));
+		o.value('proxy', 'proxy');
+		o.value('direct', 'direct');
+		o.value('block', 'block');
 		o.default = 'proxy';
 		o.rmempty = false;
 		o.editable = true;
 
 		o = s.option(form.ListValue, 'outbound', _('Outbound'));
 		addOutboundChoices(o);
-		o.default = 'direct';
-		o.rmempty = false;
+		o.depends('action', 'proxy');
+		o.default = '';
+		o.rmempty = true;
 		o.editable = true;
 
 		o = s.option(form.ListValue, 'domain_input', _('Domain input'));

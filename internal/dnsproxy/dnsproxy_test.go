@@ -232,28 +232,89 @@ func testQueryName(qtype uint16, name string) []byte {
 	return msg
 }
 
-func TestClientSubnetIPv4(t *testing.T) {
+func testQueryWithOptions(options ...[]byte) []byte {
 	msg := testQuery(qTypeA)
+	var rdata []byte
+	for _, option := range options {
+		rdata = append(rdata, option...)
+	}
 	binary.BigEndian.PutUint16(msg[10:12], 1)
-	opt := []byte{
+	msg = append(msg,
 		0x00,       // root name
 		0x00, 0x29, // OPT
 		0x04, 0xd0, // UDP payload size
 		0x00, 0x00, 0x00, 0x00, // extended rcode/version/flags
-		0x00, 0x0c, // rdlen
+	)
+	var rdLen [2]byte
+	binary.BigEndian.PutUint16(rdLen[:], uint16(len(rdata)))
+	msg = append(msg, rdLen[:]...)
+	msg = append(msg, rdata...)
+	return msg
+}
+
+func ecsOption(ip [4]byte) []byte {
+	return []byte{
 		0x00, 0x08, // ECS option
 		0x00, 0x08, // option len
 		0x00, 0x01, // family IPv4
 		0x20, // source prefix 32
 		0x00, // scope prefix
-		192, 168, 8, 50,
+		ip[0], ip[1], ip[2], ip[3],
 	}
-	msg = append(msg, opt...)
+}
+
+func ednsOption(code uint16, data ...byte) []byte {
+	option := make([]byte, 4, 4+len(data))
+	binary.BigEndian.PutUint16(option[0:2], code)
+	binary.BigEndian.PutUint16(option[2:4], uint16(len(data)))
+	option = append(option, data...)
+	return option
+}
+
+func TestClientSubnetIPv4(t *testing.T) {
+	msg := testQueryWithOptions(ecsOption([4]byte{192, 168, 8, 50}))
 	if got := clientSubnetIPv4(msg); got != "192.168.8.50" {
 		t.Fatalf("got %q, want 192.168.8.50", got)
 	}
 	p := Proxy{}
 	if got := p.clientIP(msg, "127.0.0.1"); got != "192.168.8.50" {
 		t.Fatalf("got client IP %q", got)
+	}
+}
+
+func TestStripClientSubnetOptionBeforeForwarding(t *testing.T) {
+	msg := testQueryWithOptions(ecsOption([4]byte{192, 168, 8, 50}))
+	if got := clientSubnetIPv4(msg); got == "" {
+		t.Fatal("test query must carry ECS before stripping")
+	}
+
+	stripped := stripClientSubnetOption(msg)
+	if string(stripped) == string(msg) {
+		t.Fatal("expected DNS query to change after stripping ECS")
+	}
+	if got := clientSubnetIPv4(stripped); got != "" {
+		t.Fatalf("ECS leaked after strip: %q", got)
+	}
+	if _, ok := ParseQuery(stripped); !ok {
+		t.Fatal("stripped query no longer parses")
+	}
+	if ar := binary.BigEndian.Uint16(stripped[10:12]); ar != 1 {
+		t.Fatalf("additional count changed to %d, want 1", ar)
+	}
+	if got := len(stripped); got != len(msg)-12 {
+		t.Fatalf("unexpected stripped length %d, want %d", got, len(msg)-12)
+	}
+}
+
+func TestStripClientSubnetOptionPreservesOtherEDNSOptions(t *testing.T) {
+	padding := ednsOption(12, 0xaa, 0xbb)
+	msg := testQueryWithOptions(ecsOption([4]byte{192, 168, 8, 50}), padding)
+
+	stripped := stripClientSubnetOption(msg)
+	if got := clientSubnetIPv4(stripped); got != "" {
+		t.Fatalf("ECS leaked after strip: %q", got)
+	}
+	if !strings.Contains(string(stripped), string([]byte{0x00, 0x0c, 0x00, 0x02, 0xaa, 0xbb})) {
+		t.Fatalf("non-ECS EDNS option was not preserved: %x", stripped)
 	}
 }

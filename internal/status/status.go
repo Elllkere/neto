@@ -13,10 +13,15 @@ import (
 )
 
 func Summary(cfg config.Config) string {
+	realDNSOutbound := strings.TrimSpace(cfg.Main.RealDNSOutbound)
+	if realDNSOutbound == "" {
+		realDNSOutbound = "-"
+	}
 	lines := []string{
 		fmt.Sprintf("enabled: %t", cfg.Main.Enabled),
 		fmt.Sprintf("singbox_bin: %s", cfg.Main.SingBoxBin),
 		fmt.Sprintf("real_dns_mode: %s", cfg.Main.RealDNSMode),
+		fmt.Sprintf("real_dns_outbound: %s", realDNSOutbound),
 		fmt.Sprintf("real_dns_transport: %s", cfg.Main.DNSUpstream().Protocol),
 		fmt.Sprintf("real_dns_server: %s", cfg.Main.DNSUpstream().Address()),
 		fmt.Sprintf("singbox_dns_fakeip: %s", cfg.Main.SingBoxDNSFakeIPAddr()),

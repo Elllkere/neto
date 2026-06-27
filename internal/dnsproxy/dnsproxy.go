@@ -33,8 +33,10 @@ type Query struct {
 }
 
 const (
-	qTypeA    uint16 = 1
-	qTypeAAAA uint16 = 28
+	qTypeA                 uint16 = 1
+	qTypeAAAA              uint16 = 28
+	rrTypeOPT              uint16 = 41
+	ednsClientSubnetOption uint16 = 8
 )
 
 func New(cfg config.Config) Proxy {
@@ -161,14 +163,14 @@ func (p Proxy) handleUDP(ctx context.Context, msg []byte, clientIP string) ([]by
 	if resp, ok := p.localResponse(msg, clientIP); ok {
 		return resp, nil
 	}
-	return p.forwardUDP(ctx, msg, p.upstreamFor(msg, clientIP))
+	return p.forwardUDP(ctx, stripClientSubnetOption(msg), p.upstreamFor(msg, clientIP))
 }
 
 func (p Proxy) handleTCPQuery(ctx context.Context, msg []byte, clientIP string) ([]byte, error) {
 	if resp, ok := p.localResponse(msg, clientIP); ok {
 		return resp, nil
 	}
-	return p.forwardTCP(ctx, msg, p.upstreamFor(msg, clientIP))
+	return p.forwardTCP(ctx, stripClientSubnetOption(msg), p.upstreamFor(msg, clientIP))
 }
 
 func (p Proxy) forwardUDP(ctx context.Context, msg []byte, upstream string) ([]byte, error) {
@@ -315,6 +317,125 @@ func clientSubnetIPv4(msg []byte) string {
 		off += rdLen
 	}
 	return ""
+}
+
+func stripClientSubnetOption(msg []byte) []byte {
+	if len(msg) < 12 {
+		return msg
+	}
+	qd := int(binary.BigEndian.Uint16(msg[4:6]))
+	an := int(binary.BigEndian.Uint16(msg[6:8]))
+	ns := int(binary.BigEndian.Uint16(msg[8:10]))
+	ar := int(binary.BigEndian.Uint16(msg[10:12]))
+
+	out := make([]byte, 0, len(msg))
+	out = append(out, msg[:12]...)
+	off := 12
+	changed := false
+
+	for i := 0; i < qd; i++ {
+		start := off
+		var ok bool
+		_, off, ok = decodeName(msg, off, 0)
+		if !ok || off+4 > len(msg) {
+			return msg
+		}
+		off += 4
+		out = append(out, msg[start:off]...)
+	}
+
+	for i := 0; i < an+ns; i++ {
+		start := off
+		next, ok := resourceRecordEnd(msg, off)
+		if !ok {
+			return msg
+		}
+		off = next
+		out = append(out, msg[start:off]...)
+	}
+
+	for i := 0; i < ar; i++ {
+		start := off
+		var ok bool
+		_, off, ok = decodeName(msg, off, 0)
+		if !ok || off+10 > len(msg) {
+			return msg
+		}
+		rrType := binary.BigEndian.Uint16(msg[off : off+2])
+		rdLen := int(binary.BigEndian.Uint16(msg[off+8 : off+10]))
+		rdataStart := off + 10
+		rdataEnd := rdataStart + rdLen
+		if rdataEnd > len(msg) {
+			return msg
+		}
+		if rrType != rrTypeOPT {
+			out = append(out, msg[start:rdataEnd]...)
+			off = rdataEnd
+			continue
+		}
+
+		options, optionChanged, ok := stripEDNSClientSubnetOptions(msg[rdataStart:rdataEnd])
+		if !ok {
+			return msg
+		}
+		if !optionChanged {
+			out = append(out, msg[start:rdataEnd]...)
+			off = rdataEnd
+			continue
+		}
+		changed = true
+		out = append(out, msg[start:off+8]...)
+		var lenBuf [2]byte
+		binary.BigEndian.PutUint16(lenBuf[:], uint16(len(options)))
+		out = append(out, lenBuf[:]...)
+		out = append(out, options...)
+		off = rdataEnd
+	}
+
+	if off != len(msg) {
+		return msg
+	}
+	if !changed {
+		return msg
+	}
+	return out
+}
+
+func resourceRecordEnd(msg []byte, off int) (int, bool) {
+	var ok bool
+	_, off, ok = decodeName(msg, off, 0)
+	if !ok || off+10 > len(msg) {
+		return 0, false
+	}
+	rdLen := int(binary.BigEndian.Uint16(msg[off+8 : off+10]))
+	off += 10
+	if off+rdLen > len(msg) {
+		return 0, false
+	}
+	return off + rdLen, true
+}
+
+func stripEDNSClientSubnetOptions(options []byte) ([]byte, bool, bool) {
+	out := make([]byte, 0, len(options))
+	changed := false
+	for off := 0; off < len(options); {
+		if off+4 > len(options) {
+			return nil, false, false
+		}
+		code := binary.BigEndian.Uint16(options[off : off+2])
+		length := int(binary.BigEndian.Uint16(options[off+2 : off+4]))
+		next := off + 4 + length
+		if next > len(options) {
+			return nil, false, false
+		}
+		if code == ednsClientSubnetOption {
+			changed = true
+		} else {
+			out = append(out, options[off:next]...)
+		}
+		off = next
+	}
+	return out, changed, true
 }
 
 func ecsIPv4FromOptions(opts []byte) string {

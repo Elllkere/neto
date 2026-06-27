@@ -94,13 +94,21 @@ Routing modes:
   `singbox_dns_real_direct` (`127.0.0.1:15354`), and
   `singbox_dns_real_proxy` (`127.0.0.1:15355`).
 - `real_dns_mode` is `direct` or `proxy`.
+- `real_dns_outbound` selects the custom outbound used by the real-proxy DNS
+  listener when `real_dns_mode=proxy`; do not use `proxy_default`.
 - `real_dns_transport` is `udp`, `tcp`, `tls`, or `https`.
-- `real_dns_server`, `real_dns_server_name`, and `real_dns_path` describe the
-  upstream used by generated sing-box DNS servers.
+- `real_dns_server` may be `host` or `host:port`; LuCI saves `host:port` using
+  the default port for the selected transport when no port is entered.
+- `real_dns_server_name` and `real_dns_path` describe the upstream used by
+  generated sing-box DNS servers. LuCI combines these into one DoH server/path
+  field for HTTPS.
 - `real_dns_upstream` and `dns_upstream_*` are legacy compatibility mirrors.
-- FakeIP DNS decisions forward raw DNS wire queries to sing-box FakeIP DNS.
-  Direct/real DNS decisions forward raw DNS wire queries to the selected
-  sing-box real DNS listener.
+- FakeIP DNS decisions forward DNS wire queries to sing-box FakeIP DNS.
+  Direct/real DNS decisions forward DNS wire queries to the selected sing-box
+  real DNS listener.
+- dnsmasq `addsubnet=32` is used only as local metadata so netod can recover
+  the original LAN client IP. netod must strip EDNS Client Subnet before
+  forwarding DNS queries to sing-box/public resolvers.
 - Domain proxy rules in custom mode may use FakeIP. Direct clients, direct
   rules, provider/CIDR rules, and global mode use real DNS.
 - Mixed domain and provider/CIDR matchers are not supported; split them into
@@ -160,6 +168,12 @@ semantics:
 - Provider types are `domain` and `ip`.
 - Providers download plain text lists from `url` into `/var/lib/neto/providers/`.
 - `netod providers update [name]` updates providers using `curl`.
+- The installer seeds built-in IP providers for Cloudflare
+  (`https://www.cloudflare.com/ips-v4/`) and Telegram
+  (`https://core.telegram.org/resources/cidr.txt`) if no provider with the same
+  URL already exists.
+- IP provider updates save only valid IPv4 CIDR/address entries; IPv6 entries
+  from mixed feeds such as Telegram are ignored.
 - `auto_update=1` creates neto-owned cron entries, similar to protocol
   subscriptions.
 - `update_via=direct|proxy` follows the subscription update model and must not

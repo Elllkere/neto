@@ -403,6 +403,60 @@ ensure_lan_subnet_config() {
 	uci commit neto
 }
 
+provider_url_exists() {
+	local url="$1"
+	local section
+
+	command -v uci >/dev/null 2>&1 || return 1
+	for section in $(uci -q show neto | sed -n 's/^neto\.\([^=]*\)=provider$/\1/p'); do
+		if [ "$(uci -q get "neto.$section.url" 2>/dev/null || true)" = "$url" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+unique_provider_section() {
+	local base="$1"
+	local section="$base"
+	local n=2
+
+	while uci -q get "neto.$section" >/dev/null 2>&1; do
+		section="${base}_$n"
+		n=$((n + 1))
+	done
+	echo "$section"
+}
+
+ensure_builtin_provider() {
+	local base="$1"
+	local label="$2"
+	local url="$3"
+	local section
+
+	command -v uci >/dev/null 2>&1 || return 0
+	if provider_url_exists "$url"; then
+		return 0
+	fi
+
+	section="$(unique_provider_section "$base")"
+	log "adding built-in provider $label"
+	uci set "neto.$section=provider"
+	uci set "neto.$section.enabled=1"
+	uci set "neto.$section.label=$label"
+	uci set "neto.$section.type=ip"
+	uci set "neto.$section.url=$url"
+	uci set "neto.$section.update_via=direct"
+	uci set "neto.$section.auto_update=0"
+}
+
+ensure_builtin_providers() {
+	command -v uci >/dev/null 2>&1 || return 0
+	ensure_builtin_provider "cloudflare_ipv4" "Cloudflare IPv4" "https://www.cloudflare.com/ips-v4/"
+	ensure_builtin_provider "telegram_ipv4" "Telegram IPv4" "https://core.telegram.org/resources/cidr.txt"
+	uci commit neto
+}
+
 install_files() {
 	local arch="$1"
 	local config_created=0
@@ -447,6 +501,7 @@ install_files() {
 	fi
 
 	ensure_lan_subnet_config
+	ensure_builtin_providers
 	configure_language
 }
 

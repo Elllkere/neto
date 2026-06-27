@@ -127,12 +127,10 @@ return view.extend({
 		o.value('ip', _('IP/CIDR'));
 		o.default = 'domain';
 		o.rmempty = false;
-		o.editable = true;
 
 		o = s.option(form.Value, 'url', _('URL'));
 		o.datatype = 'url';
 		o.rmempty = false;
-		o.editable = true;
 
 		o = s.option(form.Flag, 'auto_update', _('Auto update'));
 		o.enabled = '1';
@@ -150,11 +148,10 @@ return view.extend({
 		o.modalonly = true;
 
 		o = s.option(form.ListValue, 'update_via', _('Update via'));
-		o.value('direct', _('Direct'));
-		o.value('proxy', _('Proxy'));
+		o.value('direct', 'direct');
+		o.value('proxy', 'proxy');
 		o.default = 'direct';
 		o.rmempty = false;
-		o.editable = true;
 
 		o = s.option(form.ListValue, 'update_outbound', _('Update outbound'));
 		addProxyOutboundChoices(o);

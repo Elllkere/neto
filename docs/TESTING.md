@@ -141,11 +141,12 @@ Manually verify on router:
 - General Start starts the service and writes `neto.main.enabled=1`
 - General Stop stops the service through `/etc/init.d/neto stop`
 - General Autostart uses `/etc/init.d/neto enable|disable`
-- General exposes language, DNS server, real DNS mode/transport/server,
-  FakeIP range, AAAA filtering, routing mode, and default outbound
+- General exposes language, DNS preset, DNS mode/outbound/transport, custom
+  server, routing mode, and default outbound
 - General DNS transport supports UDP, TCP, DoT, and DoH through generated
   sing-box DNS servers
-- Advanced contains lower-level dnsmasq, LAN, sing-box listener, TProxy, and nft settings
+- Advanced contains lower-level DNS listener, FakeIP range/AAAA filter,
+  dnsmasq, LAN, sing-box listener, TProxy, and nft settings
 - LuCI does not expose a FakeIP off switch and Save forces `fakeip_enabled=1`
 - creating a rule writes `priority`
 - moving rules rewrites priority as `100`, `200`, `300`, ...

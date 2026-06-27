@@ -500,8 +500,42 @@ config main 'main'
 		t.Fatal(err)
 	}
 	upstream := cfg.Main.DNSUpstream()
-	if upstream.Protocol != "https" || upstream.Host != "8.8.8.8" || upstream.Port != 443 || upstream.TLSName != "dns.google" || upstream.Path != "/dns-query" {
+	if upstream.Protocol != "https" || upstream.Host != "dns.google" || upstream.Port != 443 || upstream.TLSName != "dns.google" || upstream.Path != "/dns-query" {
 		t.Fatalf("unexpected DNS upstream: %+v", upstream)
+	}
+}
+
+func TestParseGoogleUDPPresetUsesIPAddress(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option dns_upstream_preset 'google'
+	option dns_upstream_protocol 'udp'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := cfg.Main.DNSUpstream()
+	if upstream.Protocol != "udp" || upstream.Host != "8.8.8.8" || upstream.Port != 53 || upstream.TLSName != "dns.google" {
+		t.Fatalf("unexpected DNS upstream: %+v", upstream)
+	}
+}
+
+func TestParsePresetOverridesStaleRealDNSFields(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option dns_upstream_preset 'google'
+	option dns_upstream_protocol 'https'
+	option real_dns_transport 'https'
+	option real_dns_server '1.1.1.1:443'
+	option real_dns_server_name 'cloudflare-dns.com'
+	option real_dns_path '/dns-query'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := cfg.Main.DNSUpstream()
+	if upstream.Protocol != "https" || upstream.Host != "dns.google" || upstream.Port != 443 || upstream.TLSName != "dns.google" {
+		t.Fatalf("preset should override stale real DNS fields: %+v", upstream)
 	}
 }
 
@@ -518,6 +552,23 @@ config main 'main'
 	}
 	upstream := cfg.Main.DNSUpstream()
 	if upstream.Protocol != "https" || upstream.Port != 443 {
+		t.Fatalf("unexpected real DNS upstream: %+v", upstream)
+	}
+}
+
+func TestParseRealDNSServerHostPortOverridesDefaultPort(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option real_dns_transport 'https'
+	option real_dns_server '1.1.1.1:443'
+	option real_dns_server_name 'cloudflare-dns.com'
+	option real_dns_path '/dns-query'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := cfg.Main.DNSUpstream()
+	if upstream.Host != "1.1.1.1" || upstream.Port != 443 {
 		t.Fatalf("unexpected real DNS upstream: %+v", upstream)
 	}
 }
@@ -546,6 +597,53 @@ config main 'main'
 	option dns_upstream_path 'dns-query'
 `); err == nil {
 		t.Fatal("expected invalid DoH path to be rejected")
+	}
+}
+
+func TestParseRealDNSProxyRequiresSelectedOutbound(t *testing.T) {
+	_, err := Parse(`
+config main 'main'
+	option real_dns_mode 'proxy'
+`)
+	if err == nil || !strings.Contains(err.Error(), "real_dns_outbound") {
+		t.Fatalf("got error %v, want real_dns_outbound requirement", err)
+	}
+}
+
+func TestParseRealDNSProxyOutbound(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option real_dns_mode 'proxy'
+	option real_dns_outbound 'dns_proxy'
+
+config outbound 'dns_proxy'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Main.RealDNSOutbound != "dns_proxy" {
+		t.Fatalf("unexpected real_dns_outbound: %+v", cfg.Main)
+	}
+}
+
+func TestParseRejectsDeprecatedRealDNSProxyDefault(t *testing.T) {
+	_, err := Parse(`
+config main 'main'
+	option real_dns_mode 'proxy'
+	option real_dns_outbound 'proxy_default'
+
+config outbound 'dns_proxy'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+`)
+	if err == nil || !strings.Contains(err.Error(), "proxy_default") {
+		t.Fatalf("got error %v, want proxy_default rejection", err)
 	}
 }
 

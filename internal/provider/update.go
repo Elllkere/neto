@@ -106,6 +106,9 @@ func normalizeIPList(data []byte) ([]string, error) {
 	for _, value := range values {
 		cidr, err := policy.ParseIPv4CIDR(value)
 		if err != nil {
+			if strings.Contains(value, ":") {
+				continue
+			}
 			return nil, err
 		}
 		cidrs = append(cidrs, cidr)

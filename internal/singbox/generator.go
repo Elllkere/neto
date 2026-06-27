@@ -54,8 +54,8 @@ func Generate(cfg config.Config) ([]byte, error) {
 
 	upstream := cfg.Main.DNSUpstream()
 	dnsServers := []any{
-		encodeDNSServer("real-direct", upstream, config.BuiltinDirectOutbound),
-		encodeDNSServer("real-proxy", upstream, SelectedProxyOutbound(cfg)),
+		encodeDNSServer("real-direct", upstream, ""),
+		encodeDNSServer("real-proxy", upstream, DNSProxyOutbound(cfg)),
 		map[string]any{
 			"tag":         "fakeip",
 			"type":        "fakeip",
@@ -68,7 +68,6 @@ func Generate(cfg config.Config) ([]byte, error) {
 			"type":        "udp",
 			"server":      "1.1.1.1",
 			"server_port": 53,
-			"detour":      config.BuiltinDirectOutbound,
 		})
 	}
 
@@ -194,7 +193,7 @@ func encodeDNSServer(tag string, upstream config.DNSUpstream, detour string) map
 		"server":      upstream.Host,
 		"server_port": upstream.Port,
 	}
-	if detour != "" {
+	if detour = dnsServerDetour(detour); detour != "" {
 		item["detour"] = detour
 	}
 	if needsBootstrap(upstream) {
@@ -215,6 +214,16 @@ func encodeDNSServer(tag string, upstream config.DNSUpstream, detour string) map
 		}
 	}
 	return item
+}
+
+func dnsServerDetour(detour string) string {
+	detour = strings.TrimSpace(detour)
+	switch detour {
+	case "", config.BuiltinDirectOutbound, config.BuiltinBlockedOutbound, "block", "proxy_default":
+		return ""
+	default:
+		return detour
+	}
 }
 
 func needsBootstrap(upstream config.DNSUpstream) bool {
@@ -284,6 +293,18 @@ func SelectedProxyOutbound(cfg config.Config) string {
 		}
 	}
 	return config.BuiltinDirectOutbound
+}
+
+func DNSProxyOutbound(cfg config.Config) string {
+	tag := strings.TrimSpace(cfg.Main.RealDNSOutbound)
+	if tag != "" && tag != config.BuiltinDirectOutbound && tag != config.BuiltinBlockedOutbound && tag != "block" && tag != "proxy_default" {
+		for _, outbound := range cfg.EnabledCustomOutbounds() {
+			if outbound.Tag == tag {
+				return tag
+			}
+		}
+	}
+	return SelectedProxyOutbound(cfg)
 }
 
 func hasProxyClient(cfg config.Config) bool {

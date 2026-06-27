@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/elllkere/neto/internal/config"
@@ -54,6 +55,29 @@ func TestLoadRuleCIDRsCombinesInlineAndFileCIDRs(t *testing.T) {
 	}
 }
 
+func TestLoadRuleCIDRsMissingProviderCacheIsActionable(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Rules = []config.Rule{{
+		Name:        "telegram",
+		Enabled:     true,
+		Action:      "proxy",
+		DNSMode:     "real_ip",
+		IPProviders: []string{"telegram_ipv4"},
+	}}
+	cfg.Providers = []config.Provider{{
+		Name:      "telegram_ipv4",
+		Enabled:   true,
+		Type:      "ip",
+		LocalPath: filepath.Join(t.TempDir(), "telegram_ipv4.txt"),
+		URL:       "https://core.telegram.org/resources/cidr.txt",
+	}}
+
+	_, err := LoadRuleCIDRs(cfg)
+	if err == nil || !strings.Contains(err.Error(), "netod providers update telegram_ipv4") {
+		t.Fatalf("got error %v, want actionable provider update command", err)
+	}
+}
+
 func TestNormalizeDownloadedProviderLists(t *testing.T) {
 	domains, err := NormalizeDownloadedList(config.Provider{Name: "domains", Type: "domain"}, []byte("Example.COM.\nexample.org # comment\n\n"))
 	if err != nil {
@@ -63,11 +87,18 @@ func TestNormalizeDownloadedProviderLists(t *testing.T) {
 		t.Fatalf("unexpected domains: %v", domains)
 	}
 
-	cidrs, err := NormalizeDownloadedList(config.Provider{Name: "ips", Type: "ip"}, []byte("1.1.1.1\n8.8.8.0/24\n"))
+	cidrs, err := NormalizeDownloadedList(config.Provider{Name: "ips", Type: "ip"}, []byte("1.1.1.1\n8.8.8.0/24\n2001:db8::/32\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(cidrs, []string{"1.1.1.1/32", "8.8.8.0/24"}) {
 		t.Fatalf("unexpected cidrs: %v", cidrs)
+	}
+}
+
+func TestNormalizeDownloadedIPProviderRejectsInvalidNonIP(t *testing.T) {
+	_, err := NormalizeDownloadedList(config.Provider{Name: "ips", Type: "ip"}, []byte("not-an-ip\n"))
+	if err == nil {
+		t.Fatal("expected invalid non-IP provider line to fail")
 	}
 }

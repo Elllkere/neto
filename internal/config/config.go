@@ -35,6 +35,7 @@ type Main struct {
 	DNSListen             string
 	RealDNSUpstream       string
 	RealDNSMode           string
+	RealDNSOutbound       string
 	RealDNSTransport      string
 	RealDNSServer         string
 	RealDNSServerPort     int
@@ -281,12 +282,23 @@ func (m Main) DNSUpstream() DNSUpstream {
 	if preset == "" {
 		preset = "custom"
 	}
+	if preset != "custom" {
+		host, tlsName, path := presetDNSUpstream(preset, protocol)
+		return DNSUpstream{
+			Preset:   preset,
+			Protocol: protocol,
+			Host:     host,
+			Port:     defaultDNSPort(protocol),
+			TLSName:  tlsName,
+			Path:     path,
+		}
+	}
 
 	host := strings.TrimSpace(m.RealDNSServer)
 	port := m.RealDNSServerPort
 	if h, p, ok := splitOptionalHostPort(host); ok {
 		host = h
-		if port == 0 {
+		if p > 0 {
 			port = p
 		}
 	}
@@ -357,7 +369,7 @@ func legacyDNSUpstream(m Main) DNSUpstream {
 	}
 
 	if preset != "custom" {
-		u.Host, u.TLSName, u.Path = presetDNSUpstream(preset)
+		u.Host, u.TLSName, u.Path = presetDNSUpstream(preset, protocol)
 		u.Port = defaultDNSPort(protocol)
 	}
 	if u.Host == "" {
@@ -602,6 +614,21 @@ func (c Config) Validate() error {
 			return fmt.Errorf("outbound %q has unsupported type %q", outbound.Tag, outbound.Type)
 		}
 	}
+	if c.Main.RealDNSMode == "proxy" {
+		realDNSOutbound := strings.TrimSpace(c.Main.RealDNSOutbound)
+		if realDNSOutbound == "" {
+			return fmt.Errorf("real_dns_mode=proxy requires real_dns_outbound")
+		}
+		if realDNSOutbound == "proxy_default" {
+			return fmt.Errorf("real_dns_outbound 'proxy_default' is deprecated; choose a custom outbound")
+		}
+		if reservedCustomOutboundTag(realDNSOutbound) {
+			return fmt.Errorf("real_dns_outbound %q must be a custom outbound", realDNSOutbound)
+		}
+		if _, ok := seenOutboundTags[realDNSOutbound]; !ok {
+			return fmt.Errorf("real_dns_outbound %q not found", realDNSOutbound)
+		}
+	}
 	seenSubscriptions := map[string]struct{}{}
 	seenProviders := map[string]Provider{}
 	for _, p := range c.Providers {
@@ -728,9 +755,6 @@ func (c Config) Validate() error {
 			}
 		}
 	}
-	if c.Main.RealDNSMode == "proxy" && !hasEnabledCustomOutbound(c) {
-		return fmt.Errorf("real_dns_mode=proxy requires at least one custom outbound")
-	}
 	return nil
 }
 
@@ -791,6 +815,9 @@ func applyMain(m *Main, s section) {
 	}
 	if v := s.options["real_dns_mode"]; v != "" {
 		m.RealDNSMode = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := s.options["real_dns_outbound"]; ok {
+		m.RealDNSOutbound = strings.TrimSpace(v)
 	}
 	if v := s.options["real_dns_transport"]; v != "" {
 		m.RealDNSTransport = normalizeDNSProtocol(v)
@@ -867,6 +894,9 @@ func applyMain(m *Main, s section) {
 		if _, _, ok := splitOptionalHostPort(m.RealDNSServer); !ok {
 			m.RealDNSServerPort = defaultDNSPort(m.RealDNSTransport)
 		}
+	}
+	if hasRealDNSFields && !hasDNSUpstreamPreset {
+		m.DNSUpstreamPreset = "custom"
 	}
 	syncLegacyDNSFields(m)
 	if v, ok := s.options["manage_dnsmasq"]; ok {
@@ -1306,9 +1336,13 @@ func normalizeDNSProtocol(protocol string) string {
 	}
 }
 
-func presetDNSUpstream(preset string) (host string, tlsName string, path string) {
+func presetDNSUpstream(preset string, protocol string) (host string, tlsName string, path string) {
 	switch strings.TrimSpace(preset) {
 	case "google":
+		switch normalizeDNSProtocol(protocol) {
+		case "tls", "https":
+			return "dns.google", "dns.google", "/dns-query"
+		}
 		return "8.8.8.8", "dns.google", "/dns-query"
 	default:
 		return "1.1.1.1", "cloudflare-dns.com", "/dns-query"
@@ -1436,15 +1470,6 @@ func ruleHasIPSelectors(r Rule, providers map[string]Provider) bool {
 	}
 	for _, name := range r.Providers {
 		if provider, ok := providers[strings.TrimSpace(name)]; ok && provider.Type == "ip" {
-			return true
-		}
-	}
-	return false
-}
-
-func hasEnabledCustomOutbound(c Config) bool {
-	for _, outbound := range c.Outbounds {
-		if outbound.Enabled && strings.TrimSpace(outbound.Tag) != "" {
 			return true
 		}
 	}

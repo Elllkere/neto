@@ -55,6 +55,18 @@ config main 'main'
 	}
 }
 
+func TestValidateGeneratedSingBoxRejectsLegacyRuleSets(t *testing.T) {
+	for _, raw := range []string{
+		`{"route":{"rule_set":[{"tag":"main-user-domains"}]}}`,
+		`{"route":{"rules":[{"rule-set":"main-user-domains"}]}}`,
+		`{"route":{"rule_set":[{"path":"/tmp/sing-box/rulesets/main-user-domains-ruleset.json"}]}}`,
+	} {
+		if err := validateGeneratedSingBox([]byte(raw)); err == nil {
+			t.Fatalf("expected legacy rule-set config to be rejected: %s", raw)
+		}
+	}
+}
+
 func TestCommandImportURI(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "neto")

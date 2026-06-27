@@ -141,15 +141,15 @@ func TestRulesLuCIOutboundVisibleInTable(t *testing.T) {
 	if !strings.Contains(block, "o.editable = true") {
 		t.Fatalf("outbound should be editable in rules table:\n%s", block)
 	}
-	if !strings.Contains(block, "addOutboundChoices(o)") || !strings.Contains(block, "o.default = 'direct'") {
-		t.Fatalf("outbound should use dynamic choices and default direct:\n%s", block)
+	if !strings.Contains(block, "addOutboundChoices(o)") || !strings.Contains(block, "o.depends('action', 'proxy')") || !strings.Contains(block, "o.default = ''") {
+		t.Fatalf("outbound should use dynamic custom choices only for proxy action:\n%s", block)
 	}
-	for _, want := range []string{
+	for _, forbidden := range []string{
 		"option.value('direct'",
 		"option.value('blocked'",
 	} {
-		if !strings.Contains(s, want) {
-			t.Fatalf("rules.js missing builtin outbound choice %q:\n%s", want, s)
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("rules.js must not expose builtin outbound choice %q:\n%s", forbidden, s)
 		}
 	}
 	if strings.Contains(block, "proxy_default") {

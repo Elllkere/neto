@@ -468,6 +468,9 @@ func printDNSSummary(cfg config.Config) {
 	upstream := cfg.Main.DNSUpstream()
 	fmt.Printf("dns_listen: %s\n", cfg.Main.DNSListen)
 	fmt.Printf("real_dns_mode: %s\n", cfg.Main.RealDNSMode)
+	if strings.TrimSpace(cfg.Main.RealDNSOutbound) != "" {
+		fmt.Printf("real_dns_outbound: %s\n", cfg.Main.RealDNSOutbound)
+	}
 	fmt.Printf("real_dns_transport: %s\n", upstream.Protocol)
 	fmt.Printf("real_dns_server: %s\n", upstream.Address())
 	if upstream.TLSName != "" {
@@ -477,8 +480,12 @@ func printDNSSummary(cfg config.Config) {
 		fmt.Printf("real_dns_path: %s\n", upstream.Path)
 	}
 	fmt.Printf("dns_server fakeip: listener=%s tag=fakeip\n", cfg.Main.SingBoxDNSFakeIPAddr())
-	fmt.Printf("dns_server real-direct: listener=%s tag=real-direct detour=direct\n", cfg.Main.SingBoxDNSRealDirectAddr())
-	fmt.Printf("dns_server real-proxy: listener=%s tag=real-proxy detour=%s\n", cfg.Main.SingBoxDNSRealProxyAddr(), singbox.SelectedProxyOutbound(cfg))
+	fmt.Printf("dns_server real-direct: listener=%s tag=real-direct dial=direct\n", cfg.Main.SingBoxDNSRealDirectAddr())
+	realProxyDial := singbox.DNSProxyOutbound(cfg)
+	if realProxyDial == config.BuiltinDirectOutbound {
+		realProxyDial = "direct"
+	}
+	fmt.Printf("dns_server real-proxy: listener=%s tag=real-proxy dial=%s\n", cfg.Main.SingBoxDNSRealProxyAddr(), realProxyDial)
 }
 
 func debugList(values []string) string {
@@ -641,6 +648,9 @@ func compile(opts options) (config.Config, string, string, error) {
 	if err != nil {
 		return config.Config{}, "", "", err
 	}
+	if err := validateGeneratedSingBox(sbJSON); err != nil {
+		return config.Config{}, "", "", err
+	}
 	if err := os.MkdirAll(opts.outDir, 0755); err != nil {
 		return config.Config{}, "", "", err
 	}
@@ -653,6 +663,21 @@ func compile(opts options) (config.Config, string, string, error) {
 		return config.Config{}, "", "", err
 	}
 	return cfg, nftPath, sbPath, nil
+}
+
+func validateGeneratedSingBox(data []byte) error {
+	raw := string(data)
+	for _, forbidden := range []string{
+		`"detour": "direct"`,
+		`"rule_set"`,
+		`"rule-set"`,
+		`"/tmp/sing-box/rulesets`,
+	} {
+		if strings.Contains(raw, forbidden) {
+			return fmt.Errorf("generated sing-box config contains unsupported %s; neto must not generate sing-box rule-set files", forbidden)
+		}
+	}
+	return nil
 }
 
 func nftPath(opts options) string {

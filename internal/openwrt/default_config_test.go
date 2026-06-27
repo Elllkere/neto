@@ -28,7 +28,7 @@ func TestEmbeddedDefaultConfigHasNoSampleClientsOrRules(t *testing.T) {
 		"option fakeip_enabled '1'",
 		"option real_dns_mode 'direct'",
 		"option real_dns_transport 'udp'",
-		"option real_dns_server '1.1.1.1'",
+		"option real_dns_server '1.1.1.1:53'",
 		"option real_dns_server_name 'cloudflare-dns.com'",
 		"option real_dns_path '/dns-query'",
 		"option singbox_dns_fakeip '127.0.0.1:15353'",
@@ -63,6 +63,10 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"ip -4 route show dev br-lan scope link",
 		"ipcalc.sh \"$ipaddr\" \"$netmask\"",
 		"ensure_lan_subnet_config",
+		"ensure_builtin_providers",
+		"https://www.cloudflare.com/ips-v4/",
+		"https://core.telegram.org/resources/cidr.txt",
+		"provider_url_exists \"$url\"",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("installer missing %q:\n%s", want, s)

@@ -44,8 +44,8 @@ return view.extend({
 
 		o = s.option(form.ListValue, 'policy', _('Policy'));
 		o.value('default', _('Default'));
-		o.value('proxy', _('Proxy'));
-		o.value('direct', _('Direct'));
+		o.value('proxy', 'proxy');
+		o.value('direct', 'direct');
 		o.default = 'default';
 
 		return m.render();

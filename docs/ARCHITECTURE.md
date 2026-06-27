@@ -163,12 +163,16 @@ DNS behavior:
 
 sing-box owns FakeIP allocation, FakeIP-to-domain mapping, and real DNS
 transport. netod decides only `fakeip`, `real-direct`, `real-proxy`, or `block`,
-then forwards the original DNS wire query to a local sing-box DNS listener.
+then forwards the DNS wire query to a local sing-box DNS listener. If dnsmasq
+added EDNS Client Subnet for local client identification, netod strips that ECS
+option before forwarding so LAN private addresses are not leaked to public DNS
+upstreams.
 
 `dns_listen` is the local netod DNS server address used by dnsmasq. It is not an
 external resolver. The real resolver is configured by:
 
 - `real_dns_mode`: `direct` or `proxy`
+- `real_dns_outbound`: custom outbound for `real_dns_mode=proxy`
 - `real_dns_transport`: `udp`, `tcp`, `tls`, or `https`
 - `real_dns_server`
 - `real_dns_server_name`
@@ -194,6 +198,10 @@ Providers:
 - have type `domain` or `ip`
 - download plain text lists from `url` to `/var/lib/neto/providers/`
 - support manual update with `netod providers update [name]`
+- installer seeds Cloudflare IPv4 and Telegram IPv4 providers if their URLs are
+  not already present
+- IP provider update keeps only valid IPv4 address/CIDR entries and skips IPv6
+  entries from mixed feeds
 - support `auto_update`, `update_hour`, `update_via`, and `update_outbound`
 - do not create policy by themselves
 
@@ -313,9 +321,10 @@ only the marked neto cron block.
 ## LuCI Layout
 
 General is the operational page: service status, neto/sing-box versions,
-Start/Stop, Autostart, optional language selection, DNS server/upstream,
-routing mode, and default outbound. Advanced contains lower-level dnsmasq, LAN,
-sing-box, TProxy, FakeIP range, and nft settings. The main LuCI tab order is
+Start/Stop, Autostart, optional language selection, DNS preset/upstream,
+routing mode, and default outbound. Advanced contains lower-level DNS listener,
+dnsmasq, LAN, sing-box, TProxy, FakeIP range, AAAA filtering, and nft settings.
+The main LuCI tab order is
 General, Outbounds, Rules, Clients, Providers, Advanced, Debug. Debug is the
 last LuCI tab and shows `netod debug`.
 
