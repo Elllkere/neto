@@ -669,6 +669,7 @@ func validateGeneratedSingBox(data []byte) error {
 	raw := string(data)
 	for _, forbidden := range []string{
 		`"detour": "direct"`,
+		`"domain_strategy"`,
 		`"rule_set"`,
 		`"rule-set"`,
 		`"/tmp/sing-box/rulesets`,

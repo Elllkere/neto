@@ -41,6 +41,9 @@ func TestGenerateUsesModernFakeIPServer(t *testing.T) {
 	if strings.Contains(raw, `"override_destination"`) || strings.Contains(raw, `"sniff": true`) {
 		t.Fatalf("generated config contains sing-box 1.13-incompatible sniff fields:\n%s", raw)
 	}
+	if strings.Contains(raw, `"domain_strategy"`) {
+		t.Fatalf("generated config contains deprecated legacy domain strategy field:\n%s", raw)
+	}
 	if strings.Contains(raw, `"detour": "direct"`) {
 		t.Fatalf("DNS servers must not detour to empty direct outbound:\n%s", raw)
 	}
@@ -130,8 +133,9 @@ func TestGenerateGoogleDoHUsesDomainResolver(t *testing.T) {
 	if local["type"] != "https" || local["server"] != "dns.google" || local["server_port"].(float64) != 443 {
 		t.Fatalf("unexpected Google DoH DNS server: %+v", local)
 	}
-	if local["domain_resolver"] != "bootstrap" {
-		t.Fatalf("Google DoH hostname should use bootstrap resolver: %+v", local)
+	resolver, ok := local["domain_resolver"].(map[string]any)
+	if !ok || resolver["server"] != "bootstrap" || resolver["strategy"] != "prefer_ipv4" {
+		t.Fatalf("Google DoH hostname should use bootstrap resolver object: %+v", local)
 	}
 	if _, ok := local["detour"]; ok {
 		t.Fatalf("Google DoH direct DNS should not detour to direct outbound: %+v", local)
