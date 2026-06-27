@@ -93,6 +93,8 @@ func TestRulesLuCICompactTableFields(t *testing.T) {
 		"ip_cidr",
 		"domain_provider",
 		"ip_provider",
+		"src_port",
+		"dst_port",
 	} {
 		needle := "'" + field + "'"
 		if !strings.Contains(s, needle) {
@@ -107,12 +109,18 @@ func TestRulesLuCICompactTableFields(t *testing.T) {
 		"addTextList(s, '_ip_cidr_text'",
 		"addProviderList(s, 'domain_provider'",
 		"addProviderList(s, 'ip_provider'",
+		"form.DummyValue, '_packet_match'",
+		"form.ListValue, '_packet_proto'",
+		"setListOption(section_id, 'proto', [ 'tcp', 'udp' ])",
+		"form.DynamicList, 'src_port'",
+		"form.DynamicList, 'dst_port'",
+		"Port matching is packet-level. It applies only to provider/CIDR/IP matches, not to DNS/FakeIP domain matching.",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("rules.js missing input mode UI %q:\n%s", want, s)
 		}
 	}
-	if strings.Count(s, "o.modalonly = true") < 5 {
+	if strings.Count(s, "o.modalonly = true") < 8 {
 		t.Fatalf("matcher/provider fields should be modal-only:\n%s", s)
 	}
 	if strings.Contains(s, "form.Value, 'priority'") {

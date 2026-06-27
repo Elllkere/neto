@@ -236,8 +236,15 @@ DNS behavior is derived automatically for current LuCI-created rules:
 - direct rule: real DNS
 - block rule: local block response
 
-Rules with both domain and provider/CIDR matchers are rejected; split them into
-separate rules.
+Rules may mix domain matchers with provider/CIDR/IP matchers. Domain matchers
+are evaluated only in DNS phase. Provider/CIDR/IP matchers are evaluated only in
+packet/nft phase. Mixed rules are two independent entry points into one rule
+with one `action`/`outbound`, not an AND between domain and IP.
+
+Protocol and port matchers (`proto`, `src_port`, `dst_port`) are packet/nft
+phase only. They narrow provider/CIDR/IP rules and never affect DNS/FakeIP
+domain matching. If a port is configured without `proto`, neto applies it to
+both TCP and UDP.
 
 Creating a provider must not create a rule. Creating a rule must not create a
 provider.

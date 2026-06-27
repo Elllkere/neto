@@ -110,8 +110,11 @@ LuCI hides DNS mode and writes `dns_mode=auto`. netod derives DNS behavior:
 - global mode returns real DNS by default because nftables already enforces the
   global proxy path
 
-Do not mix domain and provider/CIDR matchers in one rule. netod check rejects
-mixed rules; split them into separate rules.
+Rules may mix domain and provider/CIDR/IP matchers. The domain part is used only
+in DNS phase, while the provider/CIDR/IP part is used only in packet/nft phase.
+This is not an AND between domain and IP.
+Protocol and port fields are also packet/nft-only. They apply to the
+provider/CIDR/IP part and do not affect DNS/FakeIP domain matching.
 
 Example:
 

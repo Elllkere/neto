@@ -164,6 +164,34 @@ func TestDNSPolicyIPProviderRuleUsesRealDNS(t *testing.T) {
 	}
 }
 
+func TestDNSPolicyMixedRuleUsesDomainPartOnlyForFakeIP(t *testing.T) {
+	p := Proxy{
+		Rules: []config.Rule{{
+			Name:           "mixed",
+			Enabled:        true,
+			Action:         "proxy",
+			DNSMode:        "auto",
+			DomainContains: []string{"youtube"},
+			IPProviders:    []string{"cloudflare"},
+			Proto:          []string{"tcp"},
+			DstPorts:       []string{"443"},
+		}},
+		RoutingMode:        "custom",
+		FakeUpstream:       "127.0.0.1:15353",
+		RealDirectUpstream: "127.0.0.1:15354",
+		ClientPolicies:     map[string]string{"192.168.8.50": "direct"},
+	}
+	if got := p.upstreamFor(testQueryName(qTypeA, "www.youtube.com"), "192.168.8.10"); got != p.FakeUpstream {
+		t.Fatalf("got %s, want FakeIP upstream for mixed rule domain match", got)
+	}
+	if got := p.upstreamFor(testQueryName(qTypeA, "random-cloudflare-site.com"), "192.168.8.10"); got != p.RealDirectUpstream {
+		t.Fatalf("got %s, want real DNS because provider part is packet phase only", got)
+	}
+	if got := p.upstreamFor(testQueryName(qTypeA, "www.youtube.com"), "192.168.8.50"); got != p.RealDirectUpstream {
+		t.Fatalf("got %s, want real DNS for direct client", got)
+	}
+}
+
 func TestDNSPolicyRealDNSModeProxyUsesProxyListener(t *testing.T) {
 	p := Proxy{
 		RoutingMode:        "custom",

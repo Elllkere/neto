@@ -95,6 +95,9 @@ type Rule struct {
 	DomainProviders         []string
 	IPProviders             []string
 	Providers               []string
+	Proto                   []string
+	SrcPorts                []string
+	DstPorts                []string
 }
 
 type Provider struct {
@@ -716,10 +719,27 @@ func (c Config) Validate() error {
 		}
 		hasDomainSelectors := ruleHasDomainSelectors(r, seenProviders)
 		hasIPSelectors := ruleHasIPSelectors(r, seenProviders)
-		if hasDomainSelectors && hasIPSelectors {
-			return fmt.Errorf("rule %q: Mixed domain and provider/CIDR matchers are not supported; split into separate rules", r.Name)
+		hasProtoSelectors := len(r.Proto) > 0
+		hasPortSelectors := ruleHasPortSelectors(r)
+		for _, proto := range r.Proto {
+			switch strings.ToLower(strings.TrimSpace(proto)) {
+			case "tcp", "udp":
+			default:
+				return fmt.Errorf("rule %q has unsupported proto %q", r.Name, proto)
+			}
 		}
-		if hasIPSelectors && r.DNSMode == "fakeip" {
+		for _, port := range appendList(r.SrcPorts, r.DstPorts) {
+			if _, _, err := parseRulePortRange(port); err != nil {
+				return fmt.Errorf("rule %q contains invalid port match %q: %w", r.Name, port, err)
+			}
+		}
+		if hasPortSelectors && !hasIPSelectors {
+			return fmt.Errorf("rule %q: Port matching is packet-level and requires provider/CIDR/IP matchers in v1", r.Name)
+		}
+		if hasProtoSelectors && !hasIPSelectors {
+			return fmt.Errorf("rule %q: Protocol matching is packet-level and requires provider/CIDR/IP matchers in v1", r.Name)
+		}
+		if hasIPSelectors && !hasDomainSelectors && r.DNSMode == "fakeip" {
 			return fmt.Errorf("rule %q: provider/CIDR rules require real DNS because FakeIP hides destination IP", r.Name)
 		}
 		if r.Action == "direct" && r.DNSMode == "fakeip" {
@@ -1006,6 +1026,12 @@ func parseRule(s section, order int) (Rule, []string) {
 	r.DomainProviders = cleanList(appendList(s.lists["domain_provider"], splitListOption(s.options["domain_provider"])))
 	r.IPProviders = cleanList(appendList(s.lists["ip_provider"], splitListOption(s.options["ip_provider"])))
 	r.Providers = cleanList(appendList(s.lists["provider"], splitListOption(s.options["provider"])))
+	r.Proto = cleanList(s.lists["proto"])
+	for i := range r.Proto {
+		r.Proto[i] = strings.ToLower(strings.TrimSpace(r.Proto[i]))
+	}
+	r.SrcPorts = cleanList(s.lists["src_port"])
+	r.DstPorts = cleanList(s.lists["dst_port"])
 	return r, warnings
 }
 
@@ -1474,6 +1500,51 @@ func ruleHasIPSelectors(r Rule, providers map[string]Provider) bool {
 		}
 	}
 	return false
+}
+
+func ruleHasPortSelectors(r Rule) bool {
+	return len(r.SrcPorts)+len(r.DstPorts) > 0
+}
+
+func parseRulePortRange(value string) (int, int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, 0, fmt.Errorf("empty port")
+	}
+	parts := strings.Split(value, "-")
+	if len(parts) > 2 {
+		return 0, 0, fmt.Errorf("expected port or start-end")
+	}
+	start, err := parseRulePort(parts[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	end := start
+	if len(parts) == 2 {
+		end, err = parseRulePort(parts[1])
+		if err != nil {
+			return 0, 0, err
+		}
+		if start > end {
+			return 0, 0, fmt.Errorf("range start must be <= end")
+		}
+	}
+	return start, end, nil
+}
+
+func parseRulePort(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("empty port")
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	if n < 1 || n > 65535 {
+		return 0, fmt.Errorf("port must be 1..65535")
+	}
+	return n, nil
 }
 
 func normalizeClientPolicy(policy string) (string, string) {

@@ -93,6 +93,138 @@ func TestGenerateInlineIPCIDRRule(t *testing.T) {
 	}
 }
 
+func TestGenerateMixedDomainAndProviderIPRule(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Rules = []config.Rule{{
+		Name:           "mixed",
+		Enabled:        true,
+		Action:         "proxy",
+		DNSMode:        "auto",
+		DomainContains: []string{"youtube"},
+		IPProviders:    []string{"cloudflare"},
+	}}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "set rule4_0000") || !strings.Contains(out, "1.1.1.0/24") {
+		t.Fatalf("mixed rule provider CIDR set was not emitted:\n%s", out)
+	}
+	if !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") {
+		t.Fatalf("mixed rule provider packet rule was not emitted:\n%s", out)
+	}
+}
+
+func TestGenerateProviderRuleTCPDstPort(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	rule := providerRule("cloudflare", 100, "proxy")
+	rule.Proto = []string{"tcp"}
+	rule.DstPorts = []string{"443"}
+	cfg.Rules = []config.Rule{rule}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default") {
+		t.Fatalf("tcp dst port rule missing:\n%s", out)
+	}
+	if strings.Contains(out, "udp dport 443") {
+		t.Fatalf("tcp-only rule must not emit udp match:\n%s", out)
+	}
+}
+
+func TestGenerateProviderRuleUDPDstPort(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	rule := providerRule("cloudflare", 100, "proxy")
+	rule.Proto = []string{"udp"}
+	rule.DstPorts = []string{"443"}
+	cfg.Rules = []config.Rule{rule}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_default") {
+		t.Fatalf("udp dst port rule missing:\n%s", out)
+	}
+	if strings.Contains(out, "tcp dport 443") {
+		t.Fatalf("udp-only rule must not emit tcp match:\n%s", out)
+	}
+}
+
+func TestGenerateProviderRuleTCPUDPDstPort(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	rule := providerRule("cloudflare", 100, "proxy")
+	rule.Proto = []string{"tcp", "udp"}
+	rule.DstPorts = []string{"443"}
+	cfg.Rules = []config.Rule{rule}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out, " dport 443 jump to_proxy_default") != 2 ||
+		!strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default") ||
+		!strings.Contains(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_default") {
+		t.Fatalf("tcp+udp dst port rules missing:\n%s", out)
+	}
+}
+
+func TestGenerateProviderRuleDefaultsPortsToTCPUDP(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	rule := providerRule("cloudflare", 100, "proxy")
+	rule.DstPorts = []string{"443"}
+	cfg.Rules = []config.Rule{rule}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "tcp dport 443 jump to_proxy_default") || !strings.Contains(out, "udp dport 443 jump to_proxy_default") {
+		t.Fatalf("port rule without proto must default to tcp+udp:\n%s", out)
+	}
+}
+
+func TestGenerateProviderRulePortRange(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	rule := providerRule("cloudflare", 100, "proxy")
+	rule.Proto = []string{"tcp"}
+	rule.DstPorts = []string{"1000-2000"}
+	cfg.Rules = []config.Rule{rule}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 1000-2000 jump to_proxy_default") {
+		t.Fatalf("tcp dst port range rule missing:\n%s", out)
+	}
+}
+
+func TestGenerateMixedDomainAndProviderPortRule(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Rules = []config.Rule{{
+		Name:           "mixed",
+		Enabled:        true,
+		Action:         "proxy",
+		DNSMode:        "auto",
+		DomainContains: []string{"youtube"},
+		IPProviders:    []string{"cloudflare"},
+		Proto:          []string{"tcp"},
+		DstPorts:       []string{"443"},
+	}}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default") {
+		t.Fatalf("mixed rule provider port match missing:\n%s", out)
+	}
+}
+
 func TestGenerateCounters(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Main.NFTCounters = true
@@ -112,6 +244,22 @@ func TestGenerateCounters(t *testing.T) {
 		if !strings.Contains(out, rule) {
 			t.Fatalf("missing counter rule %q:\n%s", rule, out)
 		}
+	}
+}
+
+func TestGenerateProviderPortRuleCounters(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = true
+	rule := providerRule("cloudflare", 100, "proxy")
+	rule.Proto = []string{"tcp"}
+	rule.DstPorts = []string{"443"}
+	cfg.Rules = []config.Rule{rule}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 counter jump to_proxy_default") {
+		t.Fatalf("port rule counter missing:\n%s", out)
 	}
 }
 
@@ -295,6 +443,29 @@ func TestGenerateProviderRulePriorityProxyBeforeDirect(t *testing.T) {
 	direct := strings.Index(out, "ip daddr @rule4_0001 meta l4proto { tcp, udp } return")
 	if !(proxy >= 0 && direct >= 0 && proxy < direct) {
 		t.Fatalf("proxy provider rule must be before direct rule:\n%s", out)
+	}
+}
+
+func TestGenerateProviderPortRulePriorityStable(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	first := providerRule("first_https", 10, "proxy")
+	first.Proto = []string{"tcp", "udp"}
+	first.DstPorts = []string{"443"}
+	second := providerRule("second_plain", 20, "direct")
+	cfg.Rules = []config.Rule{first, second}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{
+		0: policy.MustIPv4CIDRs("1.1.1.0/24"),
+		1: policy.MustIPv4CIDRs("8.8.8.0/24"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstTCP := strings.Index(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default")
+	firstUDP := strings.Index(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_default")
+	secondRule := strings.Index(out, "ip daddr @rule4_0001 meta l4proto { tcp, udp } return")
+	if !(firstTCP >= 0 && firstUDP >= 0 && secondRule >= 0 && firstTCP < firstUDP && firstUDP < secondRule) {
+		t.Fatalf("port-expanded rule priority is unstable:\n%s", out)
 	}
 }
 

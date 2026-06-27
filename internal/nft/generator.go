@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/elllkere/neto/internal/config"
@@ -46,7 +47,9 @@ func Generate(in Input) (string, error) {
 		if cfg.Main.FakeIPEnabled {
 			b.WriteString(fmt.Sprintf("\t\tip daddr %s meta l4proto { tcp, udp }%s jump to_proxy_default\n", cfg.Main.FakeIPRange, counter(cfg)))
 		}
-		writeOrderedIPRules(&b, cfg, in.RuleCIDRs)
+		if err := writeOrderedIPRules(&b, cfg, in.RuleCIDRs); err != nil {
+			return "", err
+		}
 	}
 	b.WriteString("\t\treturn\n")
 	b.WriteString("\t}\n")
@@ -67,25 +70,157 @@ func writeRuleSets(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*n
 	}
 }
 
-func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet) {
+func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet) error {
 	for i, rule := range cfg.Rules {
 		if !ruleengine.HasIPMatch(rule) {
 			continue
 		}
-		match := ""
-		if len(ruleCIDRs[i]) > 0 {
-			match = "ip daddr @" + ruleSetName(i) + " meta l4proto { tcp, udp }"
-		}
-		if match == "" {
+		if len(ruleCIDRs[i]) == 0 {
 			continue
+		}
+		matches, err := rulePacketMatches(ruleSetName(i), rule)
+		if err != nil {
+			return fmt.Errorf("rule %q packet match: %w", rule.Name, err)
 		}
 		switch rule.Action {
 		case "proxy":
-			b.WriteString(fmt.Sprintf("\t\t%s%s jump to_proxy_default\n", match, counter(cfg)))
+			for _, match := range matches {
+				b.WriteString(fmt.Sprintf("\t\t%s%s jump to_proxy_default\n", match, counter(cfg)))
+			}
 		case "direct", "block":
-			b.WriteString(fmt.Sprintf("\t\t%s%s return\n", match, counter(cfg)))
+			for _, match := range matches {
+				b.WriteString(fmt.Sprintf("\t\t%s%s return\n", match, counter(cfg)))
+			}
 		}
 	}
+	return nil
+}
+
+func rulePacketMatches(setName string, rule config.Rule) ([]string, error) {
+	base := "ip daddr @" + setName
+	protos := packetProtocols(rule)
+	srcPorts, err := parseNFTPorts(rule.SrcPorts)
+	if err != nil {
+		return nil, err
+	}
+	dstPorts, err := parseNFTPorts(rule.DstPorts)
+	if err != nil {
+		return nil, err
+	}
+	hasPorts := len(srcPorts)+len(dstPorts) > 0
+
+	if !hasPorts {
+		if len(protos) == 0 {
+			return []string{base + " meta l4proto { tcp, udp }"}, nil
+		}
+		out := make([]string, 0, len(protos))
+		for _, proto := range protos {
+			out = append(out, base+" meta l4proto "+proto)
+		}
+		return out, nil
+	}
+
+	if len(protos) == 0 {
+		protos = []string{"tcp", "udp"}
+	}
+	if len(srcPorts) == 0 {
+		srcPorts = []string{""}
+	}
+	if len(dstPorts) == 0 {
+		dstPorts = []string{""}
+	}
+
+	var out []string
+	for _, proto := range protos {
+		for _, srcPort := range srcPorts {
+			for _, dstPort := range dstPorts {
+				parts := []string{base}
+				if srcPort != "" {
+					parts = append(parts, proto+" sport "+srcPort)
+				}
+				if dstPort != "" {
+					parts = append(parts, proto+" dport "+dstPort)
+				}
+				out = append(out, strings.Join(parts, " "))
+			}
+		}
+	}
+	return out, nil
+}
+
+func packetProtocols(rule config.Rule) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(proto string) {
+		proto = strings.ToLower(strings.TrimSpace(proto))
+		if proto != "tcp" && proto != "udp" {
+			return
+		}
+		if _, ok := seen[proto]; ok {
+			return
+		}
+		seen[proto] = struct{}{}
+		out = append(out, proto)
+	}
+	for _, proto := range rule.Proto {
+		add(proto)
+	}
+	if _, ok := seen["tcp"]; ok {
+		if _, ok := seen["udp"]; ok {
+			return []string{"tcp", "udp"}
+		}
+	}
+	return out
+}
+
+func parseNFTPorts(values []string) ([]string, error) {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		port, err := parseNFTPort(value)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, port)
+	}
+	return out, nil
+}
+
+func parseNFTPort(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("empty port")
+	}
+	parts := strings.Split(value, "-")
+	if len(parts) > 2 {
+		return "", fmt.Errorf("invalid port range %q", value)
+	}
+	start, err := parsePortNumber(parts[0])
+	if err != nil {
+		return "", err
+	}
+	end := start
+	if len(parts) == 2 {
+		end, err = parsePortNumber(parts[1])
+		if err != nil {
+			return "", err
+		}
+		if start > end {
+			return "", fmt.Errorf("invalid port range %q", value)
+		}
+		return strconv.Itoa(start) + "-" + strconv.Itoa(end), nil
+	}
+	return strconv.Itoa(start), nil
+}
+
+func parsePortNumber(value string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0, err
+	}
+	if n < 1 || n > 65535 {
+		return 0, fmt.Errorf("port must be 1..65535")
+	}
+	return n, nil
 }
 
 func ruleSetName(index int) string {

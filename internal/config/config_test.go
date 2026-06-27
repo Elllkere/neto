@@ -366,8 +366,8 @@ config rule
 	}
 }
 
-func TestParseRejectsMixedDomainAndProviderCIDRRule(t *testing.T) {
-	_, err := Parse(`
+func TestParseAllowsMixedDomainAndProviderCIDRRule(t *testing.T) {
+	cfg, err := Parse(`
 config provider 'cloudflare'
 	option type 'ip'
 	option url 'https://example.com/cloudflare.txt'
@@ -379,8 +379,128 @@ config rule
 	list domain_contains 'youtube'
 	list ip_provider 'cloudflare'
 `)
-	if err == nil || !strings.Contains(err.Error(), "Mixed domain and provider/CIDR matchers are not supported; split into separate rules") {
-		t.Fatalf("got error %v, want mixed rule rejection", err)
+	if err != nil {
+		t.Fatalf("mixed domain+provider rule should validate: %v", err)
+	}
+	if len(cfg.Rules) != 1 || len(cfg.Rules[0].DomainContains) != 1 || len(cfg.Rules[0].IPProviders) != 1 {
+		t.Fatalf("unexpected mixed rule parse: %+v", cfg.Rules)
+	}
+}
+
+func TestParseAllowsDomainOnlyRuleWithoutProvider(t *testing.T) {
+	cfg, err := Parse(`
+config rule
+	option name 'youtube'
+	option action 'proxy'
+	list domain_contains 'youtube'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rules) != 1 || len(cfg.Rules[0].DomainContains) != 1 || cfg.Rules[0].DomainContains[0] != "youtube" {
+		t.Fatalf("unexpected domain-only rule: %+v", cfg.Rules)
+	}
+}
+
+func TestParseValidatesPacketPortRange(t *testing.T) {
+	cfg, err := Parse(`
+config provider 'cloudflare'
+	option type 'ip'
+	option url 'https://example.com/cloudflare.txt'
+
+config rule
+	option name 'cloudflare_https'
+	option action 'proxy'
+	list ip_provider 'cloudflare'
+	list proto 'tcp'
+	list dst_port '1000-2000'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rules) != 1 || len(cfg.Rules[0].DstPorts) != 1 || cfg.Rules[0].DstPorts[0] != "1000-2000" {
+		t.Fatalf("unexpected port rule parse: %+v", cfg.Rules)
+	}
+}
+
+func TestParseRejectsInvalidPacketPort(t *testing.T) {
+	_, err := Parse(`
+config provider 'cloudflare'
+	option type 'ip'
+	option url 'https://example.com/cloudflare.txt'
+
+config rule
+	option name 'bad_port'
+	option action 'proxy'
+	list ip_provider 'cloudflare'
+	list dst_port '70000'
+`)
+	if err == nil || !strings.Contains(err.Error(), "invalid port match") {
+		t.Fatalf("got error %v, want invalid port rejection", err)
+	}
+}
+
+func TestParseRejectsInvalidPacketProto(t *testing.T) {
+	_, err := Parse(`
+config provider 'cloudflare'
+	option type 'ip'
+	option url 'https://example.com/cloudflare.txt'
+
+config rule
+	option name 'bad_proto'
+	option action 'proxy'
+	list ip_provider 'cloudflare'
+	list proto 'icmp'
+`)
+	if err == nil || !strings.Contains(err.Error(), "unsupported proto") {
+		t.Fatalf("got error %v, want invalid proto rejection", err)
+	}
+}
+
+func TestParseRejectsDomainOnlyRuleWithPortMatch(t *testing.T) {
+	_, err := Parse(`
+config rule
+	option name 'youtube_https'
+	option action 'proxy'
+	list domain_contains 'youtube'
+	list dst_port '443'
+`)
+	if err == nil || !strings.Contains(err.Error(), "Port matching is packet-level and requires provider/CIDR/IP matchers in v1") {
+		t.Fatalf("got error %v, want domain-only port rejection", err)
+	}
+}
+
+func TestParseRejectsDomainOnlyRuleWithProtoMatch(t *testing.T) {
+	_, err := Parse(`
+config rule
+	option name 'youtube_tcp'
+	option action 'proxy'
+	list domain_contains 'youtube'
+	list proto 'tcp'
+`)
+	if err == nil || !strings.Contains(err.Error(), "Protocol matching is packet-level and requires provider/CIDR/IP matchers in v1") {
+		t.Fatalf("got error %v, want domain-only proto rejection", err)
+	}
+}
+
+func TestParseAllowsMixedDomainProviderRuleWithPortMatch(t *testing.T) {
+	cfg, err := Parse(`
+config provider 'cloudflare'
+	option type 'ip'
+	option url 'https://example.com/cloudflare.txt'
+
+config rule
+	option name 'mixed_https'
+	option action 'proxy'
+	list domain_contains 'youtube'
+	list ip_provider 'cloudflare'
+	list dst_port '443'
+`)
+	if err != nil {
+		t.Fatalf("mixed rule with port should validate: %v", err)
+	}
+	if len(cfg.Rules) != 1 || len(cfg.Rules[0].DomainContains) != 1 || len(cfg.Rules[0].IPProviders) != 1 || len(cfg.Rules[0].DstPorts) != 1 {
+		t.Fatalf("unexpected mixed port rule parse: %+v", cfg.Rules)
 	}
 }
 

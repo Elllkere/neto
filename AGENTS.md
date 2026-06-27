@@ -110,9 +110,10 @@ Routing modes:
   the original LAN client IP. netod must strip EDNS Client Subnet before
   forwarding DNS queries to sing-box/public resolvers.
 - Domain proxy rules in custom mode may use FakeIP. Direct clients, direct
-  rules, provider/CIDR rules, and global mode use real DNS.
-- Mixed domain and provider/CIDR matchers are not supported; split them into
-  separate rules.
+  rules, provider/CIDR-only rules, and global mode use real DNS.
+- A rule may mix domain matchers with provider/CIDR/IP matchers. Domain matchers
+  are DNS-phase only; provider/CIDR/IP matchers are packet/nft-phase only. This
+  is not an AND between domain and IP.
 
 ## Rule Matcher Semantics
 
@@ -159,8 +160,13 @@ semantics:
 - domain providers: `list domain_provider`, selected from remote provider cache
 - IP/CIDR list/textbox: `list ip_cidr`, IPv4 addresses become `/32`
 - IP/CIDR providers: `list ip_provider`, selected from remote provider cache
+- packet-only protocol/port matchers: `list proto 'tcp|udp'`, `list src_port`,
+  and `list dst_port`; ports accept `443` or `1000-2000`
 - local `domain_file`, `ip_file`, and legacy `file` are parser compatibility
   paths, not the primary LuCI UX
+
+Protocol and port matchers only apply to provider/CIDR/IP nft rules. DNS/domain
+FakeIP matching must ignore ports because DNS phase has no packet port.
 
 ## Current Provider Model
 

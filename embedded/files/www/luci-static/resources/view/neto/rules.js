@@ -193,6 +193,36 @@ function addProviderList(section, option, title, providerType, modeOption, modeV
 	return o;
 }
 
+function packetProtoValue(section_id) {
+	var values = optionValues(section_id, 'proto');
+	var hasTCP = values.indexOf('tcp') >= 0;
+	var hasUDP = values.indexOf('udp') >= 0;
+
+	if (hasTCP && hasUDP)
+		return 'tcp_udp';
+	if (hasTCP)
+		return 'tcp';
+	if (hasUDP)
+		return 'udp';
+	return 'any';
+}
+
+function writePacketProto(section_id, formvalue) {
+	switch (formvalue) {
+	case 'tcp':
+		setListOption(section_id, 'proto', [ 'tcp' ]);
+		break;
+	case 'udp':
+		setListOption(section_id, 'proto', [ 'udp' ]);
+		break;
+	case 'tcp_udp':
+		setListOption(section_id, 'proto', [ 'tcp', 'udp' ]);
+		break;
+	default:
+		uci.unset('neto', section_id, 'proto');
+	}
+}
+
 return view.extend({
 	load: function() {
 		return uci.load('neto');
@@ -313,6 +343,34 @@ return view.extend({
 		addDynamicList(s, 'ip_cidr', _('IP/CIDR list'), 'ip_input', 'list', '1.1.1.1');
 		addTextList(s, '_ip_cidr_text', 'ip_cidr', _('IP/CIDR text'), 'ip_input', 'text', '1.1.1.1\n8.8.8.0/24');
 		addProviderList(s, 'ip_provider', _('IP providers'), 'ip', 'ip_input', 'provider');
+
+		o = s.option(form.DummyValue, '_packet_match', _('Advanced packet match'),
+			_('Port matching is packet-level. It applies only to provider/CIDR/IP matches, not to DNS/FakeIP domain matching.'));
+		o.modalonly = true;
+		o.cfgvalue = function() {
+			return '';
+		};
+
+		o = s.option(form.ListValue, '_packet_proto', _('Protocol'));
+		o.value('any', _('Any'));
+		o.value('tcp', _('TCP'));
+		o.value('udp', _('UDP'));
+		o.value('tcp_udp', _('TCP+UDP'));
+		o.default = 'any';
+		o.rmempty = false;
+		o.modalonly = true;
+		o.cfgvalue = packetProtoValue;
+		o.write = writePacketProto;
+
+		o = s.option(form.DynamicList, 'src_port', _('Source ports'));
+		o.placeholder = '1000-2000';
+		o.rmempty = true;
+		o.modalonly = true;
+
+		o = s.option(form.DynamicList, 'dst_port', _('Destination ports'));
+		o.placeholder = '443';
+		o.rmempty = true;
+		o.modalonly = true;
 
 		return m.render();
 	}
