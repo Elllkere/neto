@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -218,8 +220,73 @@ config rule
 	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "match_all is deprecated and ignored") {
 		t.Fatalf("expected match_all warning, got %+v", cfg.Warnings)
 	}
-	if len(cfg.Rules[0].DomainEquals)+len(cfg.Rules[0].DomainContains)+len(cfg.Rules[0].DomainStartsWith)+len(cfg.Rules[0].DomainEndsWith)+len(cfg.Rules[0].Files) != 0 {
+	if len(cfg.Rules[0].DomainEquals)+len(cfg.Rules[0].DomainContains)+len(cfg.Rules[0].DomainStartsWith)+len(cfg.Rules[0].DomainEndsWith)+len(cfg.Rules[0].DomainFiles)+len(cfg.Rules[0].IPCIDRs)+len(cfg.Rules[0].Files) != 0 {
 		t.Fatalf("match_all should not create include conditions: %+v", cfg.Rules[0])
+	}
+}
+
+func TestParseRuleAlternateDomainAndIPInputs(t *testing.T) {
+	cfg, err := Parse(`
+config rule
+	option name 'alternate'
+	option action 'proxy'
+	option dns_mode 'fakeip'
+	list domain_file '/etc/neto/domains/youtube.txt'
+	list ip_cidr '1.1.1.1'
+	list ip_cidr '8.8.8.0/24'
+	list ip_file '/etc/neto/providers/google.txt'
+	list file '/etc/neto/providers/legacy.txt'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := cfg.Rules[0]
+	if len(r.DomainFiles) != 1 || r.DomainFiles[0] != "/etc/neto/domains/youtube.txt" {
+		t.Fatalf("domain files were not parsed: %+v", r)
+	}
+	if len(r.IPCIDRs) != 2 || r.IPCIDRs[0] != "1.1.1.1" || r.IPCIDRs[1] != "8.8.8.0/24" {
+		t.Fatalf("inline IP CIDRs were not parsed: %+v", r)
+	}
+	if len(r.Files) != 2 || r.Files[0] != "/etc/neto/providers/google.txt" || r.Files[1] != "/etc/neto/providers/legacy.txt" {
+		t.Fatalf("ip_file/file aliases were not parsed: %+v", r)
+	}
+}
+
+func TestLoadFileExpandsDomainFilesAsEquals(t *testing.T) {
+	dir := t.TempDir()
+	domains := filepath.Join(dir, "domains.txt")
+	cfgPath := filepath.Join(dir, "neto")
+
+	if err := os.WriteFile(domains, []byte("Example.COM.\n# comment\nexample.org\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`
+config rule
+	option name 'domains'
+	option action 'proxy'
+	option dns_mode 'fakeip'
+	list domain_file '`+domains+`'
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(cfg.Rules[0].DomainEquals, ",")
+	if got != "example.com,example.org" {
+		t.Fatalf("unexpected domain file expansion: %q", got)
+	}
+}
+
+func TestParseRejectsInvalidInlineIPCIDR(t *testing.T) {
+	if _, err := Parse(`
+config rule
+	option name 'bad_ip'
+	option action 'proxy'
+	list ip_cidr '2001:db8::/32'
+`); err == nil {
+		t.Fatal("expected invalid inline IPv4 CIDR to be rejected")
 	}
 }
 
@@ -247,6 +314,48 @@ config main 'main'
 	option singbox_dns '127.0.0.1:5353'
 `); err == nil {
 		t.Fatal("expected singbox_dns loop to be rejected")
+	}
+}
+
+func TestParseDNSUpstreamPresetAndProtocol(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option dns_upstream_preset 'google'
+	option dns_upstream_protocol 'doh'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := cfg.Main.DNSUpstream()
+	if upstream.Protocol != "https" || upstream.Host != "8.8.8.8" || upstream.Port != 443 || upstream.TLSName != "dns.google" || upstream.Path != "/dns-query" {
+		t.Fatalf("unexpected DNS upstream: %+v", upstream)
+	}
+}
+
+func TestParseLegacyRealDNSUpstreamAsCustomUDP(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option real_dns_upstream '9.9.9.9:53'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := cfg.Main.DNSUpstream()
+	if upstream.Preset != "custom" || upstream.Protocol != "udp" || upstream.Host != "9.9.9.9" || upstream.Port != 53 {
+		t.Fatalf("unexpected legacy DNS upstream migration: %+v", upstream)
+	}
+}
+
+func TestParseRejectsInvalidDNSUpstream(t *testing.T) {
+	if _, err := Parse(`
+config main 'main'
+	option dns_upstream_protocol 'https'
+	option dns_upstream_preset 'custom'
+	option dns_upstream_host '1.1.1.1'
+	option dns_upstream_port '443'
+	option dns_upstream_path 'dns-query'
+`); err == nil {
+		t.Fatal("expected invalid DoH path to be rejected")
 	}
 }
 

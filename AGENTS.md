@@ -84,6 +84,23 @@ Routing modes:
 - `global`: all LAN client TCP/UDP goes to proxy except direct clients and
   reserved/local destinations.
 
+## Current DNS Model
+
+- `dns_listen` is the local netod DNS server/listener used by dnsmasq.
+- `real_dns_upstream` is a legacy compatibility `host:port` mirror of the real
+  upstream.
+- New configs should use `dns_upstream_preset`, `dns_upstream_protocol`,
+  `dns_upstream_host`, `dns_upstream_port`, `dns_upstream_tls_name`, and
+  `dns_upstream_path`.
+- Supported real upstream transports are `udp`, `tcp`, `tls` (DoT), and
+  `https` (DoH).
+- Built-in DNS presets are `cloudflare` and `google`; `custom` uses explicit
+  host/port/SNI/path fields.
+- The same effective real DNS upstream must be used by netod DNS forwarding and
+  generated sing-box DNS server `local`.
+- FakeIP DNS decisions still route to sing-box FakeIP DNS; direct/real DNS
+  decisions use the real upstream.
+
 ## Rule Matcher Semantics
 
 Domain matchers are literal string operations, not DNS-aware matching.
@@ -120,6 +137,15 @@ LuCI must not write deprecated matcher names:
 - `domain_suffix`
 - `domain_prefix`
 - `domain_exact`
+
+Rules can be filled from multiple LuCI input modes without changing matcher
+semantics:
+
+- domain fields: current `domain_*` and `exclude_domain_*` list fields
+- domain textbox: writes the same `domain_*` and `exclude_domain_*` UCI lists
+- domain files: `list domain_file`, one exact domain per line, comments with `#`
+- IP/CIDR list/textbox: `list ip_cidr`, IPv4 addresses become `/32`
+- IP/CIDR files: `list ip_file`; legacy `list file` is accepted as an alias
 
 ## Current Outbound Model
 

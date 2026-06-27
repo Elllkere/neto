@@ -60,7 +60,7 @@ func Generate(in Input) (string, error) {
 
 func writeRuleSets(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet) {
 	for i, rule := range cfg.Rules {
-		if !ruleengine.HasIPMatch(rule) || len(rule.Files) == 0 {
+		if !ruleengine.HasIPMatch(rule) || len(ruleCIDRs[i]) == 0 {
 			continue
 		}
 		writeSet(b, ruleSetName(i), policy.CIDRStrings(policy.NormalizeIPv4CIDRs(ruleCIDRs[i])))
@@ -73,7 +73,7 @@ func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[in
 			continue
 		}
 		match := ""
-		if len(rule.Files) > 0 {
+		if len(ruleCIDRs[i]) > 0 {
 			match = "ip daddr @" + ruleSetName(i) + " meta l4proto { tcp, udp }"
 		}
 		if match == "" {

@@ -13,6 +13,8 @@ function rewriteRuleState() {
 
 	uci.sections('neto', 'rule', function(section, sid) {
 		var outbound = uci.get('neto', sid, 'outbound');
+		var domainInput = String(uci.get('neto', sid, 'domain_input') || '').trim();
+		var ipInput = String(uci.get('neto', sid, 'ip_input') || '').trim();
 
 		n++;
 		uci.set('neto', sid, 'priority', String(n * 100));
@@ -25,6 +27,40 @@ function rewriteRuleState() {
 
 		if (outbound == null || outbound == '' || outbound == 'proxy_default')
 			uci.set('neto', sid, 'outbound', 'direct');
+
+		if (domainInput == '' && optionValues(sid, 'domain_file').length > 0)
+			domainInput = 'file';
+		if (domainInput != 'text' && domainInput != 'file')
+			domainInput = 'fields';
+		uci.set('neto', sid, 'domain_input', domainInput);
+
+		if (domainInput == 'file') {
+			unsetRuleOptions(sid, [
+				'domain_equals', 'domain_contains', 'domain_starts_with', 'domain_ends_with',
+				'exclude_domain_equals', 'exclude_domain_contains', 'exclude_domain_starts_with', 'exclude_domain_ends_with'
+			]);
+		} else {
+			uci.unset('neto', sid, 'domain_file');
+		}
+
+		if (ipInput == '') {
+			if (optionValues(sid, 'ip_file').length > 0 || optionValues(sid, 'file').length > 0)
+				ipInput = 'file';
+			else
+				ipInput = 'list';
+		}
+		if (ipInput != 'text' && ipInput != 'file')
+			ipInput = 'list';
+		uci.set('neto', sid, 'ip_input', ipInput);
+
+		if (ipInput == 'file') {
+			if (optionValues(sid, 'ip_file').length == 0 && optionValues(sid, 'file').length > 0)
+				setListOption(sid, 'ip_file', optionValues(sid, 'file'));
+			uci.unset('neto', sid, 'ip_cidr');
+		} else {
+			uci.unset('neto', sid, 'ip_file');
+		}
+		uci.unset('neto', sid, 'file');
 	});
 }
 
@@ -41,6 +77,115 @@ function addOutboundChoices(option) {
 
 		option.value(tag, label || tag);
 	});
+}
+
+function toArray(value) {
+	if (Array.isArray(value))
+		return value;
+	if (value == null || value == '')
+		return [];
+	return [ value ];
+}
+
+function cleanValues(values) {
+	var seen = {};
+	var out = [];
+
+	values = toArray(values);
+	for (var i = 0; i < values.length; i++) {
+		var value = String(values[i] || '').trim();
+
+		if (value == '' || seen[value])
+			continue;
+
+		seen[value] = true;
+		out.push(value);
+	}
+
+	return out;
+}
+
+function splitTextValues(value) {
+	var values = [];
+	var lines = String(value || '').replace(/\r/g, '\n').split('\n');
+
+	for (var i = 0; i < lines.length; i++) {
+		var line = lines[i];
+		var comment = line.indexOf('#');
+
+		if (comment >= 0)
+			line = line.slice(0, comment);
+
+		values.push(line);
+	}
+
+	return cleanValues(values);
+}
+
+function optionValues(section_id, option) {
+	return cleanValues(uci.get('neto', section_id, option));
+}
+
+function setListOption(section_id, option, values) {
+	values = cleanValues(values);
+	if (values.length > 0)
+		uci.set('neto', section_id, option, values);
+	else
+		uci.unset('neto', section_id, option);
+}
+
+function unsetRuleOptions(section_id, options) {
+	for (var i = 0; i < options.length; i++)
+		uci.unset('neto', section_id, options[i]);
+}
+
+function addDynamicList(section, option, title, modeOption, modeValue, placeholder) {
+	var o = section.option(form.DynamicList, option, title);
+
+	o.rmempty = true;
+	o.modalonly = true;
+	if (placeholder)
+		o.placeholder = placeholder;
+	o.depends(modeOption, modeValue);
+
+	return o;
+}
+
+function addTextList(section, option, target, title, modeOption, modeValue, placeholder) {
+	var o = section.option(form.TextValue, option, title);
+
+	o.rows = 6;
+	o.rmempty = true;
+	o.modalonly = true;
+	o.depends(modeOption, modeValue);
+	if (placeholder)
+		o.placeholder = placeholder;
+	o.cfgvalue = function(section_id) {
+		return optionValues(section_id, target).join('\n');
+	};
+	o.write = function(section_id, formvalue) {
+		setListOption(section_id, target, splitTextValues(formvalue));
+	};
+
+	return o;
+}
+
+function addIPFileList(section) {
+	var o = section.option(form.DynamicList, 'ip_file', _('IP/CIDR file paths'));
+
+	o.rmempty = true;
+	o.modalonly = true;
+	o.placeholder = '/etc/neto/providers/cloudflare-v4.txt';
+	o.depends('ip_input', 'file');
+	o.cfgvalue = function(section_id) {
+		return cleanValues(optionValues(section_id, 'ip_file').concat(optionValues(section_id, 'file')));
+	};
+	o.write = function(section_id, formvalue) {
+		setListOption(section_id, 'ip_file', formvalue);
+		uci.unset('neto', section_id, 'file');
+	};
+
+	return o;
 }
 
 return view.extend({
@@ -105,42 +250,63 @@ return view.extend({
 		o.rmempty = false;
 		o.editable = true;
 
-		o = s.option(form.DynamicList, 'domain_equals', _('Equals'));
-		o.rmempty = true;
+		o = s.option(form.ListValue, 'domain_input', _('Domain input'));
+		o.value('fields', _('Fields'));
+		o.value('text', _('Textbox'));
+		o.value('file', _('File paths'));
+		o.default = 'fields';
+		o.rmempty = false;
 		o.modalonly = true;
+		o.cfgvalue = function(section_id) {
+			var value = String(uci.get('neto', section_id, 'domain_input') || '').trim();
 
-		o = s.option(form.DynamicList, 'domain_contains', _('Contains'));
-		o.rmempty = true;
-		o.modalonly = true;
+			if (value != '')
+				return value;
+			if (optionValues(section_id, 'domain_file').length > 0)
+				return 'file';
+			return 'fields';
+		};
 
-		o = s.option(form.DynamicList, 'domain_starts_with', _('Starts with'));
-		o.rmempty = true;
-		o.modalonly = true;
+		addDynamicList(s, 'domain_equals', _('Equals'), 'domain_input', 'fields');
+		addDynamicList(s, 'domain_contains', _('Contains'), 'domain_input', 'fields');
+		addDynamicList(s, 'domain_starts_with', _('Starts with'), 'domain_input', 'fields');
+		addDynamicList(s, 'domain_ends_with', _('Ends with'), 'domain_input', 'fields');
+		addDynamicList(s, 'exclude_domain_equals', _('Exclude equals'), 'domain_input', 'fields');
+		addDynamicList(s, 'exclude_domain_contains', _('Exclude contains'), 'domain_input', 'fields');
+		addDynamicList(s, 'exclude_domain_starts_with', _('Exclude starts with'), 'domain_input', 'fields');
+		addDynamicList(s, 'exclude_domain_ends_with', _('Exclude ends with'), 'domain_input', 'fields');
 
-		o = s.option(form.DynamicList, 'domain_ends_with', _('Ends with'));
-		o.rmempty = true;
-		o.modalonly = true;
+		addTextList(s, '_domain_equals_text', 'domain_equals', _('Equals text'), 'domain_input', 'text', 'example.com\nexample.org');
+		addTextList(s, '_domain_contains_text', 'domain_contains', _('Contains text'), 'domain_input', 'text', 'youtube');
+		addTextList(s, '_domain_starts_with_text', 'domain_starts_with', _('Starts with text'), 'domain_input', 'text', 'www.');
+		addTextList(s, '_domain_ends_with_text', 'domain_ends_with', _('Ends with text'), 'domain_input', 'text', '.example.com');
+		addTextList(s, '_exclude_domain_equals_text', 'exclude_domain_equals', _('Exclude equals text'), 'domain_input', 'text');
+		addTextList(s, '_exclude_domain_contains_text', 'exclude_domain_contains', _('Exclude contains text'), 'domain_input', 'text');
+		addTextList(s, '_exclude_domain_starts_with_text', 'exclude_domain_starts_with', _('Exclude starts with text'), 'domain_input', 'text');
+		addTextList(s, '_exclude_domain_ends_with_text', 'exclude_domain_ends_with', _('Exclude ends with text'), 'domain_input', 'text');
 
-		o = s.option(form.DynamicList, 'exclude_domain_equals', _('Exclude equals'));
-		o.rmempty = true;
-		o.modalonly = true;
+		addDynamicList(s, 'domain_file', _('Domain file paths'), 'domain_input', 'file', '/etc/neto/domains/youtube.txt');
 
-		o = s.option(form.DynamicList, 'exclude_domain_contains', _('Exclude contains'));
-		o.rmempty = true;
+		o = s.option(form.ListValue, 'ip_input', _('IP input'));
+		o.value('list', _('List'));
+		o.value('text', _('Textbox'));
+		o.value('file', _('File paths'));
+		o.default = 'list';
+		o.rmempty = false;
 		o.modalonly = true;
+		o.cfgvalue = function(section_id) {
+			var value = String(uci.get('neto', section_id, 'ip_input') || '').trim();
 
-		o = s.option(form.DynamicList, 'exclude_domain_starts_with', _('Exclude starts with'));
-		o.rmempty = true;
-		o.modalonly = true;
+			if (value != '')
+				return value;
+			if (optionValues(section_id, 'ip_file').length > 0 || optionValues(section_id, 'file').length > 0)
+				return 'file';
+			return 'list';
+		};
 
-		o = s.option(form.DynamicList, 'exclude_domain_ends_with', _('Exclude ends with'));
-		o.rmempty = true;
-		o.modalonly = true;
-
-		o = s.option(form.DynamicList, 'file', _('IPv4 CIDR files'));
-		o.rmempty = true;
-		o.placeholder = '/etc/neto/providers/cloudflare-v4.txt';
-		o.modalonly = true;
+		addDynamicList(s, 'ip_cidr', _('IP/CIDR list'), 'ip_input', 'list', '1.1.1.1');
+		addTextList(s, '_ip_cidr_text', 'ip_cidr', _('IP/CIDR text'), 'ip_input', 'text', '1.1.1.1\n8.8.8.0/24');
+		addIPFileList(s);
 
 		return m.render();
 	}

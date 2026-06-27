@@ -158,6 +158,21 @@ DNS behavior:
 
 sing-box owns FakeIP allocation and FakeIP-to-domain mapping.
 
+`dns_listen` is the local netod DNS server address used by dnsmasq. It is not an
+external resolver. The real resolver is configured by the DNS upstream fields:
+
+- `dns_upstream_preset`: `cloudflare`, `google`, or `custom`
+- `dns_upstream_protocol`: `udp`, `tcp`, `tls`, or `https`
+- `dns_upstream_host`
+- `dns_upstream_port`
+- `dns_upstream_tls_name`
+- `dns_upstream_path`
+
+`real_dns_upstream` remains as a legacy `host:port` mirror/fallback. netod DNS
+forwarding and the generated sing-box DNS server tagged `local` must use the
+same effective upstream. DoT uses DNS-over-TLS, and DoH uses POST
+`application/dns-message` to the configured path.
+
 ## Providers and Rules
 
 Provider is data source only. Rule is routing policy only.
@@ -169,15 +184,28 @@ Provider files:
 - must compile into nft interval sets
 - must not generate thousands of nft rules
 
+Providers are only reusable IPv4 CIDR file definitions/data sources. They do
+not create policy by themselves. A provider affects routing only after a rule
+references its file path through `ip_file` or legacy `file`.
+
 Rules:
 
 - have `enabled`
 - have `priority`
 - have `action`: `proxy`, `direct`, `block`
 - have `dns_mode`: `fakeip`, `real_ip`, `auto`
-- reference provider files with `list file`
+- match domains with `domain_*` and `exclude_domain_*` lists
+- optionally reference domain files with `list domain_file`
+- match IP/CIDR values with `list ip_cidr`
+- reference IPv4 CIDR files with `list ip_file`
 - are evaluated by ascending priority
 - use first-match-wins semantics
+
+Legacy `list file` is accepted as an alias for `list ip_file`. Domain files are
+loaded by `netod` at config load time and each non-empty, non-comment line is
+treated as an exact domain matcher. For root plus subdomains, keep using the
+explicit matcher fields or textbox mode to write both `domain_equals` and
+`domain_ends_with`.
 
 Creating a provider must not create a rule. Creating a rule must not create a
 provider.
@@ -261,9 +289,11 @@ only the marked neto cron block.
 ## LuCI Layout
 
 General is the operational page: service status, neto/sing-box versions,
-Start/Stop, Autostart, optional language selection, routing mode, and default
-outbound. Advanced contains lower-level DNS, LAN, sing-box, TProxy, FakeIP
-range, and nft settings. Debug is the last LuCI tab and shows `netod debug`.
+Start/Stop, Autostart, optional language selection, DNS server/upstream,
+routing mode, and default outbound. Advanced contains lower-level dnsmasq, LAN,
+sing-box, TProxy, FakeIP range, and nft settings. The main LuCI tab order is
+General, Outbounds, Rules, Clients, Providers, Advanced, Debug. Debug is the
+last LuCI tab and shows `netod debug`.
 
 ## Client Policy Model
 
@@ -297,6 +327,11 @@ Domain matchers are literal string operations:
 - `domain_contains`: `strings.Contains`
 - `domain_starts_with`: `strings.HasPrefix`
 - `domain_ends_with`: `strings.HasSuffix`
+
+Rules LuCI exposes separate domain and IP input selectors. Domain input can be
+field lists, textboxes backed by the same UCI lists, or `domain_file` paths. IP
+input can be inline `ip_cidr` lists, a textbox backed by `ip_cidr`, or `ip_file`
+paths.
 
 Exclude fields use the same semantics.
 

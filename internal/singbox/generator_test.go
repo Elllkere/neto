@@ -51,6 +51,34 @@ func TestGenerateBuiltinOutbounds(t *testing.T) {
 	}
 }
 
+func TestGenerateDoTDNSServer(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.DNSUpstreamPreset = "google"
+	cfg.Main.DNSUpstreamProtocol = "tls"
+	local := generatedDNSServer(t, cfg, "local")
+	if local["type"] != "tls" || local["server"] != "8.8.8.8" || local["server_port"].(float64) != 853 {
+		t.Fatalf("unexpected DoT DNS server: %+v", local)
+	}
+	tls := local["tls"].(map[string]any)
+	if tls["server_name"] != "dns.google" {
+		t.Fatalf("unexpected DoT TLS config: %+v", tls)
+	}
+}
+
+func TestGenerateDoHDNSServer(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.DNSUpstreamPreset = "cloudflare"
+	cfg.Main.DNSUpstreamProtocol = "https"
+	local := generatedDNSServer(t, cfg, "local")
+	if local["type"] != "https" || local["server"] != "1.1.1.1" || local["server_port"].(float64) != 443 || local["path"] != "/dns-query" {
+		t.Fatalf("unexpected DoH DNS server: %+v", local)
+	}
+	tls := local["tls"].(map[string]any)
+	if tls["server_name"] != "cloudflare-dns.com" {
+		t.Fatalf("unexpected DoH TLS config: %+v", tls)
+	}
+}
+
 func TestGenerateRoutesCapturedTrafficToReferencedProxyOutbound(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Outbounds = []config.Outbound{{
@@ -372,4 +400,27 @@ func generatedRoute(t *testing.T, cfg config.Config) map[string]any {
 		t.Fatal(err)
 	}
 	return decoded.Route
+}
+
+func generatedDNSServer(t *testing.T, cfg config.Config, tag string) map[string]any {
+	t.Helper()
+	out, err := Generate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		DNS struct {
+			Servers []map[string]any `json:"servers"`
+		} `json:"dns"`
+	}
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	for _, server := range decoded.DNS.Servers {
+		if server["tag"] == tag {
+			return server
+		}
+	}
+	t.Fatalf("DNS server %q not found in %s", tag, string(out))
+	return nil
 }

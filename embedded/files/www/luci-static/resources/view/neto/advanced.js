@@ -44,12 +44,6 @@ return view.extend({
 
 		s = m.section(form.NamedSection, 'main', 'main', _('Advanced'));
 
-		o = s.option(form.Value, 'dns_listen', _('DNS listen'));
-		o.placeholder = '127.0.0.1:5353';
-
-		o = s.option(form.Value, 'real_dns_upstream', _('Real DNS upstream'));
-		o.placeholder = '1.1.1.1:53';
-
 		o = s.option(form.Flag, 'manage_dnsmasq', _('Manage dnsmasq'));
 		o.enabled = '1';
 		o.disabled = '0';

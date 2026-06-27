@@ -43,10 +43,6 @@ func Generate(cfg config.Config) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	realDNSHost, realDNSPort, err := splitHostPort(cfg.Main.RealDNSUpstream)
-	if err != nil {
-		return nil, err
-	}
 
 	doc := Config{
 		Log: map[string]any{
@@ -55,12 +51,7 @@ func Generate(cfg config.Config) ([]byte, error) {
 		},
 		DNS: DNS{
 			Servers: []any{
-				map[string]any{
-					"tag":         "local",
-					"type":        "udp",
-					"server":      realDNSHost,
-					"server_port": realDNSPort,
-				},
+				encodeDNSServer("local", cfg.Main.DNSUpstream()),
 				map[string]any{
 					"tag":         "fakeip",
 					"type":        "fakeip",
@@ -150,6 +141,29 @@ func GenerateProxyClient(cfg config.Config, outboundTag string, listenPort int) 
 		},
 	}
 	return json.MarshalIndent(doc, "", "  ")
+}
+
+func encodeDNSServer(tag string, upstream config.DNSUpstream) map[string]any {
+	item := map[string]any{
+		"tag":         tag,
+		"type":        upstream.Protocol,
+		"server":      upstream.Host,
+		"server_port": upstream.Port,
+	}
+	switch upstream.Protocol {
+	case "tls":
+		if upstream.TLSName != "" {
+			item["tls"] = map[string]any{"server_name": upstream.TLSName}
+		}
+	case "https":
+		if upstream.Path != "" {
+			item["path"] = upstream.Path
+		}
+		if upstream.TLSName != "" {
+			item["tls"] = map[string]any{"server_name": upstream.TLSName}
+		}
+	}
+	return item
 }
 
 func findClientOutbound(cfg config.Config, outboundTag string) (config.Outbound, error) {

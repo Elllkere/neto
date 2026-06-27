@@ -35,6 +35,25 @@ Exclude fields use the same semantics:
 Provider rules use `list file` with IPv4 CIDR files and compile into nft
 interval sets in rule order.
 
+New configs should prefer `list ip_file` for IPv4 CIDR files. The old
+`list file` name is still accepted as an alias. Rules can also use inline
+IPv4 addresses/CIDRs:
+
+```uci
+list ip_cidr '1.1.1.1'
+list ip_cidr '8.8.8.0/24'
+list ip_file '/etc/neto/providers/google.txt'
+```
+
+Domain files are exact-domain lists, one domain per line, with `#` comments:
+
+```uci
+list domain_file '/etc/neto/domains/youtube.txt'
+```
+
+Use LuCI Rules -> Domain input / IP input to choose between field lists,
+textboxes, and file paths.
+
 Rules default to built-in `option outbound 'direct'`. Built-in `blocked` is also
 available. After adding a custom native sing-box outbound profile, select its
 tag in the rule outbound field. In LuCI, the first Add input becomes the stable
@@ -123,6 +142,27 @@ Check DNS forwarding through netod:
 ```sh
 dig @127.0.0.1 -p 5353 youtube.com
 dig @127.0.0.1 -p 5353 example.org
+```
+
+DNS terminology:
+
+- `dns_listen` / General -> DNS server is the local netod listener used by
+  dnsmasq.
+- DNS upstream is the external resolver used for real DNS answers and sing-box
+  outbound domain resolution.
+- Supported upstream protocols are UDP, TCP, DoT, and DoH.
+- Presets are Cloudflare and Google; custom mode uses explicit host, port, TLS
+  server name, and DoH path.
+
+Example DoH upstream:
+
+```uci
+option dns_upstream_preset 'cloudflare'
+option dns_upstream_protocol 'https'
+option dns_upstream_host '1.1.1.1'
+option dns_upstream_port '443'
+option dns_upstream_tls_name 'cloudflare-dns.com'
+option dns_upstream_path '/dns-query'
 ```
 
 LAN client DNS test from Windows:

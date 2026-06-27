@@ -140,14 +140,19 @@ Manually verify on router:
 - General Start starts the service and writes `neto.main.enabled=1`
 - General Stop stops the service through `/etc/init.d/neto stop`
 - General Autostart uses `/etc/init.d/neto enable|disable`
-- General exposes only language, routing mode, and default outbound from UCI
-- Advanced contains low-level DNS, LAN, sing-box, TProxy, FakeIP range, and nft settings
+- General exposes language, DNS server/upstream, routing mode, and default outbound
+- General DNS upstream supports Cloudflare, Google, custom, UDP, TCP, DoT, and DoH
+- Advanced contains lower-level dnsmasq, LAN, sing-box, TProxy, FakeIP range, and nft settings
 - LuCI does not expose a FakeIP off switch and Save forces `fakeip_enabled=1`
 - creating a rule writes `priority`
 - moving rules rewrites priority as `100`, `200`, `300`, ...
 - Rules page writes only new matcher field names
 - Rules page does not write `match_all`
 - Rules page does not write deprecated matcher fields
+- Rules page has separate Domain input and IP input selectors
+- Domain input supports fields, textbox, and `domain_file` paths
+- IP input supports inline IP/CIDR list, textbox, and `ip_file` paths
+- editing IP file paths migrates old `list file` values to `list ip_file`
 - Rules page hides DNS mode selection and writes `dns_mode=fakeip` for proxy rules
 - Providers page does not create rules unless explicitly intended
 - Rules page does not create providers

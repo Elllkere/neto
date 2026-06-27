@@ -50,7 +50,7 @@ func DomainDecision(rules []config.Rule, name string) Decision {
 }
 
 func HasIPMatch(r config.Rule) bool {
-	return r.Enabled && len(r.Files) > 0
+	return r.Enabled && len(r.IPCIDRs)+len(r.Files) > 0
 }
 
 func HasDomainIncludes(r config.Rule) bool {

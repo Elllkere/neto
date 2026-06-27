@@ -72,6 +72,27 @@ func TestGenerateUsesSetForManyProviderCIDRs(t *testing.T) {
 	}
 }
 
+func TestGenerateInlineIPCIDRRule(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Rules = []config.Rule{{
+		Name:    "inline_ip",
+		Enabled: true,
+		Action:  "proxy",
+		DNSMode: "real_ip",
+		IPCIDRs: []string{
+			"8.8.8.8",
+		},
+	}}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("8.8.8.8")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "8.8.8.8/32") || !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") {
+		t.Fatalf("inline IP/CIDR rule was not emitted:\n%s", out)
+	}
+}
+
 func TestGenerateCounters(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Main.NFTCounters = true

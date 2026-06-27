@@ -18,7 +18,6 @@ func TestEmbeddedDefaultConfigHasNoSampleClientsOrRules(t *testing.T) {
 		"gaming_pc",
 		"all_proxy",
 		"youtube",
-		"cloudflare",
 		"list lan_subnet '192.168.8.0/24'",
 	} {
 		if strings.Contains(s, forbidden) {
@@ -27,6 +26,11 @@ func TestEmbeddedDefaultConfigHasNoSampleClientsOrRules(t *testing.T) {
 	}
 	for _, want := range []string{
 		"option fakeip_enabled '1'",
+		"option dns_upstream_preset 'cloudflare'",
+		"option dns_upstream_protocol 'udp'",
+		"option dns_upstream_host '1.1.1.1'",
+		"option dns_upstream_tls_name 'cloudflare-dns.com'",
+		"option dns_upstream_path '/dns-query'",
 		"option language 'en'",
 		"option language_ru_installed '0'",
 	} {

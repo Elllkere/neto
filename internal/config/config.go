@@ -1,12 +1,15 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/elllkere/neto/internal/policy"
 )
 
 const DefaultPath = "/etc/config/neto"
@@ -29,6 +32,12 @@ type Main struct {
 	Enabled               bool
 	DNSListen             string
 	RealDNSUpstream       string
+	DNSUpstreamPreset     string
+	DNSUpstreamProtocol   string
+	DNSUpstreamHost       string
+	DNSUpstreamPort       int
+	DNSUpstreamTLSName    string
+	DNSUpstreamPath       string
 	ManageDNSMasq         bool
 	FilterAAAAForFakeIP   bool
 	SingBoxBin            string
@@ -68,6 +77,8 @@ type Rule struct {
 	ExcludeDomainContains   []string
 	ExcludeDomainStartsWith []string
 	ExcludeDomainEndsWith   []string
+	DomainFiles             []string
+	IPCIDRs                 []string
 	Files                   []string
 }
 
@@ -127,6 +138,15 @@ type Subscription struct {
 	NodeCount      int
 }
 
+type DNSUpstream struct {
+	Preset   string
+	Protocol string
+	Host     string
+	Port     int
+	TLSName  string
+	Path     string
+}
+
 type section struct {
 	typ     string
 	name    string
@@ -144,6 +164,12 @@ func Defaults() Config {
 			Enabled:               true,
 			DNSListen:             "127.0.0.1:5353",
 			RealDNSUpstream:       "1.1.1.1:53",
+			DNSUpstreamPreset:     "cloudflare",
+			DNSUpstreamProtocol:   "udp",
+			DNSUpstreamHost:       "1.1.1.1",
+			DNSUpstreamPort:       53,
+			DNSUpstreamTLSName:    "cloudflare-dns.com",
+			DNSUpstreamPath:       "/dns-query",
 			ManageDNSMasq:         true,
 			FilterAAAAForFakeIP:   true,
 			SingBoxBin:            "/usr/libexec/neto/sing-box",
@@ -186,12 +212,64 @@ func (c Config) AllowedOutboundTags() map[string]struct{} {
 	return tags
 }
 
+func (m Main) DNSUpstream() DNSUpstream {
+	protocol := normalizeDNSProtocol(m.DNSUpstreamProtocol)
+	if protocol == "" {
+		protocol = "udp"
+	}
+	preset := strings.TrimSpace(m.DNSUpstreamPreset)
+	if preset == "" {
+		preset = "custom"
+	}
+
+	u := DNSUpstream{
+		Preset:   preset,
+		Protocol: protocol,
+		Host:     strings.TrimSpace(m.DNSUpstreamHost),
+		Port:     m.DNSUpstreamPort,
+		TLSName:  strings.TrimSpace(m.DNSUpstreamTLSName),
+		Path:     strings.TrimSpace(m.DNSUpstreamPath),
+	}
+
+	if preset != "custom" {
+		u.Host, u.TLSName, u.Path = presetDNSUpstream(preset)
+		u.Port = defaultDNSPort(protocol)
+	}
+	if u.Host == "" {
+		host, port, ok := splitHostPortValue(m.RealDNSUpstream)
+		if ok {
+			u.Host = host
+			if u.Port == 0 {
+				u.Port = port
+			}
+		}
+	}
+	if u.Port == 0 {
+		u.Port = defaultDNSPort(protocol)
+	}
+	if protocol == "https" && u.Path == "" {
+		u.Path = "/dns-query"
+	}
+	return u
+}
+
+func (u DNSUpstream) Address() string {
+	return net.JoinHostPort(u.Host, strconv.Itoa(u.Port))
+}
+
 func LoadFile(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err
 	}
-	return Parse(string(data))
+	cfg, err := Parse(string(data))
+	if err != nil {
+		return Config{}, err
+	}
+	if err := LoadRuleDomainFiles(&cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
 func Parse(data string) (Config, error) {
@@ -296,10 +374,32 @@ func (c Config) Validate() error {
 	if _, _, err := net.SplitHostPort(c.Main.DNSListen); err != nil {
 		return fmt.Errorf("invalid dns_listen %q: %w", c.Main.DNSListen, err)
 	}
-	if _, _, err := net.SplitHostPort(c.Main.RealDNSUpstream); err != nil {
-		return fmt.Errorf("invalid real_dns_upstream %q: %w", c.Main.RealDNSUpstream, err)
+	if c.Main.RealDNSUpstream != "" {
+		if _, _, err := net.SplitHostPort(c.Main.RealDNSUpstream); err != nil {
+			return fmt.Errorf("invalid real_dns_upstream %q: %w", c.Main.RealDNSUpstream, err)
+		}
 	}
-	if c.Main.RealDNSUpstream == c.Main.DNSListen {
+	dnsUpstream := c.Main.DNSUpstream()
+	switch dnsUpstream.Protocol {
+	case "udp", "tcp", "tls", "https":
+	default:
+		return fmt.Errorf("unsupported dns_upstream_protocol %q", c.Main.DNSUpstreamProtocol)
+	}
+	switch dnsUpstream.Preset {
+	case "cloudflare", "google", "custom":
+	default:
+		return fmt.Errorf("unsupported dns_upstream_preset %q", dnsUpstream.Preset)
+	}
+	if strings.TrimSpace(dnsUpstream.Host) == "" {
+		return fmt.Errorf("dns upstream host must not be empty")
+	}
+	if dnsUpstream.Port <= 0 || dnsUpstream.Port > 65535 {
+		return fmt.Errorf("invalid dns upstream port %d", dnsUpstream.Port)
+	}
+	if dnsUpstream.Protocol == "https" && !strings.HasPrefix(dnsUpstream.Path, "/") {
+		return fmt.Errorf("dns_upstream_path must start with /")
+	}
+	if (dnsUpstream.Protocol == "udp" || dnsUpstream.Protocol == "tcp") && dnsUpstream.Address() == c.Main.DNSListen {
 		return fmt.Errorf("real_dns_upstream must not point back to dns_listen")
 	}
 	if c.Main.SingBoxDNS == c.Main.DNSListen {
@@ -415,11 +515,23 @@ func (c Config) Validate() error {
 				return fmt.Errorf("rule %q contains an empty provider file path", r.Name)
 			}
 		}
+		for _, file := range r.DomainFiles {
+			if strings.TrimSpace(file) == "" {
+				return fmt.Errorf("rule %q contains an empty domain file path", r.Name)
+			}
+		}
+		for _, cidr := range r.IPCIDRs {
+			if _, err := policy.ParseIPv4CIDR(cidr); err != nil {
+				return fmt.Errorf("rule %q contains invalid IPv4 CIDR %q: %w", r.Name, cidr, err)
+			}
+		}
 	}
 	return nil
 }
 
 func applyMain(m *Main, s section) {
+	hasDNSUpstreamPreset := false
+	hasDNSUpstreamFields := false
 	if v, ok := s.options["enabled"]; ok {
 		m.Enabled = parseBool(v, m.Enabled)
 	}
@@ -428,6 +540,42 @@ func applyMain(m *Main, s section) {
 	}
 	if v := s.options["real_dns_upstream"]; v != "" {
 		m.RealDNSUpstream = v
+	}
+	if v := s.options["dns_upstream_preset"]; v != "" {
+		m.DNSUpstreamPreset = v
+		hasDNSUpstreamPreset = true
+		hasDNSUpstreamFields = true
+	}
+	if v := s.options["dns_upstream_protocol"]; v != "" {
+		m.DNSUpstreamProtocol = normalizeDNSProtocol(v)
+		hasDNSUpstreamFields = true
+	}
+	if v := s.options["dns_upstream_host"]; v != "" {
+		m.DNSUpstreamHost = v
+		hasDNSUpstreamFields = true
+	}
+	if v := s.options["dns_upstream_port"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			m.DNSUpstreamPort = n
+			hasDNSUpstreamFields = true
+		}
+	}
+	if v := s.options["dns_upstream_tls_name"]; v != "" {
+		m.DNSUpstreamTLSName = v
+		hasDNSUpstreamFields = true
+	}
+	if v := s.options["dns_upstream_path"]; v != "" {
+		m.DNSUpstreamPath = v
+		hasDNSUpstreamFields = true
+	}
+	if !hasDNSUpstreamPreset && !hasDNSUpstreamFields && s.options["real_dns_upstream"] != "" {
+		host, port, ok := splitHostPortValue(m.RealDNSUpstream)
+		if ok {
+			m.DNSUpstreamPreset = "custom"
+			m.DNSUpstreamHost = host
+			m.DNSUpstreamPort = port
+			m.DNSUpstreamProtocol = "udp"
+		}
 	}
 	if v, ok := s.options["manage_dnsmasq"]; ok {
 		m.ManageDNSMasq = parseBool(v, m.ManageDNSMasq)
@@ -517,8 +665,58 @@ func parseRule(s section, order int) (Rule, []string) {
 	r.ExcludeDomainContains = cleanDomainList(appendList(s.lists["exclude_domain_contains"], s.lists["exclude_domain_keyword"]))
 	r.ExcludeDomainStartsWith = cleanDomainList(appendList(s.lists["exclude_domain_starts_with"], s.lists["exclude_domain_prefix"]))
 	r.ExcludeDomainEndsWith = cleanDomainList(appendList(s.lists["exclude_domain_ends_with"], s.lists["exclude_domain_suffix"]))
-	r.Files = cleanList(s.lists["file"])
+	r.DomainFiles = cleanList(appendList(s.lists["domain_file"], splitListOption(s.options["domain_file"])))
+	r.IPCIDRs = cleanList(appendList(s.lists["ip_cidr"], splitListOption(s.options["ip_cidr"])))
+	r.Files = cleanList(appendList(appendList(s.lists["ip_file"], s.lists["file"]), splitListOption(s.options["ip_file"])))
 	return r, warnings
+}
+
+func LoadRuleDomainFiles(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	for i := range cfg.Rules {
+		var domains []string
+		for _, path := range cfg.Rules[i].DomainFiles {
+			values, err := loadDomainFile(path)
+			if err != nil {
+				return err
+			}
+			domains = append(domains, values...)
+		}
+		if len(domains) > 0 {
+			cfg.Rules[i].DomainEquals = cleanDomainList(appendList(cfg.Rules[i].DomainEquals, domains))
+		}
+	}
+	return nil
+}
+
+func loadDomainFile(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var out []string
+	scanner := bufio.NewScanner(f)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(stripComment(scanner.Text()))
+		if line == "" {
+			continue
+		}
+		line = strings.TrimRight(strings.ToLower(line), ".")
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("%s:%d: %w", path, lineNo, err)
+	}
+	return cleanDomainList(out), nil
 }
 
 func parseOutbound(s section) (Outbound, []string) {
@@ -718,6 +916,53 @@ func splitListOption(value string) []string {
 	return strings.FieldsFunc(value, func(r rune) bool {
 		return r == ',' || r == ' ' || r == '\t' || r == '\n'
 	})
+}
+
+func normalizeDNSProtocol(protocol string) string {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "", "udp":
+		return "udp"
+	case "tcp":
+		return "tcp"
+	case "tls", "dot":
+		return "tls"
+	case "https", "doh":
+		return "https"
+	default:
+		return strings.ToLower(strings.TrimSpace(protocol))
+	}
+}
+
+func presetDNSUpstream(preset string) (host string, tlsName string, path string) {
+	switch strings.TrimSpace(preset) {
+	case "google":
+		return "8.8.8.8", "dns.google", "/dns-query"
+	default:
+		return "1.1.1.1", "cloudflare-dns.com", "/dns-query"
+	}
+}
+
+func defaultDNSPort(protocol string) int {
+	switch normalizeDNSProtocol(protocol) {
+	case "tls":
+		return 853
+	case "https":
+		return 443
+	default:
+		return 53
+	}
+}
+
+func splitHostPortValue(value string) (string, int, bool) {
+	host, portValue, err := net.SplitHostPort(strings.TrimSpace(value))
+	if err != nil {
+		return "", 0, false
+	}
+	port, err := strconv.Atoi(portValue)
+	if err != nil {
+		return "", 0, false
+	}
+	return host, port, true
 }
 
 func normalizeClientPolicy(policy string) (string, string) {

@@ -92,14 +92,28 @@ func TestRulesLuCICompactTableFields(t *testing.T) {
 		"exclude_domain_contains",
 		"exclude_domain_starts_with",
 		"exclude_domain_ends_with",
-		"file",
+		"domain_file",
+		"ip_cidr",
+		"ip_file",
 	} {
-		needle := "s.option(form.DynamicList, '" + field + "'"
+		needle := "'" + field + "'"
 		if !strings.Contains(s, needle) {
 			t.Fatalf("rules.js missing detail field %q:\n%s", field, s)
 		}
 	}
-	if strings.Count(s, "o.modalonly = true") < 9 {
+	for _, want := range []string{
+		"form.ListValue, 'domain_input'",
+		"form.ListValue, 'ip_input'",
+		"form.TextValue, option",
+		"addTextList(s, '_domain_equals_text'",
+		"addTextList(s, '_ip_cidr_text'",
+		"addIPFileList(s)",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("rules.js missing input mode UI %q:\n%s", want, s)
+		}
+	}
+	if strings.Count(s, "o.modalonly = true") < 5 {
 		t.Fatalf("matcher/provider fields should be modal-only:\n%s", s)
 	}
 	if strings.Contains(s, "form.Value, 'priority'") {
@@ -117,7 +131,7 @@ func TestRulesLuCIOutboundVisibleInTable(t *testing.T) {
 	}
 	s := string(data)
 	start := strings.Index(s, "form.ListValue, 'outbound'")
-	end := strings.Index(s, "form.DynamicList, 'domain_equals'")
+	end := strings.Index(s, "form.ListValue, 'domain_input'")
 	if start < 0 || end < 0 || end <= start {
 		t.Fatalf("could not find outbound option block:\n%s", s)
 	}
@@ -152,6 +166,27 @@ func TestRulesLuCIOutboundVisibleInTable(t *testing.T) {
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("rules.js should support pending custom outbounds; missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestRulesLuCIInputModesNormalizePersistence(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"uci.set('neto', sid, 'domain_input', domainInput)",
+		"uci.set('neto', sid, 'ip_input', ipInput)",
+		"uci.unset('neto', sid, 'domain_file')",
+		"setListOption(sid, 'ip_file', optionValues(sid, 'file'))",
+		"uci.unset('neto', sid, 'file')",
+		"setListOption(section_id, target, splitTextValues(formvalue))",
+		"uci.set('neto', section_id, option, values)",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("rules.js missing persistence behavior %q:\n%s", want, s)
 		}
 	}
 }

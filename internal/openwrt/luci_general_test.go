@@ -28,6 +28,15 @@ func TestGeneralLuCIShowsStatusControlsAndOnlyCoreSettings(t *testing.T) {
 		"form.Button, '_autostart'",
 		"fs.exec('/etc/init.d/neto', [ action ])",
 		"fs.exec('/sbin/uci', [ 'set', 'neto.main.enabled=1' ])",
+		"form.Value, 'dns_listen'",
+		"form.ListValue, 'dns_upstream_preset'",
+		"form.ListValue, 'dns_upstream_protocol'",
+		"form.Value, 'dns_upstream_host'",
+		"form.Value, 'dns_upstream_port'",
+		"form.Value, 'dns_upstream_tls_name'",
+		"form.Value, 'dns_upstream_path'",
+		"port = defaultDNSPort(protocol)",
+		"uci.set('neto', 'main', 'real_dns_upstream', host + ':' + port)",
 		"form.ListValue, 'routing_mode'",
 		"form.ListValue, 'default_outbound'",
 		"form.ListValue, 'language'",
@@ -39,7 +48,6 @@ func TestGeneralLuCIShowsStatusControlsAndOnlyCoreSettings(t *testing.T) {
 	for _, forbidden := range []string{
 		"form.Flag, 'enabled'",
 		"form.Flag, 'fakeip_enabled'",
-		"form.Value, 'dns_listen'",
 		"form.DynamicList, 'lan_subnet'",
 		"form.Value, 'singbox_bin'",
 		"form.Value, 'tproxy_port'",
@@ -58,8 +66,6 @@ func TestAdvancedLuCIContainsMovedSettingsButNoFakeIPToggle(t *testing.T) {
 	s := string(data)
 	for _, want := range []string{
 		"form.NamedSection, 'main', 'main', _('Advanced')",
-		"form.Value, 'dns_listen'",
-		"form.Value, 'real_dns_upstream'",
 		"form.Flag, 'manage_dnsmasq'",
 		"form.Flag, 'filter_aaaa_for_fakeip'",
 		"form.DynamicList, 'lan_subnet'",
@@ -81,6 +87,10 @@ func TestAdvancedLuCIContainsMovedSettingsButNoFakeIPToggle(t *testing.T) {
 	for _, forbidden := range []string{
 		"form.Flag, 'enabled'",
 		"form.Flag, 'fakeip_enabled'",
+		"form.Value, 'dns_listen'",
+		"form.Value, 'real_dns_upstream'",
+		"form.ListValue, 'dns_upstream_preset'",
+		"form.ListValue, 'dns_upstream_protocol'",
 		"form.ListValue, 'routing_mode'",
 		"form.ListValue, 'default_outbound'",
 	} {
