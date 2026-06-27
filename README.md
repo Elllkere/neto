@@ -275,6 +275,7 @@ LuCI app находится в `Services -> neto`.
 - [Testing](docs/TESTING.md)
 - [Decisions](docs/DECISIONS.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Release process](docs/RELEASE.md)
 
 ## Build
 
@@ -317,3 +318,5 @@ Installer скачивает именно:
 ```text
 https://github.com/elllkere/neto/releases/latest/download/neto-openwrt-embedded.tar.gz
 ```
+
+Полный процесс: [docs/RELEASE.md](docs/RELEASE.md).

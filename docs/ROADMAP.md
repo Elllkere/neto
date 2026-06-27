@@ -39,7 +39,7 @@ aarch64 with `apk`.
 5. Add `netod test-domain <client-ip> <domain> <qtype>`.
 6. Add better status for provider caches and last update errors.
 7. Add clearer LuCI validation messages for packet-level port/proto fields.
-8. Add release workflow for publishing `neto-openwrt-embedded.tar.gz`.
+8. Add CI release workflow for publishing `neto-openwrt-embedded.tar.gz`.
 
 ## Later Tasks
 

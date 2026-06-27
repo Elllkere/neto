@@ -92,3 +92,4 @@ The main docs are currently maintained in Russian:
 - [Testing](docs/TESTING.md)
 - [Decisions](docs/DECISIONS.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Release process](docs/RELEASE.md)
