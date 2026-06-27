@@ -1,8 +1,23 @@
 'use strict';
+'require fs';
 'require form';
+'require uci';
 'require view';
 
 return view.extend({
+	handleSaveApply: function(ev) {
+		return this.handleSave(ev)
+			.then(function() {
+				return uci.apply();
+			})
+			.then(function() {
+				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
+			})
+			.then(function() {
+				window.location.reload();
+			});
+	},
+
 	render: function() {
 		var m, s, o;
 

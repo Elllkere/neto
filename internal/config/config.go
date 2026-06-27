@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -11,11 +12,10 @@ import (
 const DefaultPath = "/etc/config/neto"
 
 type Config struct {
-	Main        Main
-	Clients     []Client
-	DomainRules []DomainRule
-	SubnetRules []SubnetRule
-	Warnings    []string
+	Main     Main
+	Clients  []Client
+	Rules    []Rule
+	Warnings []string
 }
 
 type Main struct {
@@ -46,17 +46,22 @@ type Client struct {
 	Policy string
 }
 
-type DomainRule struct {
-	Name     string
-	Mode     string
-	Outbound string
-	Suffixes []string
-}
-
-type SubnetRule struct {
-	Name     string
-	Outbound string
-	Files    []string
+type Rule struct {
+	Name                    string
+	Enabled                 bool
+	Priority                int
+	Action                  string
+	Outbound                string
+	DNSMode                 string
+	DomainEquals            []string
+	DomainContains          []string
+	DomainStartsWith        []string
+	DomainEndsWith          []string
+	ExcludeDomainEquals     []string
+	ExcludeDomainContains   []string
+	ExcludeDomainStartsWith []string
+	ExcludeDomainEndsWith   []string
+	Files                   []string
 }
 
 type section struct {
@@ -121,21 +126,17 @@ func Parse(data string) (Config, error) {
 				IP:     s.options["ip"],
 				Policy: policy,
 			})
-		case "domain_rule":
-			cfg.DomainRules = append(cfg.DomainRules, DomainRule{
-				Name:     firstNonEmpty(s.options["name"], s.name),
-				Mode:     firstNonEmpty(s.options["mode"], "fakeip"),
-				Outbound: firstNonEmpty(s.options["outbound"], "proxy_default"),
-				Suffixes: append([]string(nil), s.lists["suffix"]...),
-			})
-		case "subnet_rule":
-			cfg.SubnetRules = append(cfg.SubnetRules, SubnetRule{
-				Name:     firstNonEmpty(s.options["name"], s.name),
-				Outbound: firstNonEmpty(s.options["outbound"], "proxy_default"),
-				Files:    append([]string(nil), s.lists["file"]...),
-			})
+		case "rule":
+			rule, warning := parseRule(s, len(cfg.Rules))
+			cfg.Rules = append(cfg.Rules, rule)
+			if warning != "" {
+				cfg.Warnings = append(cfg.Warnings, warning)
+			}
 		}
 	}
+	sort.SliceStable(cfg.Rules, func(i, j int) bool {
+		return cfg.Rules[i].Priority < cfg.Rules[j].Priority
+	})
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -212,21 +213,26 @@ func (c Config) Validate() error {
 			return fmt.Errorf("client %q has unsupported policy %q", cl.Name, cl.Policy)
 		}
 	}
-	for _, r := range c.DomainRules {
-		if r.Mode != "fakeip" {
-			return fmt.Errorf("domain_rule %q has unsupported mode %q", r.Name, r.Mode)
+	for _, r := range c.Rules {
+		if strings.TrimSpace(r.Name) == "" {
+			return fmt.Errorf("rule name must not be empty")
 		}
-		if r.Outbound != "proxy_default" {
-			return fmt.Errorf("domain_rule %q has unsupported outbound %q", r.Name, r.Outbound)
+		switch r.Action {
+		case "proxy", "direct", "block":
+		default:
+			return fmt.Errorf("rule %q has unsupported action %q", r.Name, r.Action)
 		}
-	}
-	for _, r := range c.SubnetRules {
-		if r.Outbound != "proxy_default" {
-			return fmt.Errorf("subnet_rule %q has unsupported outbound %q", r.Name, r.Outbound)
+		switch r.DNSMode {
+		case "fakeip", "real_ip", "auto":
+		default:
+			return fmt.Errorf("rule %q has unsupported dns_mode %q", r.Name, r.DNSMode)
+		}
+		if r.Outbound != "" && r.Outbound != "proxy_default" {
+			return fmt.Errorf("rule %q has unsupported outbound %q", r.Name, r.Outbound)
 		}
 		for _, file := range r.Files {
 			if strings.TrimSpace(file) == "" {
-				return fmt.Errorf("subnet_rule %q contains an empty provider file path", r.Name)
+				return fmt.Errorf("rule %q contains an empty provider file path", r.Name)
 			}
 		}
 	}
@@ -297,11 +303,68 @@ func applyMain(m *Main, s section) {
 	}
 }
 
+func parseRule(s section, order int) (Rule, string) {
+	r := Rule{
+		Name:     firstNonEmpty(s.options["name"], s.name, fmt.Sprintf("rule_%d", order+1)),
+		Enabled:  true,
+		Priority: 1000 + order,
+		Action:   firstNonEmpty(s.options["action"], "proxy"),
+		Outbound: firstNonEmpty(s.options["outbound"], "proxy_default"),
+		DNSMode:  firstNonEmpty(s.options["dns_mode"], "auto"),
+	}
+	if v, ok := s.options["enabled"]; ok {
+		r.Enabled = parseBool(v, r.Enabled)
+	}
+	if v := s.options["priority"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			r.Priority = n
+		}
+	}
+	var warning string
+	if _, ok := s.options["match_all"]; ok {
+		warning = fmt.Sprintf("rule %q: match_all is deprecated and ignored", r.Name)
+	}
+	r.DomainEquals = cleanDomainList(appendList(s.lists["domain_equals"], s.lists["domain_exact"]))
+	r.DomainContains = cleanDomainList(appendList(s.lists["domain_contains"], s.lists["domain_keyword"]))
+	r.DomainStartsWith = cleanDomainList(appendList(s.lists["domain_starts_with"], s.lists["domain_prefix"]))
+	r.DomainEndsWith = cleanDomainList(appendList(s.lists["domain_ends_with"], s.lists["domain_suffix"]))
+	r.ExcludeDomainEquals = cleanDomainList(appendList(s.lists["exclude_domain_equals"], s.lists["exclude_domain_exact"]))
+	r.ExcludeDomainContains = cleanDomainList(appendList(s.lists["exclude_domain_contains"], s.lists["exclude_domain_keyword"]))
+	r.ExcludeDomainStartsWith = cleanDomainList(appendList(s.lists["exclude_domain_starts_with"], s.lists["exclude_domain_prefix"]))
+	r.ExcludeDomainEndsWith = cleanDomainList(appendList(s.lists["exclude_domain_ends_with"], s.lists["exclude_domain_suffix"]))
+	r.Files = cleanList(s.lists["file"])
+	return r, warning
+}
+
 func cleanList(values []string) []string {
 	out := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
 	for _, value := range values {
 		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func appendList(a []string, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	return out
+}
+
+func cleanDomainList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimRight(strings.ToLower(strings.TrimSpace(value)), ".")
 		if value == "" {
 			continue
 		}

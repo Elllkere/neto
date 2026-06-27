@@ -8,18 +8,18 @@ import (
 
 	"github.com/elllkere/neto/internal/config"
 	"github.com/elllkere/neto/internal/policy"
+	"github.com/elllkere/neto/internal/ruleengine"
 )
 
 type Input struct {
-	Config        config.Config
-	ProviderCIDRs []*net.IPNet
+	Config    config.Config
+	RuleCIDRs map[int][]*net.IPNet
 }
 
 func Generate(in Input) (string, error) {
 	cfg := in.Config
 	directClients := collectClients(cfg, "direct")
 	proxyClients := collectClients(cfg, "proxy")
-	providerCIDRs := policy.NormalizeIPv4CIDRs(in.ProviderCIDRs)
 	lanSubnets := policy.NormalizeIPv4CIDRs(policy.MustIPv4CIDRs(cfg.Main.LANSubnets...))
 	reserved4 := reservedCIDRs(cfg)
 
@@ -29,7 +29,7 @@ func Generate(in Input) (string, error) {
 	writeSet(&b, "reserved4", policy.CIDRStrings(reserved4))
 	writeSet(&b, "direct_clients4", directClients)
 	writeSet(&b, "proxy_clients4", proxyClients)
-	writeSet(&b, "proxy_default4", policy.CIDRStrings(providerCIDRs))
+	writeRuleSets(&b, cfg, in.RuleCIDRs)
 	b.WriteString("\tchain prerouting {\n")
 	b.WriteString("\t\ttype filter hook prerouting priority mangle; policy accept;\n")
 	b.WriteString(lanGuardRule(cfg))
@@ -46,7 +46,7 @@ func Generate(in Input) (string, error) {
 		if cfg.Main.FakeIPEnabled {
 			b.WriteString(fmt.Sprintf("\t\tip daddr %s meta l4proto { tcp, udp }%s jump to_proxy_default\n", cfg.Main.FakeIPRange, counter(cfg)))
 		}
-		b.WriteString(fmt.Sprintf("\t\tip daddr @proxy_default4 meta l4proto { tcp, udp }%s jump to_proxy_default\n", counter(cfg)))
+		writeOrderedIPRules(&b, cfg, in.RuleCIDRs)
 	}
 	b.WriteString("\t\treturn\n")
 	b.WriteString("\t}\n")
@@ -56,6 +56,40 @@ func Generate(in Input) (string, error) {
 	b.WriteString("\t}\n")
 	b.WriteString("}\n")
 	return b.String(), nil
+}
+
+func writeRuleSets(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet) {
+	for i, rule := range cfg.Rules {
+		if !ruleengine.HasIPMatch(rule) || len(rule.Files) == 0 {
+			continue
+		}
+		writeSet(b, ruleSetName(i), policy.CIDRStrings(policy.NormalizeIPv4CIDRs(ruleCIDRs[i])))
+	}
+}
+
+func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet) {
+	for i, rule := range cfg.Rules {
+		if !ruleengine.HasIPMatch(rule) {
+			continue
+		}
+		match := ""
+		if len(rule.Files) > 0 {
+			match = "ip daddr @" + ruleSetName(i) + " meta l4proto { tcp, udp }"
+		}
+		if match == "" {
+			continue
+		}
+		switch rule.Action {
+		case "proxy":
+			b.WriteString(fmt.Sprintf("\t\t%s%s jump to_proxy_default\n", match, counter(cfg)))
+		case "direct", "block":
+			b.WriteString(fmt.Sprintf("\t\t%s%s return\n", match, counter(cfg)))
+		}
+	}
+}
+
+func ruleSetName(index int) string {
+	return fmt.Sprintf("rule4_%04d", index)
 }
 
 func lanGuardRule(cfg config.Config) string {

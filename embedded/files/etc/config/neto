@@ -28,14 +28,23 @@ config client
 	option ip '192.168.8.100'
 	option policy 'proxy'
 
-config domain_rule
+config rule
 	option name 'youtube'
-	option mode 'fakeip'
+	option enabled '1'
+	option priority '100'
+	option action 'proxy'
+	option dns_mode 'fakeip'
 	option outbound 'proxy_default'
-	list suffix 'youtube.com'
-	list suffix 'googlevideo.com'
+	list domain_equals 'youtube.com'
+	list domain_ends_with '.youtube.com'
+	list domain_equals 'googlevideo.com'
+	list domain_ends_with '.googlevideo.com'
 
-config subnet_rule
+config rule
 	option name 'cloudflare'
+	option enabled '1'
+	option priority '200'
+	option action 'proxy'
+	option dns_mode 'real_ip'
 	option outbound 'proxy_default'
 	list file '/etc/neto/providers/cloudflare-v4.txt'

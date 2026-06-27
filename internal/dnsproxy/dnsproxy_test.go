@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"strings"
 	"testing"
+
+	"github.com/elllkere/neto/internal/config"
 )
 
 func testQuery(qtype uint16) []byte {
@@ -37,20 +39,24 @@ func TestParseQuery(t *testing.T) {
 }
 
 func TestMatchesFakeIP(t *testing.T) {
-	p := Proxy{Suffixes: []string{"youtube.com", "googlevideo.com"}}
+	p := Proxy{Rules: []config.Rule{
+		fakeRule("youtube.com"),
+		fakeRule("googlevideo.com"),
+	}}
 	for _, name := range []string{"youtube.com", "www.youtube.com", "r1.googlevideo.com"} {
-		if !p.matchesFakeIP(name) {
+		decision := p.domainDecision(name, "192.168.8.10")
+		if decision.Action != "proxy" || decision.DNSMode != "fakeip" {
 			t.Fatalf("expected %s to match", name)
 		}
 	}
-	if p.matchesFakeIP("notyoutube.com") {
-		t.Fatal("unexpected suffix match")
+	if decision := p.domainDecision("notyoutube.com", "192.168.8.10"); decision.Action == "proxy" && decision.DNSMode == "fakeip" {
+		t.Fatal("unexpected root/subdomain match")
 	}
 }
 
 func TestFakeIPAAAAGetsLocalNODATA(t *testing.T) {
 	p := Proxy{
-		Suffixes:            []string{"youtube.com"},
+		Rules:               []config.Rule{fakeRule("youtube.com")},
 		RoutingMode:         "custom",
 		FilterAAAAForFakeIP: true,
 	}
@@ -74,7 +80,7 @@ func TestFakeIPAAAAGetsLocalNODATA(t *testing.T) {
 
 func TestFakeIPAStillForwards(t *testing.T) {
 	p := Proxy{
-		Suffixes:            []string{"youtube.com"},
+		Rules:               []config.Rule{fakeRule("youtube.com")},
 		RoutingMode:         "custom",
 		FilterAAAAForFakeIP: true,
 	}
@@ -85,7 +91,7 @@ func TestFakeIPAStillForwards(t *testing.T) {
 
 func TestDNSPolicyCustomDefaultFakeIP(t *testing.T) {
 	p := Proxy{
-		Suffixes:     []string{"youtube.com"},
+		Rules:        []config.Rule{fakeRule("youtube.com")},
 		RoutingMode:  "custom",
 		FakeUpstream: "127.0.0.1:15353",
 		RealUpstream: "1.1.1.1:53",
@@ -100,7 +106,7 @@ func TestDNSPolicyCustomDefaultFakeIP(t *testing.T) {
 
 func TestDNSPolicyCustomDirectNoFakeIP(t *testing.T) {
 	p := Proxy{
-		Suffixes:       []string{"youtube.com"},
+		Rules:          []config.Rule{fakeRule("youtube.com")},
 		RoutingMode:    "custom",
 		FakeUpstream:   "127.0.0.1:15353",
 		RealUpstream:   "1.1.1.1:53",
@@ -116,7 +122,7 @@ func TestDNSPolicyCustomDirectNoFakeIP(t *testing.T) {
 
 func TestDNSPolicyGlobalDefaultReal(t *testing.T) {
 	p := Proxy{
-		Suffixes:     []string{"youtube.com"},
+		Rules:        []config.Rule{fakeRule("youtube.com")},
 		RoutingMode:  "global",
 		FakeUpstream: "127.0.0.1:15353",
 		RealUpstream: "1.1.1.1:53",
@@ -128,7 +134,7 @@ func TestDNSPolicyGlobalDefaultReal(t *testing.T) {
 
 func TestDNSPolicyGlobalProxyCanUseFakeIP(t *testing.T) {
 	p := Proxy{
-		Suffixes:       []string{"youtube.com"},
+		Rules:          []config.Rule{fakeRule("youtube.com")},
 		RoutingMode:    "global",
 		FakeUpstream:   "127.0.0.1:15353",
 		RealUpstream:   "1.1.1.1:53",
@@ -136,6 +142,38 @@ func TestDNSPolicyGlobalProxyCanUseFakeIP(t *testing.T) {
 	}
 	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.100"); got != p.FakeUpstream {
 		t.Fatalf("got %s, want fake upstream for proxy client matched domain", got)
+	}
+}
+
+func TestDNSPolicyBlockReturnsNXDOMAIN(t *testing.T) {
+	p := Proxy{
+		Rules: []config.Rule{{
+			Name:         "blocked",
+			Enabled:      true,
+			Action:       "block",
+			DNSMode:      "real_ip",
+			DomainEquals: []string{"blocked.example"},
+		}},
+		RoutingMode: "custom",
+	}
+	resp, ok := p.localResponse(testQueryName(qTypeA, "blocked.example"), "192.168.8.10")
+	if !ok {
+		t.Fatal("expected local block response")
+	}
+	if rcode := resp[3] & 0x0f; rcode != 3 {
+		t.Fatalf("rcode=%d, want NXDOMAIN", rcode)
+	}
+}
+
+func fakeRule(suffix string) config.Rule {
+	return config.Rule{
+		Name:           suffix,
+		Enabled:        true,
+		Action:         "proxy",
+		Outbound:       "proxy_default",
+		DNSMode:        "fakeip",
+		DomainEquals:   []string{suffix},
+		DomainEndsWith: []string{"." + suffix},
 	}
 }
 

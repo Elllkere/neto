@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/elllkere/neto/internal/config"
+	"github.com/elllkere/neto/internal/ruleengine"
 )
 
 type Proxy struct {
@@ -18,7 +19,7 @@ type Proxy struct {
 	RealUpstream        string
 	RoutingMode         string
 	ClientPolicies      map[string]string
-	Suffixes            []string
+	Rules               []config.Rule
 	FilterAAAAForFakeIP bool
 	Timeout             time.Duration
 }
@@ -35,21 +36,9 @@ const (
 )
 
 func New(cfg config.Config) Proxy {
-	var suffixes []string
 	clientPolicies := map[string]string{}
 	for _, client := range cfg.Clients {
 		clientPolicies[client.IP] = client.Policy
-	}
-	for _, rule := range cfg.DomainRules {
-		if rule.Mode != "fakeip" {
-			continue
-		}
-		for _, suffix := range rule.Suffixes {
-			suffix = strings.Trim(strings.ToLower(suffix), ".")
-			if suffix != "" {
-				suffixes = append(suffixes, suffix)
-			}
-		}
 	}
 	return Proxy{
 		Listen:              cfg.Main.DNSListen,
@@ -57,7 +46,7 @@ func New(cfg config.Config) Proxy {
 		RealUpstream:        cfg.Main.RealDNSUpstream,
 		RoutingMode:         cfg.Main.RoutingMode,
 		ClientPolicies:      clientPolicies,
-		Suffixes:            suffixes,
+		Rules:               append([]config.Rule(nil), cfg.Rules...),
 		FilterAAAAForFakeIP: cfg.Main.FilterAAAAForFakeIP,
 		Timeout:             5 * time.Second,
 	}
@@ -212,7 +201,8 @@ func (p Proxy) upstreamFor(msg []byte, clientIP string) string {
 	if !ok {
 		return p.RealUpstream
 	}
-	if p.shouldUseFakeIP(query.Name, clientIP) {
+	decision := p.domainDecision(query.Name, clientIP)
+	if decision.Action == "proxy" && decision.DNSMode == "fakeip" {
 		return p.FakeUpstream
 	}
 	return p.RealUpstream
@@ -223,21 +213,25 @@ func (p Proxy) localResponse(msg []byte, clientIP string) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
-	if p.FilterAAAAForFakeIP && query.Type == qTypeAAAA && p.shouldUseFakeIP(query.Name, clientIP) {
+	decision := p.domainDecision(query.Name, clientIP)
+	if decision.Action == "block" {
+		return nxdomainResponse(msg, query.QuestionEnd), true
+	}
+	if p.FilterAAAAForFakeIP && query.Type == qTypeAAAA && decision.Action == "proxy" && decision.DNSMode == "fakeip" {
 		return nodataResponse(msg, query.QuestionEnd), true
 	}
 	return nil, false
 }
 
-func (p Proxy) shouldUseFakeIP(name string, clientIP string) bool {
+func (p Proxy) domainDecision(name string, clientIP string) ruleengine.Decision {
 	policy := p.clientPolicy(clientIP)
 	if policy == "direct" {
-		return false
+		return ruleengine.Decision{Action: "direct", DNSMode: "real_ip"}
 	}
 	if p.RoutingMode == "global" && policy != "proxy" {
-		return false
+		return ruleengine.Decision{Action: "direct", DNSMode: "real_ip"}
 	}
-	return p.matchesFakeIP(name)
+	return ruleengine.DomainDecision(p.Rules, name)
 }
 
 func (p Proxy) clientPolicy(clientIP string) string {
@@ -247,16 +241,6 @@ func (p Proxy) clientPolicy(clientIP string) string {
 		}
 	}
 	return "default"
-}
-
-func (p Proxy) matchesFakeIP(name string) bool {
-	name = strings.Trim(strings.ToLower(name), ".")
-	for _, suffix := range p.Suffixes {
-		if name == suffix || strings.HasSuffix(name, "."+suffix) {
-			return true
-		}
-	}
-	return false
 }
 
 func sourceIP(addr net.Addr) string {
@@ -416,6 +400,12 @@ func nodataResponse(query []byte, questionEnd int) []byte {
 	binary.BigEndian.PutUint16(resp[6:8], 0)
 	binary.BigEndian.PutUint16(resp[8:10], 0)
 	binary.BigEndian.PutUint16(resp[10:12], 0)
+	return resp
+}
+
+func nxdomainResponse(query []byte, questionEnd int) []byte {
+	resp := nodataResponse(query, questionEnd)
+	resp[3] = (resp[3] & 0xf0) | 0x03
 	return resp
 }
 

@@ -5,11 +5,54 @@ after installing neto.
 
 Routing semantics in v1:
 
-- `routing_mode=custom`: domain/subnet rules decide proxy; unmatched traffic is `default_outbound=direct`.
+- `routing_mode=custom`: ordered `config rule` sections decide proxy/direct/block; unmatched traffic is `default_outbound=direct`.
 - `routing_mode=global`: LAN client non-reserved TCP/UDP traffic is proxied unless the client policy is `direct`.
 - Client `policy=default` follows `routing_mode`.
 - Client `policy=proxy` forces non-reserved TCP/UDP traffic to `proxy_default`.
 - Client `policy=direct` bypasses neto and receives real DNS answers.
+
+Rules are evaluated by ascending `priority`; the first rule whose include
+conditions match and exclude conditions do not match wins. Domain rule fields are
+literal string operations, not DNS-aware matching:
+
+- `domain_equals youtube.com` matches only `youtube.com`.
+- `domain_contains youtube` matches `youtube.com`, `youtube.kz`, and `notyoutube.com`.
+- `domain_starts_with you` matches `youtube.com`.
+- `domain_ends_with youtube.com` matches `youtube.com`, `www.youtube.com`, and `notyoutube.com`.
+- `domain_ends_with .youtube.com` matches `www.youtube.com`, but not `youtube.com` or `notyoutube.com`.
+
+For root + subdomains, use both:
+
+```uci
+list domain_equals 'youtube.com'
+list domain_ends_with '.youtube.com'
+```
+
+Exclude fields use the same semantics:
+`exclude_domain_equals`, `exclude_domain_contains`,
+`exclude_domain_starts_with`, and `exclude_domain_ends_with`.
+
+Provider rules use `list file` with IPv4 CIDR files and compile into nft
+interval sets in rule order.
+
+Rules are for explicit domain/IP/provider matches only. To proxy everything
+globally, use General -> `routing_mode=global`. To proxy one client entirely,
+use client `policy=proxy`.
+
+Example:
+
+```uci
+config rule
+	option name 'youtube_except_kz'
+	option enabled '1'
+	option priority '100'
+	option action 'proxy'
+	option outbound 'proxy_default'
+	option dns_mode 'fakeip'
+	list domain_contains 'youtube'
+	list exclude_domain_equals 'youtube.kz'
+	list exclude_domain_ends_with '.youtube.kz'
+```
 
 Neto only routes LAN client traffic. Configure at least one `list lan_subnet`
 in `/etc/config/neto`, for example `192.168.8.0/24`. Optional

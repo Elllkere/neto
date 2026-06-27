@@ -1,6 +1,7 @@
 package nft
 
 import (
+	"net"
 	"strings"
 	"testing"
 
@@ -15,9 +16,10 @@ func TestGenerateOrder(t *testing.T) {
 		{Name: "direct", IP: "192.168.8.50", Policy: "direct"},
 		{Name: "proxy", IP: "192.168.8.100", Policy: "proxy"},
 	}
+	cfg.Rules = []config.Rule{providerRule("cloudflare", 100, "proxy")}
 	out, err := Generate(Input{
-		Config:        cfg,
-		ProviderCIDRs: policy.MustIPv4CIDRs("1.1.1.0/24"),
+		Config:    cfg,
+		RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +31,7 @@ func TestGenerateOrder(t *testing.T) {
 	reserved := strings.Index(out, "ip daddr @reserved4 return")
 	forced := strings.Index(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_default")
 	fakeip := strings.Index(out, "ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } jump to_proxy_default")
-	subnet := strings.Index(out, "ip daddr @proxy_default4 meta l4proto { tcp, udp } jump to_proxy_default")
+	subnet := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default")
 	def := strings.Index(out, "\t\treturn\n\t}\n\tchain to_proxy_default")
 
 	if !(guard >= 0 && guard < fromLAN && fromLAN < direct && direct < reserved && reserved < forced && forced < fakeip && fakeip < subnet && subnet < def) {
@@ -43,6 +45,7 @@ func TestGenerateOrder(t *testing.T) {
 func TestGenerateUsesSetForManyProviderCIDRs(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Main.NFTCounters = false
+	cfg.Rules = []config.Rule{providerRule("large", 100, "proxy")}
 	cidrs := make([]string, 0, 7000)
 	for i := 0; i < 7000; i++ {
 		cidrs = append(cidrs, "100."+string(rune('0'+(i%10)))+".0.0/24")
@@ -54,15 +57,15 @@ func TestGenerateUsesSetForManyProviderCIDRs(t *testing.T) {
 			provider = append(provider, "11."+itoa(a)+"."+itoa(b)+".0/24")
 		}
 	}
-	out, err := Generate(Input{Config: cfg, ProviderCIDRs: policy.MustIPv4CIDRs(provider...)})
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs(provider...)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(out, "ip daddr @proxy_default4 meta l4proto { tcp, udp } jump to_proxy_default") != 1 {
+	if strings.Count(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") != 1 {
 		t.Fatalf("expected one set-based proxy rule:\n%s", out)
 	}
-	if strings.Count(out, "set proxy_default4") != 1 {
-		t.Fatalf("expected one proxy_default4 set:\n%s", out)
+	if strings.Count(out, "set rule4_0000") != 1 {
+		t.Fatalf("expected one rule4_0000 set:\n%s", out)
 	}
 	if strings.Count(out, "jump to_proxy_default") > 3 {
 		t.Fatalf("expected no per-CIDR proxy jump rules:\n%s", out)
@@ -72,7 +75,8 @@ func TestGenerateUsesSetForManyProviderCIDRs(t *testing.T) {
 func TestGenerateCounters(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Main.NFTCounters = true
-	out, err := Generate(Input{Config: cfg, ProviderCIDRs: policy.MustIPv4CIDRs("1.1.1.0/24")})
+	cfg.Rules = []config.Rule{providerRule("cloudflare", 100, "proxy")}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +85,7 @@ func TestGenerateCounters(t *testing.T) {
 		"ip daddr @reserved4 counter return",
 		"ip saddr @proxy_clients4 meta l4proto { tcp, udp } counter jump to_proxy_default",
 		"ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } counter jump to_proxy_default",
-		"ip daddr @proxy_default4 meta l4proto { tcp, udp } counter jump to_proxy_default",
+		"ip daddr @rule4_0000 meta l4proto { tcp, udp } counter jump to_proxy_default",
 		"meta l4proto { tcp, udp } counter meta mark set",
 	} {
 		if !strings.Contains(out, rule) {
@@ -231,6 +235,48 @@ func TestGenerateGlobalNonLANReturnsBeforeCatchAll(t *testing.T) {
 	}
 }
 
+func TestGenerateProviderRulePriorityDirectBeforeProxy(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Rules = []config.Rule{
+		providerRule("direct_google", 10, "direct"),
+		providerRule("proxy_all", 20, "proxy"),
+	}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{
+		0: policy.MustIPv4CIDRs("8.8.8.0/24"),
+		1: policy.MustIPv4CIDRs("0.0.0.0/0"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } return")
+	proxy := strings.Index(out, "ip daddr @rule4_0001 meta l4proto { tcp, udp } jump to_proxy_default")
+	if !(direct >= 0 && proxy >= 0 && direct < proxy) {
+		t.Fatalf("direct provider rule must be before proxy rule:\n%s", out)
+	}
+}
+
+func TestGenerateProviderRulePriorityProxyBeforeDirect(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Rules = []config.Rule{
+		providerRule("proxy_youtube", 10, "proxy"),
+		providerRule("direct_google", 20, "direct"),
+	}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{
+		0: policy.MustIPv4CIDRs("8.8.8.0/24"),
+		1: policy.MustIPv4CIDRs("8.8.8.0/24"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default")
+	direct := strings.Index(out, "ip daddr @rule4_0001 meta l4proto { tcp, udp } return")
+	if !(proxy >= 0 && direct >= 0 && proxy < direct) {
+		t.Fatalf("proxy provider rule must be before direct rule:\n%s", out)
+	}
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
@@ -243,4 +289,16 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+func providerRule(name string, priority int, action string) config.Rule {
+	return config.Rule{
+		Name:     name,
+		Enabled:  true,
+		Priority: priority,
+		Action:   action,
+		Outbound: "proxy_default",
+		DNSMode:  "real_ip",
+		Files:    []string{"/tmp/" + name + ".txt"},
+	}
 }

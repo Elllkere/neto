@@ -5,11 +5,16 @@ import (
 
 	"github.com/elllkere/neto/internal/config"
 	"github.com/elllkere/neto/internal/policy"
+	"github.com/elllkere/neto/internal/ruleengine"
 )
 
-func LoadSubnetRuleCIDRs(cfg config.Config) ([]*net.IPNet, error) {
-	var all []*net.IPNet
-	for _, rule := range cfg.SubnetRules {
+func LoadRuleCIDRs(cfg config.Config) (map[int][]*net.IPNet, error) {
+	out := map[int][]*net.IPNet{}
+	for i, rule := range cfg.Rules {
+		if !ruleengine.HasIPMatch(rule) || len(rule.Files) == 0 {
+			continue
+		}
+		var all []*net.IPNet
 		for _, path := range rule.Files {
 			cidrs, err := policy.LoadIPv4CIDRsFile(path)
 			if err != nil {
@@ -17,6 +22,7 @@ func LoadSubnetRuleCIDRs(cfg config.Config) ([]*net.IPNet, error) {
 			}
 			all = append(all, cidrs...)
 		}
+		out[i] = policy.NormalizeIPv4CIDRs(all)
 	}
-	return policy.NormalizeIPv4CIDRs(all), nil
+	return out, nil
 }

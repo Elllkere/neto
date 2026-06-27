@@ -13,9 +13,9 @@
     "write": {
       "uci": [ "neto" ],
       "file": {
-        "/usr/bin/netod": [ "exec" ]
+        "/usr/bin/netod": [ "exec" ],
+        "/etc/init.d/neto": [ "exec" ]
       }
     }
   }
 }
-

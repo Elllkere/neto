@@ -250,11 +250,11 @@ func compile(opts options) (config.Config, string, string, error) {
 	if err != nil {
 		return config.Config{}, "", "", err
 	}
-	cidrs, err := provider.LoadSubnetRuleCIDRs(cfg)
+	cidrs, err := provider.LoadRuleCIDRs(cfg)
 	if err != nil {
 		return config.Config{}, "", "", err
 	}
-	nftText, err := nft.Generate(nft.Input{Config: cfg, ProviderCIDRs: cidrs})
+	nftText, err := nft.Generate(nft.Input{Config: cfg, RuleCIDRs: cidrs})
 	if err != nil {
 		return config.Config{}, "", "", err
 	}

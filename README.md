@@ -5,6 +5,7 @@ decisions are made with firewall4/nftables before traffic reaches sing-box;
 sing-box is used only as the FakeIP DNS owner, TProxy inbound backend, and proxy
 outbound executor.
 
-Milestone 1 provides the daemon skeleton, UCI parsing, IPv4 provider loading,
-nftables and sing-box config generation, OpenWrt/ImmortalWrt init integration,
-embedded installer scripts, and a minimal LuCI application.
+Milestone 1 provides the daemon skeleton, UCI parsing, ordered rules with
+include/exclude domain matching, IPv4 provider loading, nftables and sing-box
+config generation, OpenWrt/ImmortalWrt init integration, embedded installer
+scripts, and a minimal LuCI application.
