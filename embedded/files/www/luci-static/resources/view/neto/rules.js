@@ -31,35 +31,53 @@ function rewriteRuleState() {
 			uci.unset('neto', sid, 'outbound');
 		}
 
-		if (domainInput == '' && optionValues(sid, 'domain_provider').length > 0)
-			domainInput = 'provider';
-		if (domainInput != 'text' && domainInput != 'provider')
+		if (domainInput == '') {
+			if (optionValues(sid, 'domain_provider').length > 0)
+				domainInput = 'provider';
+			else if (optionValues(sid, 'domain_file').length > 0)
+				domainInput = 'file';
+		}
+		if (domainInput != 'text' && domainInput != 'provider' && domainInput != 'file')
 			domainInput = 'fields';
 		uci.set('neto', sid, 'domain_input', domainInput);
 
 		if (domainInput == 'provider') {
 			unsetRuleOptions(sid, [
 				'domain_equals', 'domain_contains', 'domain_starts_with', 'domain_ends_with',
-				'exclude_domain_equals', 'exclude_domain_contains', 'exclude_domain_starts_with', 'exclude_domain_ends_with'
+				'exclude_domain_equals', 'exclude_domain_contains', 'exclude_domain_starts_with', 'exclude_domain_ends_with',
+				'domain_file'
+			]);
+		} else if (domainInput == 'file') {
+			unsetRuleOptions(sid, [
+				'domain_equals', 'domain_contains', 'domain_starts_with', 'domain_ends_with',
+				'exclude_domain_equals', 'exclude_domain_contains', 'exclude_domain_starts_with', 'exclude_domain_ends_with',
+				'domain_provider'
 			]);
 		} else {
 			uci.unset('neto', sid, 'domain_provider');
+			uci.unset('neto', sid, 'domain_file');
 		}
 
 		if (ipInput == '') {
 			if (optionValues(sid, 'ip_provider').length > 0)
 				ipInput = 'provider';
+			else if (optionValues(sid, 'ip_file').length > 0 || optionValues(sid, 'file').length > 0)
+				ipInput = 'file';
 			else
 				ipInput = 'list';
 		}
-		if (ipInput != 'text' && ipInput != 'provider')
+		if (ipInput != 'text' && ipInput != 'provider' && ipInput != 'file')
 			ipInput = 'list';
 		uci.set('neto', sid, 'ip_input', ipInput);
 
 		if (ipInput == 'provider') {
-			uci.unset('neto', sid, 'ip_cidr');
+			unsetRuleOptions(sid, [ 'ip_cidr', 'ip_file', 'file' ]);
+		} else if (ipInput == 'file') {
+			unsetRuleOptions(sid, [ 'ip_cidr', 'ip_provider', 'file' ]);
 		} else {
 			uci.unset('neto', sid, 'ip_provider');
+			uci.unset('neto', sid, 'ip_file');
+			uci.unset('neto', sid, 'file');
 		}
 	});
 }
@@ -289,6 +307,7 @@ return view.extend({
 		o = s.option(form.ListValue, 'domain_input', _('Domain input'));
 		o.value('fields', _('Fields'));
 		o.value('text', _('Textbox'));
+		o.value('file', _('File paths'));
 		o.value('provider', _('Providers'));
 		o.default = 'fields';
 		o.rmempty = false;
@@ -300,6 +319,8 @@ return view.extend({
 				return value;
 			if (optionValues(section_id, 'domain_provider').length > 0)
 				return 'provider';
+			if (optionValues(section_id, 'domain_file').length > 0)
+				return 'file';
 			return 'fields';
 		};
 
@@ -322,10 +343,12 @@ return view.extend({
 		addTextList(s, '_exclude_domain_ends_with_text', 'exclude_domain_ends_with', _('Exclude ends with text'), 'domain_input', 'text');
 
 		addProviderList(s, 'domain_provider', _('Domain providers'), 'domain', 'domain_input', 'provider');
+		addDynamicList(s, 'domain_file', _('Domain file paths'), 'domain_input', 'file', '/etc/neto/domains.txt');
 
 		o = s.option(form.ListValue, 'ip_input', _('IP input'));
 		o.value('list', _('List'));
 		o.value('text', _('Textbox'));
+		o.value('file', _('File paths'));
 		o.value('provider', _('Providers'));
 		o.default = 'list';
 		o.rmempty = false;
@@ -337,12 +360,15 @@ return view.extend({
 				return value;
 			if (optionValues(section_id, 'ip_provider').length > 0)
 				return 'provider';
+			if (optionValues(section_id, 'ip_file').length > 0 || optionValues(section_id, 'file').length > 0)
+				return 'file';
 			return 'list';
 		};
 
 		addDynamicList(s, 'ip_cidr', _('IP/CIDR list'), 'ip_input', 'list', '1.1.1.1');
 		addTextList(s, '_ip_cidr_text', 'ip_cidr', _('IP/CIDR text'), 'ip_input', 'text', '1.1.1.1\n8.8.8.0/24');
 		addProviderList(s, 'ip_provider', _('IP providers'), 'ip', 'ip_input', 'provider');
+		addDynamicList(s, 'ip_file', _('IP/CIDR file paths'), 'ip_input', 'file', '/etc/neto/ipv4-cidr.txt');
 
 		o = s.option(form.DummyValue, '_packet_match', _('Advanced packet match'),
 			_('Port matching is packet-level. It applies only to provider/CIDR/IP matches, not to DNS/FakeIP domain matching.'));
