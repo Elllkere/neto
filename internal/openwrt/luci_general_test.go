@@ -6,38 +6,86 @@ import (
 	"testing"
 )
 
-func TestGeneralLuCIFlagsPersistZeroValues(t *testing.T) {
+func TestGeneralLuCIShowsStatusControlsAndOnlyCoreSettings(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/general.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(data)
-	for _, field := range []string{
-		"enabled",
-		"manage_dnsmasq",
-		"filter_aaaa_for_fakeip",
-		"fakeip_enabled",
-		"resolve_for_subnet_rules",
-		"nft_counters",
+	for _, want := range []string{
+		"'require neto.i18n as netoI18n'",
+		"commandResult('/etc/init.d/neto', [ 'status' ])",
+		"commandResult('/etc/init.d/neto', [ 'enabled' ])",
+		"commandResult('/bin/pidof', [ 'netod' ])",
+		"commandResult('/bin/pidof', [ 'sing-box' ])",
+		"commandResult('/usr/bin/netod', [ 'version' ])",
+		"commandResult(singboxBin, [ 'version' ])",
+		"form.DummyValue, '_neto_status'",
+		"form.DummyValue, '_singbox_status'",
+		"form.DummyValue, '_netod_version'",
+		"form.DummyValue, '_singbox_version'",
+		"form.Button, '_service'",
+		"form.Button, '_autostart'",
+		"fs.exec('/etc/init.d/neto', [ action ])",
+		"fs.exec('/sbin/uci', [ 'set', 'neto.main.enabled=1' ])",
+		"form.ListValue, 'routing_mode'",
+		"form.ListValue, 'default_outbound'",
+		"form.ListValue, 'language'",
 	} {
-		needle := "form.Flag, '" + field + "'"
-		start := strings.Index(s, needle)
-		if start < 0 {
-			t.Fatalf("general.js missing flag %q:\n%s", field, s)
+		if !strings.Contains(s, want) {
+			t.Fatalf("general.js missing %q:\n%s", want, s)
 		}
-		end := strings.Index(s[start+len(needle):], "\n\t\to = s.option(")
-		block := s[start:]
-		if end >= 0 {
-			block = s[start : start+len(needle)+end]
+	}
+	for _, forbidden := range []string{
+		"form.Flag, 'enabled'",
+		"form.Flag, 'fakeip_enabled'",
+		"form.Value, 'dns_listen'",
+		"form.DynamicList, 'lan_subnet'",
+		"form.Value, 'singbox_bin'",
+		"form.Value, 'tproxy_port'",
+	} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("general.js should not expose %q:\n%s", forbidden, s)
 		}
-		for _, want := range []string{
-			"o.enabled = '1'",
-			"o.disabled = '0'",
-			"o.rmempty = false",
-		} {
-			if !strings.Contains(block, want) {
-				t.Fatalf("flag %q must persist 0/1 and not delete option; missing %q:\n%s", field, want, block)
-			}
+	}
+}
+
+func TestAdvancedLuCIContainsMovedSettingsButNoFakeIPToggle(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/advanced.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"form.NamedSection, 'main', 'main', _('Advanced')",
+		"form.Value, 'dns_listen'",
+		"form.Value, 'real_dns_upstream'",
+		"form.Flag, 'manage_dnsmasq'",
+		"form.Flag, 'filter_aaaa_for_fakeip'",
+		"form.DynamicList, 'lan_subnet'",
+		"form.DynamicList, 'lan_iface'",
+		"form.Value, 'singbox_bin'",
+		"form.Value, 'singbox_dns'",
+		"form.Value, 'tproxy_port'",
+		"form.Value, 'mark'",
+		"form.Value, 'table'",
+		"form.Value, 'fakeip_range'",
+		"form.Flag, 'resolve_for_subnet_rules'",
+		"form.Flag, 'nft_counters'",
+		"uci.set('neto', 'main', 'fakeip_enabled', '1')",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("advanced.js missing %q:\n%s", want, s)
+		}
+	}
+	for _, forbidden := range []string{
+		"form.Flag, 'enabled'",
+		"form.Flag, 'fakeip_enabled'",
+		"form.ListValue, 'routing_mode'",
+		"form.ListValue, 'default_outbound'",
+	} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("advanced.js should not expose %q:\n%s", forbidden, s)
 		}
 	}
 }

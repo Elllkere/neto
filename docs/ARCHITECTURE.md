@@ -43,6 +43,7 @@ Installers should:
 - prefer compatible system sing-box
 - install managed sing-box to `/usr/libexec/neto/sing-box` when needed
 - never overwrite `/usr/bin/sing-box`
+- optionally enable the embedded Russian LuCI localization when requested
 
 The archive should have a top-level `neto/` directory.
 
@@ -256,6 +257,13 @@ When `auto_update=1`, the init script writes neto-owned cron entries in
 `netod subscriptions update <name>` and restart neto after the update so the
 generated sing-box config sees replaced nodes. Stop/reload removes or rewrites
 only the marked neto cron block.
+
+## LuCI Layout
+
+General is the operational page: service status, neto/sing-box versions,
+Start/Stop, Autostart, optional language selection, routing mode, and default
+outbound. Advanced contains lower-level DNS, LAN, sing-box, TProxy, FakeIP
+range, and nft settings. Debug is the last LuCI tab and shows `netod debug`.
 
 ## Client Policy Model
 

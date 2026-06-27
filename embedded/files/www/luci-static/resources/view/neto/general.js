@@ -1,10 +1,65 @@
 'use strict';
 'require fs';
 'require form';
+'require ui';
 'require uci';
 'require view';
+'require neto.i18n as netoI18n';
+
+var _ = netoI18n.translate;
+
+function commandResult(path, args) {
+	return fs.exec(path, args).catch(function(err) {
+		return {
+			code: -1,
+			stdout: '',
+			stderr: String(err)
+		};
+	});
+}
+
+function outputLine(res) {
+	return String((res && (res.stdout || res.stderr)) || '').trim().split('\n')[0] || '-';
+}
+
+function processStatus(res) {
+	return res && res.code == 0 ? _('Running') : _('Stopped');
+}
+
+function serviceStatus(res) {
+	return res && res.code == 0 ? _('Running') : _('Stopped');
+}
+
+function autostartStatus(res) {
+	return res && res.code == 0 ? _('Enabled') : _('Disabled');
+}
+
+function forceGeneralState() {
+	uci.set('neto', 'main', 'fakeip_enabled', '1');
+}
 
 return view.extend({
+	load: function() {
+		return uci.load('neto').then(function() {
+			var singboxBin = uci.get('neto', 'main', 'singbox_bin') || '/usr/libexec/neto/sing-box';
+
+			return Promise.all([
+				commandResult('/etc/init.d/neto', [ 'status' ]),
+				commandResult('/etc/init.d/neto', [ 'enabled' ]),
+				commandResult('/bin/pidof', [ 'netod' ]),
+				commandResult('/bin/pidof', [ 'sing-box' ]),
+				commandResult('/usr/bin/netod', [ 'version' ]),
+				commandResult(singboxBin, [ 'version' ])
+			]);
+		});
+	},
+
+	handleSave: function() {
+		return this.map.save(forceGeneralState).then(function() {
+			return ui.changes.init();
+		});
+	},
+
 	handleSaveApply: function(ev) {
 		return this.handleSave(ev)
 			.then(function() {
@@ -18,36 +73,117 @@ return view.extend({
 			});
 	},
 
-	render: function() {
-		var m, s, o;
+	handleService: function(action) {
+		var chain = Promise.resolve();
+
+		if (action == 'start') {
+			chain = chain
+				.then(function() {
+					return fs.exec('/sbin/uci', [ 'set', 'neto.main.enabled=1' ]);
+				})
+				.then(function(res) {
+					if (res.code)
+						throw new Error(res.stderr || res.stdout || _('Update failed'));
+
+					return fs.exec('/sbin/uci', [ 'commit', 'neto' ]);
+				});
+		}
+
+		return chain
+			.then(function(res) {
+				if (res && res.code)
+					throw new Error(res.stderr || res.stdout || _('Update failed'));
+
+				return fs.exec('/etc/init.d/neto', [ action ]);
+			})
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Update failed'));
+
+				window.location.reload();
+			});
+	},
+
+	handleAutostart: function(action) {
+		return fs.exec('/etc/init.d/neto', [ action ])
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Update failed'));
+
+				window.location.reload();
+			});
+	},
+
+	render: function(data) {
+		var m, s, o, state, serviceRunning, autostartEnabled;
+
+		data = data || [];
+		state = {
+			service: data[0],
+			autostart: data[1],
+			netod: data[2],
+			singbox: data[3],
+			netodVersion: data[4],
+			singboxVersion: data[5]
+		};
+		serviceRunning = state.service && state.service.code == 0;
+		autostartEnabled = state.autostart && state.autostart.code == 0;
 
 		m = new form.Map('neto', _('neto'));
+		this.map = m;
 
 		s = m.section(form.NamedSection, 'main', 'main', _('General'));
 
-		o = s.option(form.Flag, 'enabled', _('Enabled'));
-		o.enabled = '1';
-		o.disabled = '0';
-		o.default = '1';
-		o.rmempty = false;
+		o = s.option(form.DummyValue, '_neto_status', _('neto status'));
+		o.cfgvalue = function() {
+			return serviceStatus(state.service);
+		};
 
-		o = s.option(form.Value, 'dns_listen', _('DNS listen'));
-		o.placeholder = '127.0.0.1:5353';
+		o = s.option(form.DummyValue, '_singbox_status', _('sing-box status'));
+		o.cfgvalue = function() {
+			return processStatus(state.singbox);
+		};
 
-		o = s.option(form.Value, 'real_dns_upstream', _('Real DNS upstream'));
-		o.placeholder = '1.1.1.1:53';
+		o = s.option(form.DummyValue, '_autostart_status', _('Autostart'));
+		o.cfgvalue = function() {
+			return autostartStatus(state.autostart);
+		};
 
-		o = s.option(form.Flag, 'manage_dnsmasq', _('Manage dnsmasq'));
-		o.enabled = '1';
-		o.disabled = '0';
-		o.default = '1';
-		o.rmempty = false;
+		o = s.option(form.DummyValue, '_netod_version', _('netod version'));
+		o.cfgvalue = function() {
+			return outputLine(state.netodVersion);
+		};
 
-		o = s.option(form.Flag, 'filter_aaaa_for_fakeip', _('Filter FakeIP AAAA'));
-		o.enabled = '1';
-		o.disabled = '0';
-		o.default = '1';
-		o.rmempty = false;
+		o = s.option(form.DummyValue, '_singbox_version', _('sing-box version'));
+		o.cfgvalue = function() {
+			return outputLine(state.singboxVersion);
+		};
+
+		o = s.option(form.Button, '_service', _('Service'));
+		o.inputtitle = serviceRunning ? _('Stop') : _('Start');
+		o.inputstyle = serviceRunning ? 'reset' : 'apply';
+		o.onclick = L.bind(function() {
+			return this.handleService(serviceRunning ? 'stop' : 'start').catch(function(err) {
+				ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+			});
+		}, this);
+
+		o = s.option(form.Button, '_autostart', _('Autostart'));
+		o.inputtitle = autostartEnabled ? _('Disable') : _('Enable');
+		o.inputstyle = autostartEnabled ? 'reset' : 'apply';
+		o.onclick = L.bind(function() {
+			return this.handleAutostart(autostartEnabled ? 'disable' : 'enable').catch(function(err) {
+				ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+			});
+		}, this);
+
+		if (netoI18n.ruAvailable()) {
+			o = s.option(form.ListValue, 'language', _('Language'));
+			o.value('en', _('English'));
+			o.value('ru', _('Russian'));
+			o.default = 'en';
+			o.rmempty = false;
+		}
 
 		o = s.option(form.ListValue, 'routing_mode', _('Routing mode'));
 		o.value('custom', _('Custom'));
@@ -57,52 +193,6 @@ return view.extend({
 		o = s.option(form.ListValue, 'default_outbound', _('Default outbound'));
 		o.value('direct', _('Direct'));
 		o.default = 'direct';
-
-		o = s.option(form.DynamicList, 'lan_subnet', _('LAN IPv4 subnets'));
-		o.datatype = 'cidr4';
-		o.placeholder = '192.168.8.0/24';
-
-		o = s.option(form.DynamicList, 'lan_iface', _('LAN interfaces'));
-		o.placeholder = 'br-lan';
-
-		o = s.option(form.Value, 'singbox_bin', _('sing-box binary'));
-		o.placeholder = '/usr/libexec/neto/sing-box';
-
-		o = s.option(form.Value, 'singbox_dns', _('sing-box DNS'));
-		o.placeholder = '127.0.0.1:15353';
-
-		o = s.option(form.Value, 'tproxy_port', _('TProxy port'));
-		o.datatype = 'port';
-		o.placeholder = '16001';
-
-		o = s.option(form.Value, 'mark', _('Mark'));
-		o.placeholder = '0x101';
-
-		o = s.option(form.Value, 'table', _('Table'));
-		o.datatype = 'uinteger';
-		o.placeholder = '101';
-
-		o = s.option(form.Flag, 'fakeip_enabled', _('FakeIP'));
-		o.enabled = '1';
-		o.disabled = '0';
-		o.default = '1';
-		o.rmempty = false;
-
-		o = s.option(form.Value, 'fakeip_range', _('FakeIP range'));
-		o.datatype = 'cidr4';
-		o.placeholder = '198.18.0.0/15';
-
-		o = s.option(form.Flag, 'resolve_for_subnet_rules', _('Resolve subnet rules'));
-		o.enabled = '1';
-		o.disabled = '0';
-		o.default = '1';
-		o.rmempty = false;
-
-		o = s.option(form.Flag, 'nft_counters', _('nft counters'));
-		o.enabled = '1';
-		o.disabled = '0';
-		o.default = '1';
-		o.rmempty = false;
 
 		return m.render();
 	}

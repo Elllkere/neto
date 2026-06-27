@@ -32,6 +32,8 @@ const (
 	sbFileName    = "sing-box.json"
 )
 
+var version = "dev"
+
 type options struct {
 	configPath        string
 	outDir            string
@@ -63,6 +65,9 @@ func run(args []string) error {
 	}
 
 	switch args[0] {
+	case "version":
+		fmt.Printf("netod %s\n", version)
+		return nil
 	case "check":
 		opts, err := parseOptions(args[0], args[1:], true)
 		if err != nil {
@@ -179,7 +184,7 @@ func parseSubscriptionOptions(args []string) (subscriptionOptions, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: netod <check|compile|apply|status|debug|run|import-uri|subscriptions> [options]")
+	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions> [options]")
 }
 
 func commandCheck(opts options) error {

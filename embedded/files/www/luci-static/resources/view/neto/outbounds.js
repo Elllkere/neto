@@ -4,8 +4,10 @@
 'require ui';
 'require uci';
 'require view';
+'require neto.i18n as netoI18n';
 
 var importPath = '/tmp/neto-import.txt';
+var _ = netoI18n.translate;
 
 function isReservedTag(tag) {
 	return tag == 'direct' || tag == 'blocked' || tag == 'block' || tag == 'proxy_default';
@@ -614,7 +616,7 @@ return view.extend({
 
 		o = sub.option(form.ListValue, 'update_hour', _('Update time'));
 		for (var hour = 0; hour < 24; hour++)
-			o.value(String(hour), _('%d hours').format(hour));
+			o.value(String(hour), _('%d:00').format(hour));
 		o.default = '0';
 		o.depends('auto_update', '1');
 		o.rmempty = false;

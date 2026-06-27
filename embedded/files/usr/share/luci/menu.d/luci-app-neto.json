@@ -10,20 +10,20 @@
       "uci": { "neto": true }
     }
   },
-  "admin/services/neto/overview": {
-    "title": "Overview",
+  "admin/services/neto/general": {
+    "title": "General",
     "order": 10,
     "action": {
       "type": "view",
-      "path": "neto/overview"
+      "path": "neto/general"
     }
   },
-  "admin/services/neto/general": {
-    "title": "General",
+  "admin/services/neto/rules": {
+    "title": "Rules",
     "order": 20,
     "action": {
       "type": "view",
-      "path": "neto/general"
+      "path": "neto/rules"
     }
   },
   "admin/services/neto/clients": {
@@ -32,14 +32,6 @@
     "action": {
       "type": "view",
       "path": "neto/clients"
-    }
-  },
-  "admin/services/neto/rules": {
-    "title": "Rules",
-    "order": 50,
-    "action": {
-      "type": "view",
-      "path": "neto/rules"
     }
   },
   "admin/services/neto/outbounds": {
@@ -52,10 +44,26 @@
   },
   "admin/services/neto/providers": {
     "title": "Providers",
-    "order": 60,
+    "order": 50,
     "action": {
       "type": "view",
       "path": "neto/providers"
+    }
+  },
+  "admin/services/neto/advanced": {
+    "title": "Advanced",
+    "order": 60,
+    "action": {
+      "type": "view",
+      "path": "neto/advanced"
+    }
+  },
+  "admin/services/neto/debug": {
+    "title": "Debug",
+    "order": 90,
+    "action": {
+      "type": "view",
+      "path": "neto/debug"
     }
   }
 }

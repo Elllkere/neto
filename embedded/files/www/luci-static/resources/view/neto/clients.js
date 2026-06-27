@@ -3,8 +3,15 @@
 'require form';
 'require uci';
 'require view';
+'require neto.i18n as netoI18n';
+
+var _ = netoI18n.translate;
 
 return view.extend({
+	load: function() {
+		return uci.load('neto');
+	},
+
 	handleSaveApply: function(ev) {
 		return this.handleSave(ev)
 			.then(function() {

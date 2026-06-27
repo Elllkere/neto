@@ -10,10 +10,11 @@ MIN_SINGBOX_VERSION="1.12.0"
 LOCAL_ARCHIVE=""
 DRY_RUN=0
 VERBOSE=0
+LANGUAGE_CHOICE=""
 
 usage() {
 	cat >&2 <<'EOF'
-usage: install.sh [--local ./dist/neto-openwrt-embedded.tar.gz] [--dry-run] [--verbose]
+usage: install.sh [--local ./dist/neto-openwrt-embedded.tar.gz] [--dry-run] [--verbose] [--language en|ru]
 EOF
 }
 
@@ -34,6 +35,22 @@ while [ "$#" -gt 0 ]; do
 		--verbose)
 			VERBOSE=1
 			shift
+			;;
+		--language)
+			[ "$#" -ge 2 ] || {
+				usage
+				exit 1
+			}
+			case "$2" in
+				en|ru)
+					LANGUAGE_CHOICE="$2"
+					;;
+				*)
+					usage
+					exit 1
+					;;
+			esac
+			shift 2
 			;;
 		-h|--help)
 			usage
@@ -285,6 +302,19 @@ detect_lan_subnet() {
 	local ipaddr=""
 	local netmask=""
 	local prefix=""
+	local route=""
+	local NETWORK=""
+	local PREFIX=""
+
+	if command -v ip >/dev/null 2>&1; then
+		route="$(ip -4 route show dev br-lan scope link 2>/dev/null | awk '{ print $1; exit }' || true)"
+		case "$route" in
+			*/*)
+				echo "$route"
+				return
+				;;
+		esac
+	fi
 
 	if command -v uci >/dev/null 2>&1; then
 		ipaddr="$(uci -q get network.lan.ipaddr 2>/dev/null || true)"
@@ -296,6 +326,14 @@ detect_lan_subnet() {
 				;;
 		esac
 		if [ -n "$ipaddr" ] && [ -n "$netmask" ]; then
+			if command -v ipcalc.sh >/dev/null 2>&1; then
+				# shellcheck disable=SC2046
+				eval $(ipcalc.sh "$ipaddr" "$netmask" 2>/dev/null || true)
+				if [ -n "${NETWORK:-}" ] && [ -n "${PREFIX:-}" ]; then
+					echo "$NETWORK/$PREFIX"
+					return
+				fi
+			fi
 			prefix="$(netmask_to_prefix "$netmask")"
 			if [ -n "$prefix" ]; then
 				echo "$ipaddr/$prefix"
@@ -310,6 +348,44 @@ detect_lan_subnet() {
 	fi
 
 	echo "192.168.8.0/24"
+}
+
+choose_language() {
+	local ans
+
+	if [ -n "$LANGUAGE_CHOICE" ]; then
+		return 0
+	fi
+	if [ -t 0 ]; then
+		printf "neto install: install Russian LuCI localization? [y/N] "
+		read -r ans || ans=""
+		case "$ans" in
+			y|Y|yes|YES|Yes|д|Д|да|ДА|Да)
+				LANGUAGE_CHOICE="ru"
+				;;
+			*)
+				LANGUAGE_CHOICE="en"
+				;;
+		esac
+	else
+		LANGUAGE_CHOICE="en"
+	fi
+}
+
+configure_language() {
+	command -v uci >/dev/null 2>&1 || return 0
+	case "$LANGUAGE_CHOICE" in
+		ru)
+			log "enabling Russian LuCI localization"
+			uci set neto.main.language='ru'
+			uci set neto.main.language_ru_installed='1'
+			;;
+		*)
+			uci set neto.main.language='en'
+			uci set neto.main.language_ru_installed='0'
+			;;
+	esac
+	uci commit neto
 }
 
 ensure_lan_subnet_config() {
@@ -371,6 +447,7 @@ install_files() {
 	fi
 
 	ensure_lan_subnet_config
+	configure_language
 }
 
 if [ "$DRY_RUN" -eq 1 ] && [ ! -r /etc/openwrt_release ]; then
@@ -403,9 +480,16 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	else
 		dry_log "would download $BASE_URL/$ARCHIVE_NAME"
 	fi
+	if [ -n "$LANGUAGE_CHOICE" ]; then
+		dry_log "would configure LuCI language $LANGUAGE_CHOICE"
+	else
+		dry_log "would ask whether to enable Russian LuCI localization when interactive"
+	fi
 	dry_log "would install netod for $arch and configure dnsmasq/init/LuCI"
 	exit 0
 fi
+
+choose_language
 
 pkg_update "$pm"
 pkg_install "$pm" \

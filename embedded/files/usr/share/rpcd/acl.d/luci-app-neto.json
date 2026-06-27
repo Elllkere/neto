@@ -4,7 +4,11 @@
     "read": {
       "uci": [ "neto" ],
       "file": {
+        "/bin/pidof": [ "exec" ],
+        "/etc/init.d/neto": [ "exec" ],
         "/usr/bin/netod": [ "exec" ],
+        "/usr/bin/sing-box": [ "exec" ],
+        "/usr/libexec/neto/sing-box": [ "exec" ],
         "/etc/config/neto": [ "read" ],
         "/tmp/neto/neto.nft": [ "read" ],
         "/tmp/neto/sing-box.json": [ "read" ]

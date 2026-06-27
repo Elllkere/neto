@@ -7,6 +7,7 @@ OUT_DIR="${OUT_DIR:-$ROOT_DIR/dist}"
 WORK_DIR="${TMPDIR:-/tmp}/neto-pack.$$"
 ARCHIVE_ROOT="$WORK_DIR/neto"
 ARCHIVE="$OUT_DIR/neto-openwrt-embedded.tar.gz"
+VERSION="${NETO_VERSION:-$(git -C "$ROOT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)}"
 
 cleanup() {
 	rm -rf "$WORK_DIR"
@@ -29,7 +30,7 @@ build_netod() {
 		GOARM="$goarm" \
 		GOMIPS="$gomips" \
 		CGO_ENABLED=0 \
-		go build -buildvcs=false -trimpath -ldflags "-s -w" -o "$dest" ./cmd/netod
+		go build -buildvcs=false -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$dest" ./cmd/netod
 	)
 	chmod 0755 "$dest"
 }

@@ -4,6 +4,9 @@
 'require ui';
 'require uci';
 'require view';
+'require neto.i18n as netoI18n';
+
+var _ = netoI18n.translate;
 
 function rewriteRuleState() {
 	var n = 0;

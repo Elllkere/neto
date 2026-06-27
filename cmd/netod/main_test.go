@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,28 @@ import (
 
 	"github.com/elllkere/neto/internal/config"
 )
+
+func TestVersionCommand(t *testing.T) {
+	var out bytes.Buffer
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	err = run([]string{"version"})
+	_ = w.Close()
+	os.Stdout = oldStdout
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := out.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.String(), "netod ") {
+		t.Fatalf("unexpected version output: %q", out.String())
+	}
+}
 
 func TestDisabledConfigDoesNotRequireOutbound(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "neto")

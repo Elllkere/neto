@@ -136,7 +136,13 @@ Manually verify on router:
 - creating a rule writes `option enabled '1'`
 - disabling a rule writes `option enabled '0'`
 - editing a rule preserves `enabled`
-- General -> Enabled writes explicit `option enabled '0'` when disabled
+- General shows neto/sing-box status and versions
+- General Start starts the service and writes `neto.main.enabled=1`
+- General Stop stops the service through `/etc/init.d/neto stop`
+- General Autostart uses `/etc/init.d/neto enable|disable`
+- General exposes only language, routing mode, and default outbound from UCI
+- Advanced contains low-level DNS, LAN, sing-box, TProxy, FakeIP range, and nft settings
+- LuCI does not expose a FakeIP off switch and Save forces `fakeip_enabled=1`
 - creating a rule writes `priority`
 - moving rules rewrites priority as `100`, `200`, `300`, ...
 - Rules page writes only new matcher field names
@@ -165,8 +171,8 @@ Manually verify on router:
   `tls=1`, and `reality=1`
 - Outbounds page has an Import button next to Add for `vless://`,
   `hysteria2://`, `ss://`, and `trojan://` links
-- Outbounds page can save subscription URL, auto-update toggle, update hour
-  from a 0-23 dropdown, update_via, and optional update outbound
+- Outbounds page can save subscription URL, auto-update toggle, update time
+  from a `0:00`-`23:00` dropdown, update_via, and optional update outbound
 - Outbounds page hides update hour until auto-update is enabled
 - Outbounds page Manual Update replaces only nodes for the selected subscription
 - Imported nodes appear in the node list and in Rules outbound dropdown
@@ -175,8 +181,8 @@ Manually verify on router:
 - Imported nodes carry `option imported '1'`; subscription nodes also carry
   `option subscription '<name>'`
 - LuCI Save & Apply restarts neto after committing changes
-- setting General -> Enabled off stops neto even if no outbound is configured
-- with General -> Enabled on and no custom outbounds, `netod check` still
+- General Stop stops neto even if no outbound is configured
+- with General Start and no custom outbounds, `netod check` still
   succeeds because `direct` and `blocked` are built-ins
 
 Inspect UCI:

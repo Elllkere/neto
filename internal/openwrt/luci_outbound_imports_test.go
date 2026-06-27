@@ -37,7 +37,7 @@ func TestOutboundsLuCIContainsImportAndSubscriptions(t *testing.T) {
 		"form.Flag, 'auto_update'",
 		"form.ListValue, 'update_hour'",
 		"for (var hour = 0; hour < 24; hour++)",
-		"o.value(String(hour), _('%d hours').format(hour))",
+		"o.value(String(hour), _('%d:00').format(hour))",
 		"o.depends('auto_update', '1')",
 		"form.ListValue, 'update_via'",
 		"o.value('direct', _('Direct'))",
