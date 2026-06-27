@@ -2,7 +2,7 @@
 
 set -eu
 
-BASE_URL="${NETO_BASE_URL:-https://example.com/neto}"
+BASE_URL="${NETO_BASE_URL:-https://github.com/elllkere/neto/releases/latest/download}"
 ARCHIVE_NAME="neto-openwrt-embedded.tar.gz"
 WORK_DIR="${TMPDIR:-/tmp}/neto-install.$$"
 MANAGED_SINGBOX="/usr/libexec/neto/sing-box"

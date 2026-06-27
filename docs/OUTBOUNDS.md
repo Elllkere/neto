@@ -1,47 +1,66 @@
-# Outbound Profiles
+# Outbounds
 
-`direct` and `blocked` are built-in outbound tags. They are always generated for
-sing-box and must not be created as `config outbound` sections.
+`outbound` - это sing-box proxy profile, который выбирается в `rule` с
+`action=proxy`.
 
-The Outbounds LuCI page creates only real proxy profiles:
+Термины `direct`, `blocked`, `proxy`, `outbound`, `import`, `subscription`
+оставлены как config/UI names.
+
+## Built-ins
+
+Built-in outbound tags:
+
+- `direct`
+- `blocked`
+
+Они всегда генерируются для sing-box и не должны создаваться как
+`config outbound`.
+
+`proxy_default` deprecated. LuCI не должен создавать или предлагать
+`proxy_default`. Старые rules с `option outbound 'proxy_default'` могут быть
+normalized для compatibility.
+
+## Creatable Outbound Types
+
+LuCI Outbounds page создает только real proxy profiles:
 
 - `vless`
 - `hysteria2`
 - `shadowsocks`
 - `trojan`
 
-The LuCI editor keeps the table compact (`label`, `type`, `address`, `port`) and
-shows protocol-specific details in the edit dialog. VLESS flow, Shadowsocks
-method, TLS versions, ECH, uTLS, REALITY, and V2Ray transport fields are
-dropdown/list controls where possible. REALITY public key/short ID are shown
-only when REALITY is enabled.
+Outbounds table остается компактной:
 
-Rules default to `option outbound 'direct'`. After adding a custom outbound,
-select it in the rule outbound dropdown. The first Add input becomes the stable
-UCI section/tag; later edits should change `label`, not the tag.
+- label/name;
+- type;
+- address/server;
+- port.
 
-`proxy_default` is deprecated. Old rules using it are treated as `direct`, and
-old `proxy_default` outbound sections are ignored.
+Protocol-specific fields находятся в edit dialog.
 
-The parser also accepts these homeproxy-style aliases for compatibility:
-`address`, `vless_flow`, `tls_sni`, `tls_alpn`, `tls_insecure`, `tls_ech`,
-`tls_ech_config`, `tls_ech_config_path`, `tls_utls`, `tls_reality`,
-`tls_reality_public_key`, `tls_reality_short_id`, `grpc_servicename`, and
-`shadowsocks_encrypt_method`.
+## Rule Selection
 
-## Imports and Subscriptions
+Rule with `action=proxy` выбирает custom outbound:
 
-The Outbounds LuCI page and `netod` CLI create imported nodes as ordinary
-`config outbound` sections, so rules select imported nodes exactly like manual
-outbounds. LuCI keeps normal manual/imported outbounds separate from
-subscription definitions on the same Outbounds page. Nodes imported from a
-subscription remain editable in the normal Outbounds table; the next update of
-that subscription replaces those nodes from the subscription source again.
+```uci
+config rule
+	option action 'proxy'
+	option outbound 'my_vless'
+```
 
-Supported share link schemes:
+`direct` и `blocked` относятся к action/built-in behavior, а не к proxy outbound
+selection в Rules UI.
+
+## Imports
+
+`netod import-uri` импортирует share links и создает обычные `config outbound`
+sections.
+
+Supported schemes:
 
 - `vless://`
-- `hysteria2://` and `hy2://`
+- `hysteria2://`
+- `hy2://`
 - `ss://`
 - `trojan://`
 
@@ -51,9 +70,19 @@ Manual import:
 cat >/tmp/neto-import.txt <<'EOF'
 vless://UUID@example.com:443?security=reality&sni=example.com&pbk=PUBLIC_KEY&sid=SHORT_ID#My%20VLESS
 EOF
+
 netod import-uri -file /tmp/neto-import.txt
 /etc/init.d/neto restart
 ```
+
+Imported nodes:
+
+- carry `option imported '1'`;
+- are visible in Outbounds table;
+- are selectable in Rules outbound dropdown;
+- are ordinary editable outbounds.
+
+## Subscriptions
 
 Subscription config:
 
@@ -67,16 +96,32 @@ config subscription 'my_sub'
 	option update_via 'direct'
 ```
 
-Manual subscription update:
+Manual update:
 
 ```sh
 netod subscriptions update my_sub
 /etc/init.d/neto restart
 ```
 
-`update_via 'proxy'` does not change nft routing and does not capture router
-self traffic. It starts a temporary sing-box local mixed proxy and downloads the
-subscription through `update_outbound` or the first available custom outbound:
+Subscription nodes are ordinary outbound sections:
+
+```uci
+config outbound 'my_sub_ab12cd34ef'
+	option imported '1'
+	option subscription 'my_sub'
+	option tag 'my_sub_ab12cd34ef'
+	option label 'Imported node'
+	option type 'vless'
+```
+
+Updating a subscription replaces only nodes with matching
+`option subscription`.
+
+## update_via proxy
+
+`update_via 'proxy'` does not change nft routing and does not capture
+router-self traffic. It starts temporary sing-box local mixed proxy and uses
+`curl` through selected outbound.
 
 ```uci
 config subscription 'my_sub'
@@ -88,20 +133,7 @@ config subscription 'my_sub'
 	option update_outbound 'my_vless'
 ```
 
-Imported subscription nodes are marked like this:
-
-```uci
-config outbound 'my_sub_ab12cd34ef'
-	option imported '1'
-	option subscription 'my_sub'
-	option tag 'my_sub_ab12cd34ef'
-	option label 'Imported node'
-	option type 'vless'
-	...
-```
-
-Updating a subscription replaces only nodes with the matching
-`option subscription`, preserving manual outbounds and other subscriptions.
+Provider updates use the same direct/proxy update model.
 
 ## VLESS + REALITY
 
@@ -145,7 +177,7 @@ config outbound 'my_hy2'
 	option hysteria_up_mbps '20'
 ```
 
-## Shadowsocks 2022
+## Shadowsocks
 
 ```uci
 config outbound 'my_ss'

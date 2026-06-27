@@ -1,3 +1,8 @@
-This directory is reserved for neto runtime assets installed by the embedded
-archive.
+Эта directory зарезервирована под neto runtime assets, которые ставятся из
+embedded archive.
 
+Runtime scripts copied here:
+
+- `install.sh`
+- `upgrade.sh`
+- `uninstall.sh`

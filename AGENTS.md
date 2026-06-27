@@ -32,8 +32,8 @@ The project is embedded-first. Users should install without manually choosing
 CPU architecture or binaries:
 
 ```sh
-sh -c "$(wget -O- https://example.com/neto/install.sh)"
-sh -c "$(curl -fsSL https://example.com/neto/install.sh)"
+sh -c "$(wget -O- https://raw.githubusercontent.com/elllkere/neto/main/embedded/install.sh)"
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/elllkere/neto/main/embedded/install.sh)"
 ```
 
 The embedded archive is `dist/neto-openwrt-embedded.tar.gz` and should contain a

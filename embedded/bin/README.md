@@ -1,6 +1,6 @@
 # Managed binary slots
 
-`embedded/pack.sh` writes `netod` binaries under:
+`embedded/pack.sh` кладет `netod` binaries в arch directories:
 
 - `linux-amd64/`
 - `linux-arm64/`
@@ -8,8 +8,12 @@
 - `linux-mips-softfloat/`
 - `linux-mipsle-softfloat/`
 
-Optional managed `sing-box` binaries can be placed in the same directories
-before packing. They are copied into the embedded archive and installed to
-`/usr/libexec/neto/sing-box` only when the system `sing-box` is missing or
-incompatible.
+Managed `sing-box` binaries можно положить в эти же directories перед packing.
+Они попадут в embedded archive и будут установлены в:
 
+```text
+/usr/libexec/neto/sing-box
+```
+
+Managed `sing-box` используется только если system `sing-box` отсутствует или
+несовместим. `/usr/bin/sing-box` никогда не перезаписывается.

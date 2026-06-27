@@ -1,46 +1,82 @@
 # Router Testing
 
-Run these commands on an OpenWrt or ImmortalWrt 23.05, 24.10, or 25.12+ router
-after installing neto.
+Команды ниже выполняются на OpenWrt/ImmortalWrt router после установки `neto`.
 
-Routing semantics in v1:
+Technical terms (`direct`, `proxy`, `block`, `FakeIP`, `TProxy`, `provider`,
+`outbound`) оставлены как в UCI/LuCI/CLI.
 
-- `routing_mode=custom`: ordered `config rule` sections decide proxy/direct/block; unmatched traffic is `default_outbound=direct`.
-- `routing_mode=global`: LAN client non-reserved TCP/UDP traffic is proxied unless the client policy is `direct`.
-- Client `policy=default` follows `routing_mode`.
-- Client `policy=proxy` forces non-reserved TCP/UDP traffic through neto.
-- Client `policy=direct` bypasses neto and receives real DNS answers.
+## Install Check
 
-Rules are evaluated by ascending `priority`; the first rule whose include
-conditions match and exclude conditions do not match wins. Domain rule fields are
-literal string operations, not DNS-aware matching:
+```sh
+netod version
+netod check
+netod compile
+/usr/libexec/neto/sing-box check -c /tmp/neto/sing-box.json
+/etc/init.d/neto restart
+netod status
+```
+
+Если используется system `sing-box`:
+
+```sh
+sing-box check -c /tmp/neto/sing-box.json
+```
+
+Logs:
+
+```sh
+logread | grep -E 'netod|sing-box|dnsmasq' | tail -n 120
+```
+
+## Routing Semantics
+
+`routing_mode`:
+
+- `custom`: ordered `config rule` decide `proxy`/`direct`/`block`.
+- `global`: all LAN non-reserved TCP/UDP traffic goes to proxy except direct
+  clients.
+
+Client policy:
+
+- `default`: follows `routing_mode`;
+- `proxy`: forces non-reserved traffic from this client through neto;
+- `direct`: hard bypass, real DNS only, no FakeIP.
+
+Rules are evaluated by ascending `priority`.
+
+## Domain Matchers
+
+Domain matchers are literal string operations:
 
 - `domain_equals youtube.com` matches only `youtube.com`.
-- `domain_contains youtube` matches `youtube.com`, `youtube.kz`, and `notyoutube.com`.
+- `domain_contains youtube` matches `youtube.com`, `youtube.kz`,
+  `notyoutube.com`.
 - `domain_starts_with you` matches `youtube.com`.
-- `domain_ends_with youtube.com` matches `youtube.com`, `www.youtube.com`, and `notyoutube.com`.
-- `domain_ends_with .youtube.com` matches `www.youtube.com`, but not `youtube.com` or `notyoutube.com`.
+- `domain_ends_with youtube.com` matches `youtube.com`, `www.youtube.com`,
+  `notyoutube.com`.
+- `domain_ends_with .youtube.com` matches `www.youtube.com`, but not
+  `youtube.com`.
 
-For root + subdomains, use both:
+For root + subdomains:
 
 ```uci
 list domain_equals 'youtube.com'
 list domain_ends_with '.youtube.com'
 ```
 
-Exclude fields use the same semantics:
-`exclude_domain_equals`, `exclude_domain_contains`,
-`exclude_domain_starts_with`, and `exclude_domain_ends_with`.
+Exclude fields:
 
-Provider rules use remote provider caches and compile IP providers into nft
-interval sets in rule order. Rules can also use inline IPv4 addresses/CIDRs:
+- `exclude_domain_equals`
+- `exclude_domain_contains`
+- `exclude_domain_starts_with`
+- `exclude_domain_ends_with`
 
-```uci
-list ip_cidr '1.1.1.1'
-list ip_cidr '8.8.8.0/24'
-```
+## Providers
 
-Remote providers are configured like this:
+Provider is data source only. It affects routing only after a rule references
+it.
+
+Domain provider:
 
 ```uci
 config provider 'youtube_domains'
@@ -51,145 +87,190 @@ config provider 'youtube_domains'
 	option auto_update '1'
 	option update_hour '3'
 	option update_via 'direct'
-
-config provider 'google_ips'
-	option enabled '1'
-	option label 'Google IPs'
-	option type 'ip'
-	option url 'https://example.com/google-cidrs.txt'
 ```
 
-Update providers manually:
-
-```sh
-netod providers update
-netod providers update youtube_domains
-/etc/init.d/neto restart
-```
-
-Use LuCI Rules -> Domain input / IP input to choose between field lists,
-textboxes, and providers:
+IP provider:
 
 ```uci
-list domain_provider 'youtube_domains'
-list ip_provider 'google_ips'
+config provider 'cloudflare_ipv4'
+	option enabled '1'
+	option label 'Cloudflare IPv4'
+	option type 'ip'
+	option url 'https://www.cloudflare.com/ips-v4/'
 ```
 
-Provider domain lists are exact-domain lists, one domain per line, with `#`
-comments. Provider IP lists contain IPv4 addresses or CIDRs; single IPv4
-addresses become `/32`.
-
-Rules default to built-in `option outbound 'direct'`. Built-in `blocked` is also
-available. After adding a custom native sing-box outbound profile, select its
-tag in the rule outbound field. In LuCI, the first Add input becomes the stable
-tag and later edits change only the `label`. See `docs/OUTBOUNDS.md` for VLESS
-+ REALITY, Hysteria2, Shadowsocks 2022, and Trojan TLS examples.
-
-Imported nodes are normal outbound sections too. After importing a share link or
-running a subscription update, select the imported node tag in the rule outbound
-field:
+Manual update:
 
 ```sh
-netod import-uri -file /tmp/neto-import.txt
-netod subscriptions update my_sub
 netod providers update
+netod providers update cloudflare_ipv4
 /etc/init.d/neto restart
-uci show neto | grep "=outbound"
 ```
 
-Rules are for explicit domain/IP/provider matches only. To proxy everything
-globally, use General -> `routing_mode=global`. To proxy one client entirely,
-use client `policy=proxy`.
+Provider cache files live in:
 
-LuCI hides DNS mode and writes `dns_mode=auto`. netod derives DNS behavior:
+```text
+/var/lib/neto/providers/
+```
 
-- domain proxy rules in custom mode use FakeIP
-- provider/CIDR proxy rules use real DNS so nftables can match real
-  destination IPs
-- direct rules and direct clients always use real DNS
-- global mode returns real DNS by default because nftables already enforces the
-  global proxy path
+If compile fails with missing provider cache, update provider first:
 
-Rules may mix domain and provider/CIDR/IP matchers. The domain part is used only
-in DNS phase, while the provider/CIDR/IP part is used only in packet/nft phase.
-This is not an AND between domain and IP.
-Protocol and port fields are also packet/nft-only. They apply to the
-provider/CIDR/IP part and do not affect DNS/FakeIP domain matching.
+```sh
+netod providers update telegram_ipv4
+netod compile
+```
 
-Example:
+## Rule Examples
+
+Domain FakeIP proxy rule:
 
 ```uci
 config rule
-	option name 'youtube_except_kz'
+	option name 'youtube'
 	option enabled '1'
 	option priority '100'
 	option action 'proxy'
 	option outbound 'my_vless'
 	option dns_mode 'auto'
 	list domain_contains 'youtube'
-	list exclude_domain_equals 'youtube.kz'
-	list exclude_domain_ends_with '.youtube.kz'
 ```
 
-Neto only routes LAN client traffic. Configure at least one `list lan_subnet`
-in `/etc/config/neto`, for example `192.168.8.0/24`. Optional
-`list lan_iface 'br-lan'` entries further restrict capture by ingress
-interface. WAN inbound traffic, router self traffic, and non-LAN prerouting
-traffic must return before any proxy/tproxy rule.
+Provider/CIDR packet rule:
+
+```uci
+config rule
+	option name 'cloudflare_https'
+	option enabled '1'
+	option priority '200'
+	option action 'proxy'
+	option outbound 'my_vless'
+	option dns_mode 'auto'
+	list ip_provider 'cloudflare_ipv4'
+	list proto 'tcp'
+	list dst_port '443'
+```
+
+Mixed rule:
+
+```uci
+config rule
+	option name 'youtube_and_cloudflare'
+	option enabled '1'
+	option priority '300'
+	option action 'proxy'
+	option outbound 'my_vless'
+	option dns_mode 'auto'
+	list domain_contains 'youtube'
+	list ip_provider 'cloudflare_ipv4'
+	list proto 'tcp'
+	list dst_port '443'
+```
+
+Mixed semantics:
+
+- `youtube.com` DNS -> FakeIP, because domain part matched.
+- random Cloudflare domain DNS -> real DNS, because provider part is packet-only.
+- packet to Cloudflare IP TCP/443 -> proxy through nft.
+- port/proto do not affect DNS/FakeIP domain matching.
+
+## DNS Tests
+
+Local netod listener:
 
 ```sh
-netod check
-netod compile
-netod apply
-netod debug
+dig @127.0.0.1 -p 5353 youtube.com A
+dig @127.0.0.1 -p 5353 youtube.com AAAA
+dig @127.0.0.1 -p 5353 example.org A
 ```
 
-Inspect the generated nftables table and TProxy policy routing:
+sing-box listeners:
+
+```sh
+dig @127.0.0.1 -p 15353 youtube.com A
+dig @127.0.0.1 -p 15354 example.org A
+dig @127.0.0.1 -p 15355 example.org A
+```
+
+Expected:
+
+- FakeIP matched `A` returns `198.18.x.x`.
+- FakeIP matched `AAAA` returns no real IPv6.
+- Non-matching domains use configured real DNS.
+
+From Windows LAN client:
+
+```cmd
+ipconfig /flushdns
+nslookup -type=A youtube.com 192.168.8.1
+nslookup -type=AAAA youtube.com 192.168.8.1
+```
+
+If Google DNS returns `Query refused`, check that installed netod strips EDNS
+Client Subnet:
+
+```sh
+netod version
+logread | grep -E 'netod|dnsmasq|sing-box' | tail -n 120
+```
+
+## nft/TProxy Checks
+
+Inspect table:
 
 ```sh
 nft list table inet neto
-nft list set inet neto lan_subnets4
-ip -4 rule show
+```
+
+Expected order:
+
+1. LAN source guard in `prerouting`.
+2. non-LAN return.
+3. `direct_clients4` return.
+4. `reserved4` return.
+5. `proxy_clients4`.
+6. FakeIP rule in `custom` mode.
+7. ordered provider/CIDR/IP rules.
+8. default return.
+
+Check packet port rules:
+
+```sh
+nft list table inet neto | grep -E 'tcp dport|udp dport|sport'
+```
+
+Examples:
+
+```text
+ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default
+ip daddr @rule4_0000 udp dport 443 jump to_proxy_default
+ip daddr @rule4_0000 tcp dport 1000-2000 jump to_proxy_default
+```
+
+Check TProxy policy routing:
+
+```sh
+ip -4 rule show | grep 'fwmark 0x101'
 ip -4 route show table 101
 ```
 
-Validate sing-box compatibility with the generated config:
+Expected route:
 
-```sh
-sing-box check -c /tmp/neto/sing-box.json
+```text
+local default dev lo
 ```
 
-If `/etc/config/neto` uses the managed binary, run:
-
-```sh
-/usr/libexec/neto/sing-box check -c /tmp/neto/sing-box.json
-```
-
-For FakeIP-based proxying, `/tmp/neto/sing-box.json` should contain
-`"store_fakeip": true` under `experimental.cache_file`, and `route.final`
-should be the selected custom outbound tag.
-
-Check DNS forwarding through netod:
-
-```sh
-dig @127.0.0.1 -p 5353 youtube.com
-dig @127.0.0.1 -p 5353 example.org
-```
+## DNS Config
 
 DNS terminology:
 
-- `dns_listen` / Advanced -> DNS server is the local netod listener used by
-  dnsmasq.
-- netod forwards DNS wire queries to local sing-box DNS listeners:
-  `127.0.0.1:15353` for FakeIP, `127.0.0.1:15354` for real-direct, and
-  `127.0.0.1:15355` for real-proxy.
-- `real_dns_mode` selects direct or proxy real-DNS forwarding.
-- `real_dns_outbound` is required when `real_dns_mode=proxy` and selects the
-  custom outbound used by the real-proxy DNS listener.
-- `real_dns_transport` selects UDP, TCP, DoT, or DoH. sing-box handles that
-  transport; netod does not implement encrypted DNS clients.
+- `dns_listen`: local netod listener used by dnsmasq.
+- `singbox_dns_fakeip`: FakeIP listener, default `127.0.0.1:15353`.
+- `singbox_dns_real_direct`: real DNS direct listener, default
+  `127.0.0.1:15354`.
+- `singbox_dns_real_proxy`: real DNS proxy listener, default
+  `127.0.0.1:15355`.
 
-Example DoH upstream:
+Real DNS via DoH:
 
 ```uci
 option real_dns_mode 'direct'
@@ -199,56 +280,65 @@ option real_dns_server_name 'cloudflare-dns.com'
 option real_dns_path '/dns-query'
 ```
 
-LAN client DNS test from Windows:
+Real DNS via proxy:
 
-```cmd
-ipconfig /flushdns
-nslookup -type=A youtube.com 192.168.8.1
-nslookup -type=AAAA youtube.com 192.168.8.1
+```uci
+option real_dns_mode 'proxy'
+option real_dns_outbound 'my_vless'
+```
+
+`real_dns_mode=proxy` requires a custom outbound. Do not use `proxy_default`.
+
+## dnsmasq Integration
+
+When `manage_dnsmasq=1`, neto configures dnsmasq to forward DNS to netod:
+
+```sh
+uci show dhcp.@dnsmasq[0] | grep -E "server|noresolv|addsubnet"
 ```
 
 Expected:
 
-- `A` for a FakeIP domain returns `198.18.x.x`.
-- `AAAA` for a FakeIP domain returns no real IPv6 answer.
-- `example.org` should go through the configured real DNS upstream.
-
-Useful lifecycle checks:
-
-```sh
-/etc/init.d/neto restart
-netod status
-nft list table inet neto
-ip rule show | grep 'fwmark 0x101'
-ip -4 route show table 101
-uci show dhcp.@dnsmasq[0] | grep -E "server|noresolv|addsubnet"
+```text
+server='127.0.0.1#5353'
+noresolv='1'
+addsubnet='32'
 ```
 
-Stopping neto should remove only neto-owned state:
+`addsubnet=32` is used only so netod can recover LAN client IP. netod strips
+EDNS Client Subnet before forwarding DNS to sing-box/public resolvers.
+
+Stopping neto should restore previous dnsmasq state:
 
 ```sh
 /etc/init.d/neto stop
-nft list table inet neto
-ip rule show | grep 'fwmark 0x101'
-ip -4 route show table 101
 uci show dhcp.@dnsmasq[0] | grep '127.0.0.1#5353'
 ```
 
-When `manage_dnsmasq=1`, neto also sets dnsmasq `addsubnet=32` while running
-so netod can see the original LAN client IPv4 through EDNS Client Subnet and
-apply `policy=direct` DNS bypass correctly. Stop/uninstall restores the previous
-dnsmasq `addsubnet` and `noresolv` values.
-netod strips the EDNS Client Subnet option before forwarding queries to
-sing-box DNS listeners, so public upstreams do not receive private LAN client
-addresses.
-
-Local archive testing on a router:
+## Debug Bundle
 
 ```sh
+netod debug
+uci show neto
+nft list table inet neto
+grep -nE 'rule_set|rule-set|/tmp/sing-box/rulesets|"detour": "direct"' /tmp/neto/sing-box.json
+logread | grep -E 'netod|sing-box|dnsmasq' | tail -n 120
+```
+
+`grep` above should not find legacy sing-box rule-set paths or
+`"detour": "direct"`.
+
+## Local Archive Test
+
+From repository root:
+
+```sh
+GOCACHE=/tmp/neto-go-cache ./embedded/pack.sh
+./scripts/test-archive.sh
 ./embedded/install.sh --local ./dist/neto-openwrt-embedded.tar.gz --verbose
 ```
 
-Dry-run argument validation:
+Dry-run:
 
 ```sh
 ./embedded/install.sh --dry-run

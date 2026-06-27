@@ -1,64 +1,85 @@
 # Architecture
 
+Этот документ описывает runtime architecture `neto`. Термины `direct`,
+`proxy`, `block`, `FakeIP`, `TProxy`, `provider`, `rule`, `outbound`,
+`routing_mode` и UCI option names оставлены на английском, потому что это
+реальные значения config/UI/CLI.
+
 ## Goal
 
-`neto` is a pre-sing-box policy router for OpenWrt/ImmortalWrt. It makes routing
-decisions in nftables before traffic reaches sing-box. sing-box is a backend,
-not the policy authority.
+`neto` - pre-sing-box policy router для OpenWrt/ImmortalWrt.
 
-The default failure mode should be direct internet routing whenever possible. If
-neto is disabled or fails to apply, normal direct routing should remain intact.
+Главное правило: routing decision должен происходить в `nftables` до того, как
+traffic попадет в `sing-box`.
+
+`sing-box` используется только как:
+
+- владелец `FakeIP` DNS;
+- backend для `TProxy` inbound;
+- executor для proxy outbounds.
+
+`netod` не должен становиться transparent TCP/UDP proxy.
 
 ## Supported Platforms
 
-Supported:
+Поддерживается:
 
-- OpenWrt 23.05
-- OpenWrt 24.10
+- OpenWrt 23.05+
+- OpenWrt 24.10+
 - OpenWrt 25.12+
 - ImmortalWrt 25.12+
+- firewall4 / `nftables`
 
-Not supported:
+Не поддерживается:
 
-- fw3
-- iptables
-- OpenWrt releases older than 23.05
+- fw3;
+- iptables;
+- OpenWrt старее 23.05;
+- IPv6 routing в v1.
 
-Only firewall4/nftables is supported.
+## Distribution
 
-## Embedded-First Distribution
+Основной формат поставки - embedded archive:
 
-The distribution model is an embedded archive, not an `.ipk` package.
+```text
+dist/neto-openwrt-embedded.tar.gz
+```
 
-Installers should:
+Archive должен содержать top-level directory:
 
-- detect OpenWrt/ImmortalWrt
-- detect version
-- require firewall4/nftables
-- choose `apk` or `opkg`
-- install dependencies
-- detect CPU architecture/ABI
-- unpack `neto-openwrt-embedded.tar.gz`
-- install the correct `netod`
-- prefer compatible system sing-box
-- install managed sing-box to `/usr/libexec/neto/sing-box` when needed
-- never overwrite `/usr/bin/sing-box`
-- optionally enable the embedded Russian LuCI localization when requested
+```text
+neto/
+```
 
-The archive should have a top-level `neto/` directory.
+Installer:
 
-## Main Components
+- определяет OpenWrt/ImmortalWrt;
+- выбирает `opkg` или `apk`;
+- ставит зависимости;
+- определяет CPU arch;
+- ставит нужный `netod`;
+- использует compatible system `sing-box`, если он есть;
+- иначе ставит managed `sing-box` в `/usr/libexec/neto/sing-box`;
+- никогда не перезаписывает `/usr/bin/sing-box`.
+
+Default archive URL:
+
+```text
+https://github.com/elllkere/neto/releases/latest/download/neto-openwrt-embedded.tar.gz
+```
+
+## Components
 
 - `cmd/netod/main.go`: CLI entrypoint.
-- `internal/config`: UCI parser and config validation.
-- `internal/ruleengine`: ordered rule/domain matcher logic.
-- `internal/dnsproxy`: UDP/TCP DNS listener and forwarding policy.
-- `internal/provider`: remote provider normalization, cache metadata, and CIDR loading.
-- `internal/policy`: IPv4 CIDR normalization/dedup/collapse.
-- `internal/nft`: nftables generation.
+- `internal/config`: UCI parser и validation.
+- `internal/ruleengine`: domain matcher и DNS decision logic.
+- `internal/dnsproxy`: UDP/TCP DNS listener, DNS policy forwarding.
+- `internal/provider`: remote provider update, IPv4 CIDR filtering/cache.
+- `internal/policy`: IPv4 CIDR parse/normalize/dedup/collapse.
+- `internal/nft`: nftables config generation.
 - `internal/singbox`: sing-box config generation/check support.
-- `internal/tproxy`: policy routing command planning.
-- `internal/status`: status/listener/routing checks.
+- `internal/tproxy`: policy routing lifecycle.
+- `internal/status`: status/debug checks.
 - `embedded/files/etc/init.d/neto`: procd service.
 - `embedded/files/www/luci-static/resources/view/neto`: LuCI app.
 
@@ -73,323 +94,282 @@ The archive should have a top-level `neto/` directory.
 - `/tmp/neto/sing-box.json`
 - `/var/lib/neto/`
 
-## CLI Surface
+## Lifecycle
 
-Current milestone commands:
+Start sequence:
 
-- `netod check`
-- `netod compile`
-- `netod apply`
-- `netod status`
-- `netod debug`
-- `netod run`
+1. `/etc/init.d/neto` runs `netod check`.
+2. Runs `netod compile`.
+3. Runs `netod apply`.
+4. Checks generated sing-box config.
+5. Starts `netod run`.
+6. Starts selected `sing-box run -c /tmp/neto/sing-box.json`.
+7. Configures dnsmasq integration and cron jobs.
 
-Planned/debug-oriented commands requested for router testing:
+Stop sequence:
 
-- `netod rules list`
-- `netod test-domain 192.168.8.100 youtube.com A`
+- deletes neto-owned nft table;
+- removes neto-owned `ip rule` / route table state;
+- restores dnsmasq `server`, `noresolv`, `addsubnet`;
+- removes neto-owned cron block.
 
-If those planned commands are not implemented yet, treat that as a roadmap gap,
-not as a reason to change routing semantics.
+Stop/disable must not kill unrelated system `sing-box`.
 
-## Lifecycle Model
+## nft/TProxy Model
 
-The current OpenWrt init model is:
+Generated table:
 
-- init script runs `netod check`
-- init script runs `netod compile`
-- init script runs `netod apply`
-- procd starts `netod run`
-- procd starts selected sing-box binary with `/tmp/neto/sing-box.json`
+```text
+table inet neto
+```
 
-`netod run` owns the DNS listener. sing-box owns FakeIP DNS and the TProxy
-inbound.
+Order in `from_lan` chain:
 
-Stop/disable should remove neto-owned nft table and TProxy policy routing state
-without killing unrelated system sing-box processes.
+1. `direct_clients4` -> `return`.
+2. `reserved4` -> `return`.
+3. `proxy_clients4` -> `jump to_proxy_default`.
+4. `FakeIP` range rule in `custom` mode.
+5. ordered IP/provider/CIDR rules.
+6. default `return`.
 
-## nft/TProxy
-
-Generated nftables table:
-
-- `table inet neto`
-- LAN source guard first
-- `direct_clients4` return before proxy rules
-- `reserved4` return before proxy rules
-- `proxy_clients4` source rule
-- FakeIP range rule in custom mode
-- ordered provider/rule sets
-- default return
-
-TProxy policy routing:
+`TProxy` policy routing:
 
 ```sh
 ip -4 rule add fwmark <mark> table <table>
 ip -4 route add local default dev lo table <table>
 ```
 
-Repeated start/reload must be idempotent.
+Generated nft must be LAN-scoped. WAN, inbound, router self и non-LAN
+prerouting traffic должны вернуться до proxy/TProxy rules.
 
-## LAN Guard
+## Routing Semantics
 
-neto must only route LAN client traffic. Generated nft must return WAN,
-inbound, router self, and non-LAN prerouting traffic before any proxy/tproxy
-decision.
+Client policy:
 
-LAN scope is represented by:
+- absent/default: follows `routing_mode`;
+- `proxy`: force non-reserved TCP/UDP traffic from client through neto;
+- `direct`: hard bypass, real DNS only, no FakeIP.
 
-- `lan_subnets4` nft set
-- optional `lan_iface` matching
+`routing_mode`:
+
+- `custom`: selective routing через ordered rules; unmatched traffic -> direct.
+- `global`: all LAN non-reserved TCP/UDP traffic -> proxy, кроме direct clients.
+
+Rule action:
+
+- `proxy`: route matching packet to selected outbound.
+- `direct`: return before proxy.
+- `block`: DNS phase returns local block response; packet phase returns/blocks
+  according to generated rule behavior.
 
 ## DNS/FakeIP
 
-`netod` listens on `dns_listen`, currently `127.0.0.1:5353`, UDP and TCP.
+DNS path:
 
-DNS behavior:
+```text
+LAN DNS -> dnsmasq -> netod -> selected sing-box DNS listener
+```
 
-- direct clients always use real upstream DNS
-- no FakeIP for direct clients
-- custom mode evaluates ordered domain rules
-- domain proxy rules in custom mode use FakeIP by default
-- provider/CIDR/subnet rules use real DNS so nftables can see the real
-  destination IP
-- direct rules always use real DNS
-- global mode returns real DNS by default because nftables enforces the proxy
-  path
-- FakeIP A answers come from sing-box DNS
-- FakeIP-matched AAAA should return prompt NODATA/empty NOERROR when IPv6
-  routing is absent
-- block rules may return NXDOMAIN in DNS phase
+Packet path:
 
-sing-box owns FakeIP allocation, FakeIP-to-domain mapping, and real DNS
-transport. netod decides only `fakeip`, `real-direct`, `real-proxy`, or `block`,
-then forwards the DNS wire query to a local sing-box DNS listener. If dnsmasq
-added EDNS Client Subnet for local client identification, netod strips that ECS
-option before forwarding so LAN private addresses are not leaked to public DNS
-upstreams.
+```text
+LAN traffic -> nft decides before sing-box
+```
 
-`dns_listen` is the local netod DNS server address used by dnsmasq. It is not an
-external resolver. The real resolver is configured by:
+`netod` listens on `dns_listen`, by default:
 
-- `real_dns_mode`: `direct` or `proxy`
-- `real_dns_outbound`: custom outbound for `real_dns_mode=proxy`
-- `real_dns_transport`: `udp`, `tcp`, `tls`, or `https`
-- `real_dns_server`
-- `real_dns_server_name`
-- `real_dns_path`
+```text
+127.0.0.1:5353
+```
 
-sing-box exposes local DNS listeners:
+`netod` is DNS policy forwarder only. It decides:
+
+- `fakeip`;
+- `real-direct`;
+- `real-proxy`;
+- `block`.
+
+`sing-box` handles actual DNS transport:
+
+- UDP DNS;
+- TCP DNS;
+- DoT;
+- DoH.
+
+Local sing-box DNS listeners:
 
 - `singbox_dns_fakeip`: `127.0.0.1:15353`
 - `singbox_dns_real_direct`: `127.0.0.1:15354`
 - `singbox_dns_real_proxy`: `127.0.0.1:15355`
 
-`real_dns_upstream` and `dns_upstream_*` remain legacy mirrors/fallbacks.
-Normal DNS transport must not be implemented in netod with Go `net/http` DoH or
-DoT clients.
+Real DNS config:
 
-## Providers and Rules
+- `real_dns_mode`: `direct` or `proxy`
+- `real_dns_outbound`: custom outbound for `real_dns_mode=proxy`
+- `real_dns_transport`: `udp`, `tcp`, `tls`, `https`
+- `real_dns_server`
+- `real_dns_server_name`
+- `real_dns_path`
 
-Provider is data source only. Rule is routing policy only.
+`real_dns_upstream` and `dns_upstream_*` are legacy mirrors.
 
-Providers:
+### DNS Rules
 
-- are reusable remote data sources
-- have type `domain` or `ip`
-- download plain text lists from `url` to `/var/lib/neto/providers/`
-- support manual update with `netod providers update [name]`
-- installer seeds Cloudflare IPv4 and Telegram IPv4 providers if their URLs are
-  not already present
-- IP provider update keeps only valid IPv4 address/CIDR entries and skips IPv6
-  entries from mixed feeds
-- support `auto_update`, `update_hour`, `update_via`, and `update_outbound`
-- do not create policy by themselves
+- Domain `proxy` rules in `custom` mode use `FakeIP`.
+- Provider/CIDR/IP rules use real DNS so nft can see real destination IP.
+- Direct rules and direct clients always use real DNS.
+- `routing_mode=global` returns real DNS by default.
+- Block rules answer locally with NXDOMAIN/NODATA/block response.
+- AAAA for FakeIP domains returns NODATA when `filter_aaaa_for_fakeip=1`.
 
-A provider affects routing only after a rule references it with
-`domain_provider` or `ip_provider`. IP providers must compile into nft interval
-sets and must not generate thousands of nft rules. Domain providers are loaded
-as exact domain matcher entries.
+dnsmasq uses `addsubnet=32` so `netod` can recover original LAN client IP
+through EDNS Client Subnet. `netod` strips ECS before forwarding queries to
+sing-box/public resolvers.
 
-Rules:
-
-- have `enabled`
-- have `priority`
-- have `action`: `proxy`, `direct`, `block`
-- may have legacy `dns_mode`: `fakeip`, `real_ip`, `auto`
-- match domains with `domain_*` and `exclude_domain_*` lists
-- optionally reference domain providers with `list domain_provider`
-- match IP/CIDR values with `list ip_cidr`
-- reference IP/CIDR providers with `list ip_provider`
-- are evaluated by ascending priority
-- use first-match-wins semantics
-
-Local `domain_file`, `ip_file`, and legacy `file` fields remain parser
-compatibility paths, but LuCI should prefer provider references. For root plus
-subdomains, keep using the explicit matcher fields or textbox mode to write both
-`domain_equals` and `domain_ends_with`; provider domain lines are exact matcher
-entries.
-
-DNS behavior is derived automatically for current LuCI-created rules:
-
-- domain proxy rule: FakeIP in custom mode
-- provider/CIDR proxy rule: real DNS
-- direct rule: real DNS
-- block rule: local block response
-
-Rules may mix domain matchers with provider/CIDR/IP matchers. Domain matchers
-are evaluated only in DNS phase. Provider/CIDR/IP matchers are evaluated only in
-packet/nft phase. Mixed rules are two independent entry points into one rule
-with one `action`/`outbound`, not an AND between domain and IP.
-
-Protocol and port matchers (`proto`, `src_port`, `dst_port`) are packet/nft
-phase only. They narrow provider/CIDR/IP rules and never affect DNS/FakeIP
-domain matching. If a port is configured without `proto`, neto applies it to
-both TCP and UDP.
-
-Creating a provider must not create a rule. Creating a rule must not create a
-provider.
-
-## Outbound Profiles
-
-Rules store an outbound tag. Built-in tags are:
-
-- `direct`
-- `blocked`
-
-These built-ins are always generated for sing-box and must not be configured as
-`config outbound` sections.
-
-Supported native sing-box outbound profile types:
-
-- `vless`
-- `hysteria2`
-- `shadowsocks`
-- `trojan`
-
-Custom outbound sections must use their own stable tags, for example
-`my_vless`. The optional `label` is only a human-readable name and must not
-change routing references. Outbound sections do not have an enable/disable
-switch in v1; delete the section to remove a profile. `proxy_default` is
-deprecated and ignored as an outbound section.
-
-Outbound profile fields are native sing-box fields plus a small set of
-homeproxy-compatible aliases accepted by the parser for migration. LuCI should
-keep the table to `label`, `type`, `address`, and `port`, with advanced TLS,
-REALITY, uTLS, ECH, flow, method, and transport options in the edit dialog.
-
-Outbound profiles must not change nft routing policy. nftables still decides
-which LAN client packets reach sing-box before sing-box executes the selected
-outbound.
-
-## Imports and Subscriptions
-
-Manual imports and subscriptions are configuration management features. They
-must create, replace, or delete ordinary `config outbound` sections only. They
-must not create rules, providers, nftables rules, client policies, or a new
-runtime routing authority.
-
-Supported imported node schemes:
-
-- `vless://`
-- `hysteria2://` and `hy2://`
-- `ss://`
-- `trojan://`
-
-Subscription sections use:
-
-- `enabled`
-- `label`
-- `url`
-- `auto_update`
-- `update_hour`: hour of day, `0` through `23`
-- `update_via`: `direct` or `proxy`
-- `update_outbound`: optional outbound tag for proxy-based updates
-
-`netod subscriptions update [name]` downloads subscription content, parses
-base64 or plain share-link lists, and replaces only imported outbounds that
-belong to that subscription. Imported nodes carry `option imported '1'`; nodes
-from subscriptions also carry `option subscription '<name>'`. Subscription
-nodes are still ordinary editable outbounds; a later update of the same
-subscription overwrites those nodes from the downloaded source again.
-
-Subscription downloads use the system `curl` binary instead of Go `net/http` so
-the embedded archive does not carry Go's TLS/HTTP dependency graph once per CPU
-target. `update_via=direct` uses curl with proxy bypass. `update_via=proxy`
-starts a temporary sing-box client with a local mixed inbound and calls curl
-through that local proxy. This is intentionally separate from nft/TProxy and
-must not route router-self traffic through neto.
-
-When `auto_update=1`, the init script writes neto-owned cron entries in
-`/etc/crontabs/root` for the selected `update_hour`. These entries run
-`netod subscriptions update <name>` and restart neto after the update so the
-generated sing-box config sees replaced nodes. Stop/reload removes or rewrites
-only the marked neto cron block.
-
-## LuCI Layout
-
-General is the operational page: service status, neto/sing-box versions,
-Start/Stop, Autostart, optional language selection, DNS preset/upstream,
-routing mode, and default outbound. Advanced contains lower-level DNS listener,
-dnsmasq, LAN, sing-box, TProxy, FakeIP range, AAAA filtering, and nft settings.
-The main LuCI tab order is
-General, Outbounds, Rules, Clients, Providers, Advanced, Debug. Debug is the
-last LuCI tab and shows `netod debug`.
-
-## Client Policy Model
-
-- absent/default: follow `routing_mode`
-- `proxy`: force non-reserved client TCP/UDP traffic through neto
-- `direct`: hard bypass, real DNS only, no FakeIP, nft return before proxy
-  rules
-
-Old aliases may be accepted in backend for compatibility, but LuCI should write
-only current policy names.
-
-## Routing Modes
-
-`routing_mode=custom`:
-
-- selective routing by ordered rules
-- unmatched traffic follows `default_outbound`
-- in v1, `default_outbound` is only `direct`
-
-`routing_mode=global`:
-
-- all LAN client TCP/UDP is proxied
-- direct clients bypass
-- reserved/private/local destinations return/direct
-
-## Matcher Semantics
+## Rules and Matchers
 
 Domain matchers are literal string operations:
 
-- `domain_equals`: `==`
-- `domain_contains`: `strings.Contains`
-- `domain_starts_with`: `strings.HasPrefix`
-- `domain_ends_with`: `strings.HasSuffix`
+- `domain_equals`: exact string match.
+- `domain_contains`: substring match.
+- `domain_starts_with`: prefix match.
+- `domain_ends_with`: suffix match.
 
-Rules LuCI exposes separate domain and IP input selectors. Domain input can be
-field lists, textboxes backed by the same UCI lists, or remote domain providers.
-IP input can be inline `ip_cidr` lists, a textbox backed by `ip_cidr`, or remote
-IP providers.
-
-Exclude fields use the same semantics.
-
-Normalization:
-
-- lowercase
-- trim spaces
-- trim trailing dot
-- ignore empty values
-
-No DNS-aware suffix behavior exists. For root + subdomains:
+For root + subdomains use both:
 
 ```uci
 list domain_equals 'example.com'
 list domain_ends_with '.example.com'
 ```
 
-## IPv6 Status
+Exclude fields use the same semantics:
 
-IPv6 routing is not implemented in v1. Do not leak real IPv6 answers for
-FakeIP-matched domains while IPv6 routing is absent.
+- `exclude_domain_equals`
+- `exclude_domain_contains`
+- `exclude_domain_starts_with`
+- `exclude_domain_ends_with`
+
+IP/provider/CIDR matchers:
+
+- `list ip_cidr '1.1.1.1'`
+- `list ip_cidr '8.8.8.0/24'`
+- `list ip_provider 'cloudflare_ipv4'`
+- legacy `ip_file` / `file`
+
+Protocol/port matchers:
+
+- `list proto 'tcp'`
+- `list proto 'udp'`
+- `list src_port '1000-2000'`
+- `list dst_port '443'`
+
+Ports accept single value or `start-end`. If ports are set and `proto` is empty,
+neto generates explicit TCP and UDP rules.
+
+Port/proto matchers are packet/nft-only. DNS/domain/FakeIP matching never sees
+ports.
+
+## Mixed Rules
+
+Rules may mix domain matchers with provider/CIDR/IP matchers:
+
+```uci
+config rule
+	option action 'proxy'
+	option outbound 'my_vless'
+	list domain_contains 'youtube'
+	list ip_provider 'cloudflare_ipv4'
+	list proto 'tcp'
+	list dst_port '443'
+```
+
+This is not an AND between domain and IP.
+
+- Domain part is DNS-phase only.
+- Provider/CIDR/IP part is packet/nft-phase only.
+- Port/proto narrows only the packet/nft part.
+- Both entry points share one `action` and one `outbound`.
+
+## Providers
+
+Provider is data source only. Rule is routing policy only.
+
+Provider types:
+
+- `domain`
+- `ip`
+
+Providers download plain text lists into:
+
+```text
+/var/lib/neto/providers/
+```
+
+Manual update:
+
+```sh
+netod providers update
+netod providers update telegram_ipv4
+```
+
+Installer seeds built-in IP providers if URL is not already present:
+
+- Cloudflare IPv4: `https://www.cloudflare.com/ips-v4/`
+- Telegram IPv4: `https://core.telegram.org/resources/cidr.txt`
+
+IP provider update keeps only valid IPv4 address/CIDR entries. IPv6 entries are
+ignored.
+
+Creating a provider must not create a rule. Creating a rule must not create a
+provider.
+
+## Outbounds
+
+Built-in outbound tags:
+
+- `direct`
+- `blocked`
+
+They are always generated and must not be created as `config outbound`.
+
+Creatable outbound types:
+
+- `vless`
+- `hysteria2`
+- `shadowsocks`
+- `trojan`
+
+`proxy_default` is deprecated. LuCI must not create or offer it.
+
+Imported nodes and subscription nodes are ordinary outbound sections and are
+selectable by rules.
+
+## LuCI Layout
+
+Tabs:
+
+- General
+- Outbounds
+- Rules
+- Clients
+- Providers
+- Advanced
+- Debug
+
+General contains service status, DNS settings, `routing_mode`, start/stop and
+autostart. Advanced contains low-level listeners, dnsmasq, LAN, TProxy, FakeIP
+range and nft settings.
+
+Rules hides `dns_mode` and writes `auto`. DNS behavior is derived by netod.
+
+## Forbidden Changes
+
+- Do not add IPv6 routing in v1.
+- Do not implement transparent TCP/UDP proxy in `netod`.
+- Do not implement custom FakeIP allocator.
+- Do not add fw3/iptables support.
+- Do not route WAN/inbound/router-self/non-LAN prerouting traffic.
+- Do not overwrite `/usr/bin/sing-box`.
+- Do not make providers create rules or rules create providers.
+- Do not generate thousands of nft rules for CIDR lists.
+- Do not reintroduce `match_all`.

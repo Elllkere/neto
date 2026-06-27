@@ -1,8 +1,10 @@
 # Testing
 
+Документ описывает local checks и router checks для `neto`.
+
 ## Local Tests
 
-Run from repository root.
+Запускать из repository root:
 
 ```sh
 go test ./...
@@ -14,16 +16,22 @@ node --check embedded/files/www/luci-static/resources/view/neto/*.js
 ./scripts/test-archive.sh
 ```
 
-If the sandbox cannot write the default Go cache:
+Если sandbox не может писать в default Go cache:
 
 ```sh
 GOCACHE=/tmp/neto-go-cache go test ./...
 GOCACHE=/tmp/neto-go-cache ./embedded/pack.sh
 ```
 
-## Archive Expectations
+## Archive Checks
 
-The embedded archive must contain a top-level `neto/` directory:
+Embedded archive:
+
+```text
+dist/neto-openwrt-embedded.tar.gz
+```
+
+Проверить layout:
 
 ```sh
 tar -tzf dist/neto-openwrt-embedded.tar.gz | sed -n '1,40p'
@@ -35,49 +43,63 @@ Expected first line:
 neto/
 ```
 
-## Router Tests
+Automated archive check:
 
-Run on OpenWrt/ImmortalWrt after installing.
+```sh
+./scripts/test-archive.sh
+```
+
+## Router Smoke Test
+
+На OpenWrt/ImmortalWrt router:
 
 ```sh
 /etc/init.d/neto restart
 netod check
 netod compile
-netod apply
 netod status
 netod debug
-netod import-uri -file /tmp/neto-import.txt
-netod subscriptions update
-netod providers update
-netod rules list
-netod test-domain 192.168.8.100 youtube.com A
 nft list table inet neto
-nft list set inet neto lan_subnets4
 ip -4 rule show
 ip -4 route show table 101
-uci show neto
-grep -n "neto subscriptions" /etc/crontabs/root
-uci show dhcp.@dnsmasq[0] | grep -E "server|noresolv|addsubnet"
-logread | tail -n 120
 ```
 
-`netod rules list` and `netod test-domain` are requested router-debug commands.
-If not implemented, keep them on the roadmap.
+Validate sing-box config:
 
-## DNS Tests on Router
+```sh
+/usr/libexec/neto/sing-box check -c /tmp/neto/sing-box.json
+```
+
+or, if system sing-box is used:
+
+```sh
+sing-box check -c /tmp/neto/sing-box.json
+```
+
+## DNS Tests
+
+Local netod listener:
 
 ```sh
 dig @127.0.0.1 -p 5353 youtube.com A
 dig @127.0.0.1 -p 5353 youtube.com AAAA
 dig @127.0.0.1 -p 5353 example.org A
+```
+
+sing-box DNS listeners:
+
+```sh
 dig @127.0.0.1 -p 15353 youtube.com A
+dig @127.0.0.1 -p 15354 example.org A
+dig @127.0.0.1 -p 15355 example.org A
 ```
 
 Expected:
 
-- FakeIP-matched `A` returns `198.18.x.x`.
-- FakeIP-matched `AAAA` does not return real IPv6.
-- Non-matching domains use real upstream DNS.
+- FakeIP matched `A` returns `198.18.x.x`.
+- FakeIP matched `AAAA` does not return real IPv6.
+- Non-matching domains use real DNS.
+- Direct clients get real DNS only.
 
 ## Windows LAN Client Tests
 
@@ -91,14 +113,14 @@ curl -4 -v --connect-timeout 10 https://youtube.com
 
 Expected:
 
-- direct clients receive real DNS answers only
-- FakeIP-matched proxy domains return FakeIP for `A`
-- `AAAA` for FakeIP-matched domains does not leak real IPv6
-- non-LAN/WAN/inbound traffic is not captured by neto
+- direct clients receive real DNS answers only;
+- FakeIP domains return FakeIP for `A`;
+- FakeIP domains do not leak real IPv6 via `AAAA`;
+- non-LAN/WAN/inbound/router-self traffic is not captured.
 
 ## nft/TProxy Checks
 
-Check that LAN guard comes before policy decisions:
+Check rule order:
 
 ```sh
 nft list table inet neto
@@ -106,15 +128,15 @@ nft list table inet neto
 
 Expected order:
 
-1. LAN source guard in `prerouting`
-2. non-LAN return
-3. `direct_clients4` return
-4. `reserved4` return
-5. `proxy_clients4`
-6. FakeIP/provider/rule proxy rules
-7. default return
+1. LAN source guard in `prerouting`.
+2. non-LAN return.
+3. `direct_clients4` return.
+4. `reserved4` return.
+5. `proxy_clients4`.
+6. FakeIP/provider/rule proxy rules.
+7. default return.
 
-Check TProxy routing:
+Check TProxy route:
 
 ```sh
 ip -4 rule show | grep 'fwmark 0x101'
@@ -127,75 +149,83 @@ Expected route:
 local default dev lo
 ```
 
-On OpenWrt/ImmortalWrt, `ip -4 route show table 101` may exit 2 when the table
-does not exist. That state means missing, not fatal.
+On OpenWrt/ImmortalWrt, `ip -4 route show table 101` may exit with code 2 when
+table does not exist. That means missing state, not fatal command failure.
 
-## LuCI Checks
+## Provider Checks
 
-Manually verify on router:
+```sh
+netod providers update
+netod providers update cloudflare_ipv4
+netod providers update telegram_ipv4
+ls -la /var/lib/neto/providers/
+```
 
-- creating a rule writes `option enabled '1'`
-- disabling a rule writes `option enabled '0'`
-- editing a rule preserves `enabled`
-- General shows neto/sing-box status and versions
-- General Start starts the service and writes `neto.main.enabled=1`
-- General Stop stops the service through `/etc/init.d/neto stop`
-- General Autostart uses `/etc/init.d/neto enable|disable`
-- General exposes language, DNS preset, DNS mode/outbound/transport, custom
-  server, routing mode, and default outbound
-- General DNS transport supports UDP, TCP, DoT, and DoH through generated
-  sing-box DNS servers
-- Advanced contains lower-level DNS listener, FakeIP range/AAAA filter,
-  dnsmasq, LAN, sing-box listener, TProxy, and nft settings
-- LuCI does not expose a FakeIP off switch and Save forces `fakeip_enabled=1`
-- creating a rule writes `priority`
-- moving rules rewrites priority as `100`, `200`, `300`, ...
-- Rules page writes only new matcher field names
-- Rules page does not write `match_all`
-- Rules page does not write deprecated matcher fields
-- Rules page has separate Domain input and IP input selectors
-- Domain input supports fields, textbox, and domain providers
-- IP input supports inline IP/CIDR list, textbox, and IP providers
-- Providers page supports URL, manual update, auto-update hour, update_via, and item count
-- Rules page hides DNS mode selection and writes `dns_mode=auto`
-- Providers page does not create rules unless explicitly intended
-- Rules page does not create providers
-- Rules page defaults new rule outbound to `direct`
-- Rules page offers built-in `direct` and `blocked` outbounds
-- Rules page offers enabled custom outbound tags after they are created
-- Rules page does not offer `proxy_default`
-- Outbounds page creates only VLESS, Hysteria2, Shadowsocks, or Trojan profiles
-- Outbounds page creates stable `tag` from the first Add input
-- editing an outbound changes only `label`/name, not `tag`
-- Outbounds table shows only text name, type, address, and port, without a
-  second editable name/input column
-- Outbounds page does not show an `enabled` field
-- Outbounds page does not expose SOCKS as a primary outbound
-- Outbounds page does not expose `direct` as a creatable outbound type
-- Outbounds page does not auto-create an empty `proxy_default`
-- Outbounds edit dialog exposes homeproxy-like protocol details: VLESS flow as a
-  dropdown, Shadowsocks method as a dropdown, TLS min/max/ciphers, allow
-  insecure, ECH, uTLS fingerprint, REALITY, and transport-specific fields
-- REALITY public key and short ID fields are hidden until `type=vless`,
-  `tls=1`, and `reality=1`
-- Outbounds page has an Import button next to Add for `vless://`,
-  `hysteria2://`, `ss://`, and `trojan://` links
-- Outbounds page can save subscription URL, auto-update toggle, update time
-  from a `0:00`-`23:00` dropdown, update_via, and optional update outbound
-- Outbounds page hides update hour until auto-update is enabled
-- Outbounds page Manual Update replaces only nodes for the selected subscription
-- Imported nodes appear in the node list and in Rules outbound dropdown
-- Subscription nodes appear in the normal Outbounds table and can be edited;
-  the next update of that subscription overwrites those nodes again
-- Imported nodes carry `option imported '1'`; subscription nodes also carry
-  `option subscription '<name>'`
-- LuCI Save & Apply restarts neto after committing changes
-- General Stop stops neto even if no outbound is configured
-- with General Start and no custom outbounds, `netod check` still
-  succeeds because `direct` and `blocked` are built-ins
+Telegram provider must save only IPv4 entries. IPv6 lines from the Telegram feed
+are ignored.
 
-Inspect UCI:
+## Import/Subscription Checks
+
+Manual import:
+
+```sh
+netod import-uri -file /tmp/neto-import.txt
+uci show neto | grep '=outbound'
+```
+
+Subscription update:
+
+```sh
+netod subscriptions update my_sub
+uci show neto | grep "subscription='my_sub'"
+```
+
+Cron block:
+
+```sh
+grep -n "neto subscriptions" /etc/crontabs/root
+grep -n "netod providers update" /etc/crontabs/root
+```
+
+## LuCI Manual Checks
+
+Verify on actual OpenWrt/ImmortalWrt LuCI:
+
+- General shows neto/sing-box status and versions.
+- General Start/Stop calls `/etc/init.d/neto start|stop`.
+- General Autostart calls `/etc/init.d/neto enable|disable`.
+- General exposes DNS preset/mode/outbound/transport and routing mode.
+- Advanced contains DNS listener, FakeIP range, AAAA filter, dnsmasq, LAN,
+  sing-box listener, TProxy and nft settings.
+- Rules page writes explicit `enabled` and `priority`.
+- Moving rules rewrites priority as `100`, `200`, `300`, ...
+- Rules page writes only current matcher fields, not deprecated aliases.
+- Rules page hides `dns_mode` and writes `dns_mode=auto`.
+- Domain input supports fields, textbox and domain providers.
+- IP input supports inline IP/CIDR list, textbox and IP providers.
+- Rules details include packet-only Protocol, Source ports and Destination
+  ports.
+- Ports are not shown in main rules table.
+- Rules page does not create providers.
+- Providers page does not create rules.
+- Outbounds page creates only VLESS, Hysteria2, Shadowsocks or Trojan profiles.
+- Outbounds page does not create `proxy_default`.
+- Imported/subscription nodes appear in Outbounds and in Rules outbound
+  dropdown.
+
+Inspect UCI after LuCI save:
 
 ```sh
 uci show neto
 ```
+
+## Debug Commands
+
+```sh
+netod debug
+logread | grep -E 'netod|sing-box|dnsmasq' | tail -n 120
+grep -nE 'rule_set|rule-set|/tmp/sing-box/rulesets|"detour": "direct"' /tmp/neto/sing-box.json
+```
+
+The grep check should not find legacy sing-box rule-set paths or
+`"detour": "direct"`.
