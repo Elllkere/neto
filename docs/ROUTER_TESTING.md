@@ -8,7 +8,7 @@ Routing semantics in v1:
 - `routing_mode=custom`: ordered `config rule` sections decide proxy/direct/block; unmatched traffic is `default_outbound=direct`.
 - `routing_mode=global`: LAN client non-reserved TCP/UDP traffic is proxied unless the client policy is `direct`.
 - Client `policy=default` follows `routing_mode`.
-- Client `policy=proxy` forces non-reserved TCP/UDP traffic to `proxy_default`.
+- Client `policy=proxy` forces non-reserved TCP/UDP traffic through neto.
 - Client `policy=direct` bypasses neto and receives real DNS answers.
 
 Rules are evaluated by ascending `priority`; the first rule whose include
@@ -35,9 +35,24 @@ Exclude fields use the same semantics:
 Provider rules use `list file` with IPv4 CIDR files and compile into nft
 interval sets in rule order.
 
+Rules default to built-in `option outbound 'direct'`. Built-in `blocked` is also
+available. After adding a custom native sing-box outbound profile, select its
+tag in the rule outbound field. In LuCI, the first Add input becomes the stable
+tag and later edits change only the `label`. See `docs/OUTBOUNDS.md` for VLESS
++ REALITY, Hysteria2, Shadowsocks 2022, and Trojan TLS examples.
+
 Rules are for explicit domain/IP/provider matches only. To proxy everything
 globally, use General -> `routing_mode=global`. To proxy one client entirely,
 use client `policy=proxy`.
+
+For domain proxy rules in custom mode, use `dns_mode=fakeip`. A domain rule with
+`dns_mode=real_ip` can prove that DNS matching works, but it returns a real
+destination IP, so nftables cannot later identify that packet as a domain match
+unless a provider/IP rule also matches that destination.
+
+`dns_mode=auto` is a backend compatibility mode: proxy rules with domain include
+fields are treated as `fakeip`; other rules use `real_ip`. LuCI defaults new
+proxy rules to explicit `fakeip` and does not expose DNS mode selection.
 
 Example:
 
@@ -47,7 +62,7 @@ config rule
 	option enabled '1'
 	option priority '100'
 	option action 'proxy'
-	option outbound 'proxy_default'
+	option outbound 'my_vless'
 	option dns_mode 'fakeip'
 	list domain_contains 'youtube'
 	list exclude_domain_equals 'youtube.kz'
@@ -87,6 +102,10 @@ If `/etc/config/neto` uses the managed binary, run:
 ```sh
 /usr/libexec/neto/sing-box check -c /tmp/neto/sing-box.json
 ```
+
+For FakeIP-based proxying, `/tmp/neto/sing-box.json` should contain
+`"store_fakeip": true` under `experimental.cache_file`, and `route.final`
+should be the selected custom outbound tag.
 
 Check DNS forwarding through netod:
 

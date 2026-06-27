@@ -11,11 +11,17 @@ import (
 
 const DefaultPath = "/etc/config/neto"
 
+const (
+	BuiltinDirectOutbound  = "direct"
+	BuiltinBlockedOutbound = "blocked"
+)
+
 type Config struct {
-	Main     Main
-	Clients  []Client
-	Rules    []Rule
-	Warnings []string
+	Main      Main
+	Clients   []Client
+	Rules     []Rule
+	Outbounds []Outbound
+	Warnings  []string
 }
 
 type Main struct {
@@ -64,11 +70,57 @@ type Rule struct {
 	Files                   []string
 }
 
+type Outbound struct {
+	Enabled              bool
+	Tag                  string
+	Label                string
+	Type                 string
+	Server               string
+	Port                 int
+	UUID                 string
+	Flow                 string
+	TLS                  bool
+	ServerName           string
+	Reality              bool
+	RealityPublicKey     string
+	RealityShortID       string
+	ALPN                 []string
+	TLSMinVersion        string
+	TLSMaxVersion        string
+	TLSCipherSuites      []string
+	ECH                  bool
+	ECHConfig            []string
+	ECHConfigPath        string
+	UTLSFingerprint      string
+	Transport            string
+	PacketEncoding       string
+	GRPCServiceName      string
+	HTTPHost             []string
+	HTTPUpgradeHost      string
+	HTTPPath             string
+	HTTPMethod           string
+	WSHost               string
+	WSPath               string
+	WSEarlyData          int
+	WSEarlyDataHeader    string
+	Password             string
+	Method               string
+	Insecure             bool
+	HysteriaObfsType     string
+	HysteriaObfsPassword string
+	HysteriaUpMbps       int
+	HysteriaDownMbps     int
+}
+
 type section struct {
 	typ     string
 	name    string
 	options map[string]string
 	lists   map[string][]string
+}
+
+func BuiltinOutboundTags() []string {
+	return []string{BuiltinDirectOutbound, BuiltinBlockedOutbound}
 }
 
 func Defaults() Config {
@@ -96,6 +148,29 @@ func Defaults() Config {
 	}
 }
 
+func (c Config) EnabledCustomOutbounds() []Outbound {
+	outbounds := make([]Outbound, 0, len(c.Outbounds))
+	for _, outbound := range c.Outbounds {
+		if outbound.Enabled {
+			outbounds = append(outbounds, outbound)
+		}
+	}
+	return outbounds
+}
+
+func (c Config) AllowedOutboundTags() map[string]struct{} {
+	tags := map[string]struct{}{
+		BuiltinDirectOutbound:  {},
+		BuiltinBlockedOutbound: {},
+	}
+	for _, outbound := range c.Outbounds {
+		if outbound.Enabled && strings.TrimSpace(outbound.Tag) != "" {
+			tags[outbound.Tag] = struct{}{}
+		}
+	}
+	return tags
+}
+
 func LoadFile(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -111,6 +186,7 @@ func Parse(data string) (Config, error) {
 	}
 
 	cfg := Defaults()
+	hasOutboundSection := false
 	for _, s := range sections {
 		switch s.typ {
 		case "main":
@@ -127,11 +203,17 @@ func Parse(data string) (Config, error) {
 				Policy: policy,
 			})
 		case "rule":
-			rule, warning := parseRule(s, len(cfg.Rules))
+			rule, warnings := parseRule(s, len(cfg.Rules))
 			cfg.Rules = append(cfg.Rules, rule)
-			if warning != "" {
-				cfg.Warnings = append(cfg.Warnings, warning)
+			cfg.Warnings = append(cfg.Warnings, warnings...)
+		case "outbound":
+			if !hasOutboundSection {
+				cfg.Outbounds = nil
+				hasOutboundSection = true
 			}
+			outbound, warnings := parseOutbound(s)
+			cfg.Outbounds = append(cfg.Outbounds, outbound)
+			cfg.Warnings = append(cfg.Warnings, warnings...)
 		}
 	}
 	sort.SliceStable(cfg.Rules, func(i, j int) bool {
@@ -145,6 +227,10 @@ func Parse(data string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if !c.Main.Enabled {
+		return nil
+	}
+
 	switch c.Main.RoutingMode {
 	case "custom", "global":
 	default:
@@ -213,6 +299,49 @@ func (c Config) Validate() error {
 			return fmt.Errorf("client %q has unsupported policy %q", cl.Name, cl.Policy)
 		}
 	}
+	seenOutboundTags := map[string]struct{}{
+		BuiltinDirectOutbound:  {},
+		BuiltinBlockedOutbound: {},
+	}
+	for _, outbound := range c.Outbounds {
+		if !outbound.Enabled {
+			continue
+		}
+		tag := strings.TrimSpace(outbound.Tag)
+		if tag == "" {
+			return fmt.Errorf("outbound tag must not be empty")
+		}
+		if reservedCustomOutboundTag(tag) {
+			return fmt.Errorf("outbound tag %q is reserved", tag)
+		}
+		if _, ok := seenOutboundTags[tag]; ok {
+			return fmt.Errorf("duplicate enabled outbound tag %q", tag)
+		}
+		seenOutboundTags[tag] = struct{}{}
+		switch outbound.Type {
+		case "vless":
+			if err := requireOutboundFields(outbound, "server", "port", "uuid"); err != nil {
+				return err
+			}
+			if outbound.Reality && strings.TrimSpace(outbound.RealityPublicKey) == "" {
+				return fmt.Errorf("outbound %q reality_public_key is required when reality=1", outbound.Tag)
+			}
+		case "hysteria2":
+			if err := requireOutboundFields(outbound, "server", "port", "password"); err != nil {
+				return err
+			}
+		case "shadowsocks":
+			if err := requireOutboundFields(outbound, "server", "port", "method", "password"); err != nil {
+				return err
+			}
+		case "trojan":
+			if err := requireOutboundFields(outbound, "server", "port", "password"); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("outbound %q has unsupported type %q", outbound.Tag, outbound.Type)
+		}
+	}
 	for _, r := range c.Rules {
 		if strings.TrimSpace(r.Name) == "" {
 			return fmt.Errorf("rule name must not be empty")
@@ -227,8 +356,9 @@ func (c Config) Validate() error {
 		default:
 			return fmt.Errorf("rule %q has unsupported dns_mode %q", r.Name, r.DNSMode)
 		}
-		if r.Outbound != "" && r.Outbound != "proxy_default" {
-			return fmt.Errorf("rule %q has unsupported outbound %q", r.Name, r.Outbound)
+		outboundTag := strings.TrimSpace(firstNonEmpty(r.Outbound, BuiltinDirectOutbound))
+		if _, ok := seenOutboundTags[outboundTag]; !ok {
+			return fmt.Errorf("rule %q has unsupported outbound %q", r.Name, outboundTag)
 		}
 		for _, file := range r.Files {
 			if strings.TrimSpace(file) == "" {
@@ -303,13 +433,19 @@ func applyMain(m *Main, s section) {
 	}
 }
 
-func parseRule(s section, order int) (Rule, string) {
+func parseRule(s section, order int) (Rule, []string) {
+	outbound := strings.TrimSpace(firstNonEmpty(s.options["outbound"], BuiltinDirectOutbound))
+	var warnings []string
+	if outbound == "proxy_default" {
+		outbound = BuiltinDirectOutbound
+		warnings = append(warnings, fmt.Sprintf("rule %q: outbound 'proxy_default' is deprecated; using 'direct'", firstNonEmpty(s.options["name"], s.name, fmt.Sprintf("rule_%d", order+1))))
+	}
 	r := Rule{
 		Name:     firstNonEmpty(s.options["name"], s.name, fmt.Sprintf("rule_%d", order+1)),
 		Enabled:  true,
 		Priority: 1000 + order,
 		Action:   firstNonEmpty(s.options["action"], "proxy"),
-		Outbound: firstNonEmpty(s.options["outbound"], "proxy_default"),
+		Outbound: outbound,
 		DNSMode:  firstNonEmpty(s.options["dns_mode"], "auto"),
 	}
 	if v, ok := s.options["enabled"]; ok {
@@ -320,9 +456,8 @@ func parseRule(s section, order int) (Rule, string) {
 			r.Priority = n
 		}
 	}
-	var warning string
 	if _, ok := s.options["match_all"]; ok {
-		warning = fmt.Sprintf("rule %q: match_all is deprecated and ignored", r.Name)
+		warnings = append(warnings, fmt.Sprintf("rule %q: match_all is deprecated and ignored", r.Name))
 	}
 	r.DomainEquals = cleanDomainList(appendList(s.lists["domain_equals"], s.lists["domain_exact"]))
 	r.DomainContains = cleanDomainList(appendList(s.lists["domain_contains"], s.lists["domain_keyword"]))
@@ -333,7 +468,128 @@ func parseRule(s section, order int) (Rule, string) {
 	r.ExcludeDomainStartsWith = cleanDomainList(appendList(s.lists["exclude_domain_starts_with"], s.lists["exclude_domain_prefix"]))
 	r.ExcludeDomainEndsWith = cleanDomainList(appendList(s.lists["exclude_domain_ends_with"], s.lists["exclude_domain_suffix"]))
 	r.Files = cleanList(s.lists["file"])
-	return r, warning
+	return r, warnings
+}
+
+func parseOutbound(s section) (Outbound, []string) {
+	outbound := Outbound{
+		Enabled:              true,
+		Tag:                  strings.TrimSpace(firstNonEmpty(s.options["tag"], s.name)),
+		Label:                strings.TrimSpace(firstNonEmpty(s.options["label"], s.options["name"], s.options["tag"], s.name)),
+		Type:                 strings.TrimSpace(firstNonEmpty(s.options["type"], "vless")),
+		Server:               strings.TrimSpace(firstNonEmpty(s.options["server"], s.options["address"])),
+		UUID:                 strings.TrimSpace(s.options["uuid"]),
+		Flow:                 strings.TrimSpace(firstNonEmpty(s.options["flow"], s.options["vless_flow"])),
+		ServerName:           strings.TrimSpace(firstNonEmpty(s.options["server_name"], s.options["tls_sni"])),
+		RealityPublicKey:     strings.TrimSpace(firstNonEmpty(s.options["reality_public_key"], s.options["tls_reality_public_key"])),
+		RealityShortID:       strings.TrimSpace(firstNonEmpty(s.options["reality_short_id"], s.options["tls_reality_short_id"])),
+		TLSMinVersion:        strings.TrimSpace(s.options["tls_min_version"]),
+		TLSMaxVersion:        strings.TrimSpace(s.options["tls_max_version"]),
+		ECHConfigPath:        strings.TrimSpace(firstNonEmpty(s.options["ech_config_path"], s.options["tls_ech_config_path"])),
+		UTLSFingerprint:      strings.TrimSpace(firstNonEmpty(s.options["utls_fingerprint"], s.options["tls_utls"])),
+		Transport:            strings.TrimSpace(s.options["transport"]),
+		PacketEncoding:       strings.TrimSpace(s.options["packet_encoding"]),
+		GRPCServiceName:      strings.TrimSpace(firstNonEmpty(s.options["grpc_service_name"], s.options["grpc_servicename"])),
+		HTTPUpgradeHost:      strings.TrimSpace(s.options["httpupgrade_host"]),
+		HTTPPath:             strings.TrimSpace(s.options["http_path"]),
+		HTTPMethod:           strings.TrimSpace(s.options["http_method"]),
+		WSHost:               strings.TrimSpace(s.options["ws_host"]),
+		WSPath:               strings.TrimSpace(s.options["ws_path"]),
+		WSEarlyDataHeader:    strings.TrimSpace(s.options["websocket_early_data_header"]),
+		Password:             strings.TrimSpace(s.options["password"]),
+		Method:               strings.TrimSpace(firstNonEmpty(s.options["method"], s.options["shadowsocks_encrypt_method"])),
+		ALPN:                 cleanList(appendList(appendList(s.lists["alpn"], s.lists["tls_alpn"]), splitListOption(firstNonEmpty(s.options["alpn"], s.options["tls_alpn"])))),
+		TLSCipherSuites:      cleanList(appendList(s.lists["tls_cipher_suites"], splitListOption(s.options["tls_cipher_suites"]))),
+		ECHConfig:            cleanList(appendList(appendList(s.lists["ech_config"], s.lists["tls_ech_config"]), splitListOption(firstNonEmpty(s.options["ech_config"], s.options["tls_ech_config"])))),
+		HTTPHost:             cleanList(appendList(s.lists["http_host"], splitListOption(s.options["http_host"]))),
+		HysteriaObfsType:     strings.TrimSpace(s.options["hysteria_obfs_type"]),
+		HysteriaObfsPassword: strings.TrimSpace(s.options["hysteria_obfs_password"]),
+	}
+	if v := s.options["port"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			outbound.Port = n
+		}
+	}
+	if v, ok := s.options["tls"]; ok {
+		outbound.TLS = parseBool(v, outbound.TLS)
+	}
+	if v, ok := s.options["reality"]; ok {
+		outbound.Reality = parseBool(v, outbound.Reality)
+	} else if v, ok := s.options["tls_reality"]; ok {
+		outbound.Reality = parseBool(v, outbound.Reality)
+	}
+	if v, ok := s.options["insecure"]; ok {
+		outbound.Insecure = parseBool(v, outbound.Insecure)
+	} else if v, ok := s.options["tls_insecure"]; ok {
+		outbound.Insecure = parseBool(v, outbound.Insecure)
+	}
+	if v, ok := s.options["ech"]; ok {
+		outbound.ECH = parseBool(v, outbound.ECH)
+	} else if v, ok := s.options["tls_ech"]; ok {
+		outbound.ECH = parseBool(v, outbound.ECH)
+	}
+	if v := s.options["websocket_early_data"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			outbound.WSEarlyData = n
+		}
+	}
+	if v := s.options["hysteria_up_mbps"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			outbound.HysteriaUpMbps = n
+		}
+	}
+	if v := s.options["hysteria_down_mbps"]; v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			outbound.HysteriaDownMbps = n
+		}
+	}
+
+	var warnings []string
+	if outbound.Tag == "proxy_default" {
+		outbound.Enabled = false
+		warnings = append(warnings, "outbound 'proxy_default' is deprecated and ignored; create a custom VLESS, Hysteria2, Shadowsocks, or Trojan outbound with its own tag")
+	}
+	if outbound.Enabled && (outbound.TLS || outbound.Reality) && outbound.ServerName == "" {
+		warnings = append(warnings, fmt.Sprintf("outbound %q: server_name is recommended when tls=1 or reality=1", outbound.Tag))
+	}
+	return outbound, warnings
+}
+
+func reservedCustomOutboundTag(tag string) bool {
+	switch tag {
+	case BuiltinDirectOutbound, BuiltinBlockedOutbound, "block", "proxy_default":
+		return true
+	default:
+		return false
+	}
+}
+
+func requireOutboundFields(outbound Outbound, fields ...string) error {
+	for _, field := range fields {
+		switch field {
+		case "server":
+			if strings.TrimSpace(outbound.Server) == "" {
+				return fmt.Errorf("outbound %q server is required for type %s", outbound.Tag, outbound.Type)
+			}
+		case "port":
+			if outbound.Port <= 0 || outbound.Port > 65535 {
+				return fmt.Errorf("outbound %q port is required for type %s", outbound.Tag, outbound.Type)
+			}
+		case "uuid":
+			if strings.TrimSpace(outbound.UUID) == "" {
+				return fmt.Errorf("outbound %q uuid is required for type %s", outbound.Tag, outbound.Type)
+			}
+		case "password":
+			if strings.TrimSpace(outbound.Password) == "" {
+				return fmt.Errorf("outbound %q password is required for type %s", outbound.Tag, outbound.Type)
+			}
+		case "method":
+			if strings.TrimSpace(outbound.Method) == "" {
+				return fmt.Errorf("outbound %q method is required for type %s", outbound.Tag, outbound.Type)
+			}
+		}
+	}
+	return nil
 }
 
 func cleanList(values []string) []string {
@@ -375,6 +631,12 @@ func cleanDomainList(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func splitListOption(value string) []string {
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	})
 }
 
 func normalizeClientPolicy(policy string) (string, string) {

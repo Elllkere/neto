@@ -181,10 +181,42 @@ Rules:
 Creating a provider must not create a rule. Creating a rule must not create a
 provider.
 
+## Outbound Profiles
+
+Rules store an outbound tag. Built-in tags are:
+
+- `direct`
+- `blocked`
+
+These built-ins are always generated for sing-box and must not be configured as
+`config outbound` sections.
+
+Supported native sing-box outbound profile types:
+
+- `vless`
+- `hysteria2`
+- `shadowsocks`
+- `trojan`
+
+Custom outbound sections must use their own stable tags, for example
+`my_vless`. The optional `label` is only a human-readable name and must not
+change routing references. Outbound sections do not have an enable/disable
+switch in v1; delete the section to remove a profile. `proxy_default` is
+deprecated and ignored as an outbound section.
+
+Outbound profile fields are native sing-box fields plus a small set of
+homeproxy-compatible aliases accepted by the parser for migration. LuCI should
+keep the table to `label`, `type`, `address`, and `port`, with advanced TLS,
+REALITY, uTLS, ECH, flow, method, and transport options in the edit dialog.
+
+Outbound profiles must not change nft routing policy. nftables still decides
+which LAN client packets reach sing-box before sing-box executes the selected
+outbound.
+
 ## Client Policy Model
 
 - absent/default: follow `routing_mode`
-- `proxy`: force non-reserved client TCP/UDP traffic to `proxy_default`
+- `proxy`: force non-reserved client TCP/UDP traffic through neto
 - `direct`: hard bypass, real DNS only, no FakeIP, nft return before proxy
   rules
 
@@ -234,4 +266,3 @@ list domain_ends_with '.example.com'
 
 IPv6 routing is not implemented in v1. Do not leak real IPv6 answers for
 FakeIP-matched domains while IPv6 routing is absent.
-

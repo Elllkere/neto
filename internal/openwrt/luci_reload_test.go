@@ -10,6 +10,7 @@ func TestLuCIConfigPagesRestartNetoAfterCommit(t *testing.T) {
 	for _, path := range []string{
 		"../../embedded/files/www/luci-static/resources/view/neto/general.js",
 		"../../embedded/files/www/luci-static/resources/view/neto/clients.js",
+		"../../embedded/files/www/luci-static/resources/view/neto/outbounds.js",
 		"../../embedded/files/www/luci-static/resources/view/neto/rules.js",
 		"../../embedded/files/www/luci-static/resources/view/neto/providers.js",
 	} {

@@ -22,6 +22,7 @@ func Summary(cfg config.Config) string {
 		fmt.Sprintf("table: %d", cfg.Main.Table),
 		fmt.Sprintf("routing_mode: %s", cfg.Main.RoutingMode),
 		fmt.Sprintf("default_outbound: %s", cfg.Main.DefaultOutbound),
+		fmt.Sprintf("outbounds: %s", OutboundsSummary(cfg)),
 		fmt.Sprintf("lan_subnets4: %s", listOrDash(cfg.Main.LANSubnets)),
 		fmt.Sprintf("lan_ifaces: %s", listOrDash(cfg.Main.LANIfaces)),
 		fmt.Sprintf("nft_table: %s", nftTableStatus()),
@@ -32,6 +33,42 @@ func Summary(cfg config.Config) string {
 		fmt.Sprintf("tproxy_listener: %s", listenerStatus("127.0.0.1:"+strconv.Itoa(cfg.Main.TProxyPort))),
 	}
 	return strings.Join(lines, "\n")
+}
+
+func OutboundsSummary(cfg config.Config) string {
+	parts := []string{
+		config.BuiltinDirectOutbound + "(builtin)",
+		config.BuiltinBlockedOutbound + "(builtin)",
+	}
+	for _, outbound := range cfg.EnabledCustomOutbounds() {
+		parts = append(parts, OutboundSummary(outbound))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func OutboundSummary(outbound config.Outbound) string {
+	parts := []string{
+		fmt.Sprintf("%s(%s)", outbound.Tag, outbound.Type),
+	}
+	if outbound.Label != "" && outbound.Label != outbound.Tag {
+		parts = append(parts, fmt.Sprintf("label=%s", outbound.Label))
+	}
+	if outbound.Server != "" && outbound.Port > 0 {
+		parts = append(parts, fmt.Sprintf("server=%s:%d", outbound.Server, outbound.Port))
+	}
+	if outbound.Method != "" {
+		parts = append(parts, fmt.Sprintf("method=%s", outbound.Method))
+	}
+	if outbound.TLS || outbound.Reality || outbound.Type == "hysteria2" {
+		parts = append(parts, fmt.Sprintf("tls=%t", outbound.TLS || outbound.Reality || outbound.Type == "hysteria2"))
+	}
+	if outbound.Reality {
+		parts = append(parts, "reality=true")
+	}
+	if outbound.Transport != "" {
+		parts = append(parts, fmt.Sprintf("transport=%s", outbound.Transport))
+	}
+	return strings.Join(parts, " ")
 }
 
 func listOrDash(values []string) string {

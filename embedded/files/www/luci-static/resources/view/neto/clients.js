@@ -35,7 +35,7 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'policy', _('Policy'),
-			_('Default follows general routing mode. Proxy forces proxy_default. Direct bypasses neto completely.'));
+			_('Default follows general routing mode. Proxy forces non-reserved traffic through neto. Direct bypasses neto completely.'));
 		o.value('default', _('Default'));
 		o.value('proxy', _('Proxy'));
 		o.value('direct', _('Direct'));

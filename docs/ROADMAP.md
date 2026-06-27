@@ -65,7 +65,7 @@ Treat these as active until verified on router:
 - More robust provider management.
 - Optional provider update support.
 - More complete LuCI validation and summaries.
-- Additional outbounds beyond `proxy_default`.
+- Additional outbound UX, imports, and selectors beyond native manual profiles.
 - Better block behavior for packet phase.
 - IPv6 design, only after v1 IPv4 path is stable.
 
@@ -79,4 +79,3 @@ Treat these as active until verified on router:
 - Advanced multi-outbound UI.
 - Automatic provider updates.
 - Reintroducing `match_all`.
-

@@ -26,7 +26,10 @@ return view.extend({
 		s = m.section(form.NamedSection, 'main', 'main', _('General'));
 
 		o = s.option(form.Flag, 'enabled', _('Enabled'));
+		o.enabled = '1';
+		o.disabled = '0';
 		o.default = '1';
+		o.rmempty = false;
 
 		o = s.option(form.Value, 'dns_listen', _('DNS listen'));
 		o.placeholder = '127.0.0.1:5353';
@@ -35,10 +38,16 @@ return view.extend({
 		o.placeholder = '1.1.1.1:53';
 
 		o = s.option(form.Flag, 'manage_dnsmasq', _('Manage dnsmasq'));
+		o.enabled = '1';
+		o.disabled = '0';
 		o.default = '1';
+		o.rmempty = false;
 
 		o = s.option(form.Flag, 'filter_aaaa_for_fakeip', _('Filter FakeIP AAAA'));
+		o.enabled = '1';
+		o.disabled = '0';
 		o.default = '1';
+		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'routing_mode', _('Routing mode'));
 		o.value('custom', _('Custom'));
@@ -74,17 +83,26 @@ return view.extend({
 		o.placeholder = '101';
 
 		o = s.option(form.Flag, 'fakeip_enabled', _('FakeIP'));
+		o.enabled = '1';
+		o.disabled = '0';
 		o.default = '1';
+		o.rmempty = false;
 
 		o = s.option(form.Value, 'fakeip_range', _('FakeIP range'));
 		o.datatype = 'cidr4';
 		o.placeholder = '198.18.0.0/15';
 
 		o = s.option(form.Flag, 'resolve_for_subnet_rules', _('Resolve subnet rules'));
+		o.enabled = '1';
+		o.disabled = '0';
 		o.default = '1';
+		o.rmempty = false;
 
 		o = s.option(form.Flag, 'nft_counters', _('nft counters'));
+		o.enabled = '1';
+		o.disabled = '0';
 		o.default = '1';
+		o.rmempty = false;
 
 		return m.render();
 	}

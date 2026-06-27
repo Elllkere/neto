@@ -16,11 +16,12 @@ import (
 const MinimumVersion = "1.12.0"
 
 type Config struct {
-	Log       map[string]any `json:"log,omitempty"`
-	DNS       DNS            `json:"dns"`
-	Inbounds  []any          `json:"inbounds"`
-	Outbounds []any          `json:"outbounds"`
-	Route     Route          `json:"route"`
+	Log          map[string]any `json:"log,omitempty"`
+	DNS          DNS            `json:"dns"`
+	Inbounds     []any          `json:"inbounds"`
+	Outbounds    []any          `json:"outbounds"`
+	Route        Route          `json:"route"`
+	Experimental map[string]any `json:"experimental,omitempty"`
 }
 
 type DNS struct {
@@ -88,34 +89,269 @@ func Generate(cfg config.Config) ([]byte, error) {
 				"tag":         "tproxy-in",
 				"listen":      "127.0.0.1",
 				"listen_port": cfg.Main.TProxyPort,
-				"sniff":       true,
 			},
 		},
-		Outbounds: []any{
-			map[string]any{
-				"type": "direct",
-				"tag":  "proxy_default",
-			},
-			map[string]any{
-				"type": "direct",
-				"tag":  "direct",
-			},
-			map[string]any{
-				"type": "block",
-				"tag":  "block",
-			},
-		},
+		Outbounds: nil,
 		Route: Route{
 			Rules: []any{
 				map[string]any{"action": "sniff"},
 				map[string]any{"protocol": "dns", "action": "hijack-dns"},
 			},
-			Final:                 "proxy_default",
+			Final:                 selectedProxyOutbound(cfg),
 			DefaultDomainResolver: "local",
 		},
 	}
+	if cfg.Main.FakeIPEnabled {
+		doc.Experimental = map[string]any{
+			"cache_file": map[string]any{
+				"enabled":      true,
+				"path":         "/tmp/neto/sing-box-cache.db",
+				"store_fakeip": true,
+			},
+		}
+	}
+
+	outbounds, err := generateOutbounds(cfg)
+	if err != nil {
+		return nil, err
+	}
+	doc.Outbounds = outbounds
 
 	return json.MarshalIndent(doc, "", "  ")
+}
+
+func generateOutbounds(cfg config.Config) ([]any, error) {
+	used := map[string]struct{}{}
+	var out []any
+	add := func(item map[string]any) {
+		tag, _ := item["tag"].(string)
+		if tag == "" {
+			return
+		}
+		if _, ok := used[tag]; ok {
+			return
+		}
+		used[tag] = struct{}{}
+		out = append(out, item)
+	}
+
+	add(map[string]any{"type": "direct", "tag": config.BuiltinDirectOutbound})
+	add(map[string]any{"type": "block", "tag": config.BuiltinBlockedOutbound})
+	for _, outbound := range cfg.EnabledCustomOutbounds() {
+		add(encodeOutbound(outbound))
+	}
+	return out, nil
+}
+
+func selectedProxyOutbound(cfg config.Config) string {
+	allowed := cfg.AllowedOutboundTags()
+	for _, rule := range cfg.Rules {
+		if !rule.Enabled || rule.Action != "proxy" {
+			continue
+		}
+		tag := strings.TrimSpace(rule.Outbound)
+		if tag == "" || tag == config.BuiltinDirectOutbound || tag == config.BuiltinBlockedOutbound {
+			continue
+		}
+		if _, ok := allowed[tag]; ok {
+			return tag
+		}
+	}
+	if cfg.Main.RoutingMode == "global" || hasProxyClient(cfg) {
+		for _, outbound := range cfg.EnabledCustomOutbounds() {
+			return outbound.Tag
+		}
+	}
+	return config.BuiltinDirectOutbound
+}
+
+func hasProxyClient(cfg config.Config) bool {
+	for _, client := range cfg.Clients {
+		if client.Policy == "proxy" {
+			return true
+		}
+	}
+	return false
+}
+
+func encodeOutbound(outbound config.Outbound) map[string]any {
+	switch outbound.Type {
+	case "vless":
+		doc := map[string]any{
+			"type":        "vless",
+			"tag":         outbound.Tag,
+			"server":      outbound.Server,
+			"server_port": outbound.Port,
+			"uuid":        outbound.UUID,
+		}
+		if outbound.Flow != "" {
+			doc["flow"] = outbound.Flow
+		}
+		if outbound.Transport != "" {
+			if outbound.Transport == "tcp" {
+				doc["network"] = outbound.Transport
+			} else if transport := v2rayTransportConfig(outbound); transport != nil {
+				doc["transport"] = transport
+			}
+		}
+		if outbound.PacketEncoding != "" {
+			doc["packet_encoding"] = outbound.PacketEncoding
+		}
+		if tls := tlsConfig(outbound, outbound.TLS || outbound.Reality); tls != nil {
+			doc["tls"] = tls
+		}
+		return doc
+	case "hysteria2":
+		doc := map[string]any{
+			"type":        "hysteria2",
+			"tag":         outbound.Tag,
+			"server":      outbound.Server,
+			"server_port": outbound.Port,
+			"password":    outbound.Password,
+			"tls":         tlsConfig(outbound, true),
+		}
+		if outbound.HysteriaObfsType != "" {
+			doc["obfs"] = map[string]any{
+				"type":     outbound.HysteriaObfsType,
+				"password": outbound.HysteriaObfsPassword,
+			}
+		}
+		if outbound.HysteriaUpMbps > 0 {
+			doc["up_mbps"] = outbound.HysteriaUpMbps
+		}
+		if outbound.HysteriaDownMbps > 0 {
+			doc["down_mbps"] = outbound.HysteriaDownMbps
+		}
+		return doc
+	case "shadowsocks":
+		return map[string]any{
+			"type":        "shadowsocks",
+			"tag":         outbound.Tag,
+			"server":      outbound.Server,
+			"server_port": outbound.Port,
+			"method":      outbound.Method,
+			"password":    outbound.Password,
+		}
+	case "trojan":
+		doc := map[string]any{
+			"type":        "trojan",
+			"tag":         outbound.Tag,
+			"server":      outbound.Server,
+			"server_port": outbound.Port,
+			"password":    outbound.Password,
+		}
+		if tls := tlsConfig(outbound, outbound.TLS); tls != nil {
+			doc["tls"] = tls
+		}
+		if transport := v2rayTransportConfig(outbound); transport != nil {
+			doc["transport"] = transport
+		}
+		return doc
+	default:
+		return map[string]any{
+			"type": "direct",
+			"tag":  outbound.Tag,
+		}
+	}
+}
+
+func tlsConfig(outbound config.Outbound, enabled bool) map[string]any {
+	if !enabled {
+		return nil
+	}
+	tls := map[string]any{"enabled": true}
+	if outbound.ServerName != "" {
+		tls["server_name"] = outbound.ServerName
+	}
+	if outbound.Insecure {
+		tls["insecure"] = true
+	}
+	if len(outbound.ALPN) > 0 {
+		tls["alpn"] = outbound.ALPN
+	}
+	if outbound.TLSMinVersion != "" {
+		tls["min_version"] = outbound.TLSMinVersion
+	}
+	if outbound.TLSMaxVersion != "" {
+		tls["max_version"] = outbound.TLSMaxVersion
+	}
+	if len(outbound.TLSCipherSuites) > 0 {
+		tls["cipher_suites"] = outbound.TLSCipherSuites
+	}
+	if outbound.ECH {
+		ech := map[string]any{"enabled": true}
+		if len(outbound.ECHConfig) > 0 {
+			ech["config"] = outbound.ECHConfig
+		}
+		if outbound.ECHConfigPath != "" {
+			ech["config_path"] = outbound.ECHConfigPath
+		}
+		tls["ech"] = ech
+	}
+	if outbound.UTLSFingerprint != "" {
+		tls["utls"] = map[string]any{
+			"enabled":     true,
+			"fingerprint": outbound.UTLSFingerprint,
+		}
+	}
+	if outbound.Reality {
+		reality := map[string]any{
+			"enabled":    true,
+			"public_key": outbound.RealityPublicKey,
+		}
+		if outbound.RealityShortID != "" {
+			reality["short_id"] = outbound.RealityShortID
+		}
+		tls["reality"] = reality
+	}
+	return tls
+}
+
+func v2rayTransportConfig(outbound config.Outbound) map[string]any {
+	if outbound.Transport == "" || outbound.Transport == "tcp" {
+		return nil
+	}
+	transport := map[string]any{"type": outbound.Transport}
+	switch outbound.Transport {
+	case "grpc":
+		if outbound.GRPCServiceName != "" {
+			transport["service_name"] = outbound.GRPCServiceName
+		}
+	case "http":
+		if len(outbound.HTTPHost) > 0 {
+			transport["host"] = outbound.HTTPHost
+		}
+		if outbound.HTTPPath != "" {
+			transport["path"] = outbound.HTTPPath
+		}
+		if outbound.HTTPMethod != "" {
+			transport["method"] = outbound.HTTPMethod
+		}
+	case "httpupgrade":
+		if outbound.HTTPUpgradeHost != "" {
+			transport["host"] = outbound.HTTPUpgradeHost
+		}
+		if outbound.HTTPPath != "" {
+			transport["path"] = outbound.HTTPPath
+		}
+	case "ws":
+		if outbound.WSPath != "" {
+			transport["path"] = outbound.WSPath
+		}
+		if outbound.WSHost != "" {
+			transport["headers"] = map[string]any{"Host": outbound.WSHost}
+		}
+		if outbound.WSEarlyData > 0 {
+			transport["max_early_data"] = outbound.WSEarlyData
+		}
+		if outbound.WSEarlyDataHeader != "" {
+			transport["early_data_header_name"] = outbound.WSEarlyDataHeader
+		}
+	case "quic":
+	default:
+		return nil
+	}
+	return transport
 }
 
 func CheckBinary(bin string, configPath string) error {

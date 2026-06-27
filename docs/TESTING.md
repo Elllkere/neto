@@ -133,17 +133,40 @@ Manually verify on router:
 - creating a rule writes `option enabled '1'`
 - disabling a rule writes `option enabled '0'`
 - editing a rule preserves `enabled`
+- General -> Enabled writes explicit `option enabled '0'` when disabled
 - creating a rule writes `priority`
 - moving rules rewrites priority as `100`, `200`, `300`, ...
 - Rules page writes only new matcher field names
 - Rules page does not write `match_all`
 - Rules page does not write deprecated matcher fields
+- Rules page hides DNS mode selection and writes `dns_mode=fakeip` for proxy rules
 - Providers page does not create rules unless explicitly intended
 - Rules page does not create providers
+- Rules page defaults new rule outbound to `direct`
+- Rules page offers built-in `direct` and `blocked` outbounds
+- Rules page offers enabled custom outbound tags after they are created
+- Rules page does not offer `proxy_default`
+- Outbounds page creates only VLESS, Hysteria2, Shadowsocks, or Trojan profiles
+- Outbounds page creates stable `tag` from the first Add input
+- editing an outbound changes only `label`/name, not `tag`
+- Outbounds table shows only text name, type, address, and port, without a
+  second editable name/input column
+- Outbounds page does not show an `enabled` field
+- Outbounds page does not expose SOCKS as a primary outbound
+- Outbounds page does not expose `direct` as a creatable outbound type
+- Outbounds page does not auto-create an empty `proxy_default`
+- Outbounds edit dialog exposes homeproxy-like protocol details: VLESS flow as a
+  dropdown, Shadowsocks method as a dropdown, TLS min/max/ciphers, allow
+  insecure, ECH, uTLS fingerprint, REALITY, and transport-specific fields
+- REALITY public key and short ID fields are hidden until `type=vless`,
+  `tls=1`, and `reality=1`
+- LuCI Save & Apply restarts neto after committing changes
+- setting General -> Enabled off stops neto even if no outbound is configured
+- with General -> Enabled on and no custom outbounds, `netod check` still
+  succeeds because `direct` and `blocked` are built-ins
 
 Inspect UCI:
 
 ```sh
 uci show neto
 ```
-

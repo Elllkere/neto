@@ -29,7 +29,7 @@ config rule
 	option priority '100'
 	option action 'proxy'
 	option dns_mode 'fakeip'
-	option outbound 'proxy_default'
+	option outbound 'direct'
 	list domain_equals 'youtube.com'
 	list domain_ends_with '.youtube.com'
 	list domain_equals 'googlevideo.com'
@@ -41,7 +41,7 @@ config rule
 	option priority '200'
 	option action 'proxy'
 	option dns_mode 'real_ip'
-	option outbound 'proxy_default'
+	option outbound 'direct'
 	list file '/etc/neto/providers/cloudflare-v4.txt'
 `)
 	if err != nil {
@@ -67,6 +67,9 @@ config rule
 	}
 	if cfg.Rules[1].Action != "proxy" || cfg.Rules[1].DNSMode != "real_ip" || len(cfg.Rules[1].Files) != 1 {
 		t.Fatalf("unexpected provider rule: %+v", cfg.Rules[1])
+	}
+	if len(cfg.Outbounds) != 0 {
+		t.Fatalf("unexpected outbound: %+v", cfg.Outbounds)
 	}
 }
 
@@ -133,7 +136,6 @@ config rule
 	option enabled '1'
 	option priority '200'
 	option action 'proxy'
-	option outbound 'proxy_default'
 	option dns_mode 'fakeip'
 	list domain_contains 'YouTube'
 	list exclude_domain_ends_with '.youtube.kz'
@@ -245,5 +247,317 @@ config main 'main'
 	option singbox_dns '127.0.0.1:5353'
 `); err == nil {
 		t.Fatal("expected singbox_dns loop to be rejected")
+	}
+}
+
+func TestParseAllowsMissingCustomOutboundWhenEnabled(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option enabled '1'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Outbounds) != 0 {
+		t.Fatalf("unexpected custom outbounds: %+v", cfg.Outbounds)
+	}
+}
+
+func TestParseDisabledAllowsMissingOutbound(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option enabled '0'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Main.Enabled {
+		t.Fatalf("expected disabled config: %+v", cfg.Main)
+	}
+	if len(cfg.Outbounds) != 0 {
+		t.Fatalf("disabled config should not synthesize outbounds: %+v", cfg.Outbounds)
+	}
+}
+
+func TestParseOutboundVLESSReality(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'my_vless'
+	option enabled '1'
+	option tag 'my_vless'
+	option label 'My VLESS'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+	option flow 'xtls-rprx-vision'
+	option tls '1'
+	option server_name 'www.example.com'
+	option reality '1'
+	option reality_public_key 'public-key'
+	option reality_short_id '0123456789abcdef'
+	option alpn 'h2,http/1.1'
+	option transport 'tcp'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Outbounds) != 1 {
+		t.Fatalf("unexpected outbounds: %+v", cfg.Outbounds)
+	}
+	out := cfg.Outbounds[0]
+	if out.Tag != "my_vless" || out.Label != "My VLESS" || out.Type != "vless" || !out.TLS || !out.Reality || out.RealityPublicKey != "public-key" {
+		t.Fatalf("unexpected outbound: %+v", out)
+	}
+	if len(out.ALPN) != 2 || out.ALPN[0] != "h2" || out.ALPN[1] != "http/1.1" {
+		t.Fatalf("unexpected alpn: %+v", out.ALPN)
+	}
+}
+
+func TestParseOutboundWarnings(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'my_trojan'
+	option type 'trojan'
+	option server 'example.com'
+	option port '443'
+	option password 'secret'
+	option tls '1'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "server_name is recommended") {
+		t.Fatalf("unexpected warnings: %+v", cfg.Warnings)
+	}
+}
+
+func TestParseOutboundHomeProxyAliasesAndAdvancedTLS(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'my_vless'
+	option label 'Alias VLESS'
+	option type 'vless'
+	option address 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+	option vless_flow 'xtls-rprx-vision'
+	option tls '1'
+	option tls_sni 'www.example.com'
+	list tls_alpn 'h2'
+	list tls_alpn 'http/1.1'
+	option tls_min_version '1.2'
+	option tls_max_version '1.3'
+	list tls_cipher_suites 'TLS_AES_128_GCM_SHA256'
+	option tls_ech '1'
+	list tls_ech_config 'ech-config'
+	option tls_ech_config_path '/etc/neto/ech.pem'
+	option tls_utls 'chrome'
+	option tls_reality '1'
+	option tls_reality_public_key 'public-key'
+	option tls_reality_short_id 'short-id'
+	option transport 'ws'
+	option ws_host 'front.example.com'
+	option ws_path '/ws'
+	option websocket_early_data '2048'
+	option websocket_early_data_header 'Sec-WebSocket-Protocol'
+	option packet_encoding 'xudp'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := cfg.Outbounds[0]
+	if out.Server != "example.com" || out.Flow != "xtls-rprx-vision" || out.ServerName != "www.example.com" || !out.Reality || out.RealityPublicKey != "public-key" {
+		t.Fatalf("aliases not parsed: %+v", out)
+	}
+	if len(out.ALPN) != 2 || out.TLSMinVersion != "1.2" || out.TLSMaxVersion != "1.3" || len(out.TLSCipherSuites) != 1 {
+		t.Fatalf("advanced TLS fields not parsed: %+v", out)
+	}
+	if !out.ECH || len(out.ECHConfig) != 1 || out.ECHConfigPath != "/etc/neto/ech.pem" || out.UTLSFingerprint != "chrome" {
+		t.Fatalf("ECH/uTLS fields not parsed: %+v", out)
+	}
+	if out.Transport != "ws" || out.WSHost != "front.example.com" || out.WSPath != "/ws" || out.WSEarlyData != 2048 || out.PacketEncoding != "xudp" {
+		t.Fatalf("transport fields not parsed: %+v", out)
+	}
+}
+
+func TestParseDeprecatedProxyDefaultOutboundIsIgnored(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'proxy_default'
+	option type 'direct'
+
+config rule
+	option name 'old_rule'
+	option action 'proxy'
+	option outbound 'proxy_default'
+	list domain_equals 'example.com'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Outbounds) != 1 || cfg.Outbounds[0].Enabled {
+		t.Fatalf("deprecated proxy_default outbound should be ignored: %+v", cfg.Outbounds)
+	}
+	if cfg.Rules[0].Outbound != "direct" {
+		t.Fatalf("deprecated proxy_default rule outbound should become direct: %+v", cfg.Rules[0])
+	}
+	if len(cfg.Warnings) < 2 {
+		t.Fatalf("expected deprecation warnings, got %+v", cfg.Warnings)
+	}
+}
+
+func TestParseRejectsCustomDirectOutbound(t *testing.T) {
+	_, err := Parse(`
+config outbound 'debug_direct'
+	option type 'direct'
+`)
+	if err == nil || !strings.Contains(err.Error(), "unsupported type") {
+		t.Fatalf("got error %v, want unsupported direct outbound", err)
+	}
+}
+
+func TestParseRejectsReservedOutboundTag(t *testing.T) {
+	_, err := Parse(`
+config outbound 'direct'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+`)
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("got error %v, want reserved tag", err)
+	}
+}
+
+func TestParseRuleCustomOutbound(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'my_vless'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+
+config rule
+	option name 'custom_proxy'
+	option action 'proxy'
+	option outbound 'my_vless'
+	list domain_equals 'example.com'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Rules[0].Outbound != "my_vless" {
+		t.Fatalf("unexpected rule outbound: %+v", cfg.Rules[0])
+	}
+}
+
+func TestParseIgnoresCustomOutboundEnabledOption(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'my_vless'
+	option enabled '0'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+
+config rule
+	option name 'custom_proxy'
+	option action 'proxy'
+	option outbound 'my_vless'
+	list domain_equals 'example.com'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Outbounds[0].Enabled || cfg.Rules[0].Outbound != "my_vless" {
+		t.Fatalf("custom outbound enabled option should be ignored: %+v %+v", cfg.Outbounds[0], cfg.Rules[0])
+	}
+}
+
+func TestParseRejectsUnknownRuleOutbound(t *testing.T) {
+	_, err := Parse(`
+config rule
+	option name 'unknown_outbound'
+	option action 'proxy'
+	option outbound 'missing_proxy'
+	list domain_equals 'example.com'
+`)
+	if err == nil || !strings.Contains(err.Error(), "unsupported outbound") {
+		t.Fatalf("got error %v, want unsupported outbound", err)
+	}
+}
+
+func TestParseOutboundMissingFields(t *testing.T) {
+	tests := []struct {
+		name string
+		uci  string
+		want string
+	}{
+		{
+			name: "vless_uuid",
+			uci: `
+config outbound 'my_vless'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+`,
+			want: "uuid is required",
+		},
+		{
+			name: "vless_reality_public_key",
+			uci: `
+config outbound 'my_vless'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+	option reality '1'
+`,
+			want: "reality_public_key is required",
+		},
+		{
+			name: "hysteria2_password",
+			uci: `
+config outbound 'my_hy2'
+	option type 'hysteria2'
+	option server 'example.com'
+	option port '443'
+`,
+			want: "password is required",
+		},
+		{
+			name: "shadowsocks_method",
+			uci: `
+config outbound 'my_ss'
+	option type 'shadowsocks'
+	option server 'example.com'
+	option port '8388'
+	option password 'secret'
+`,
+			want: "method is required",
+		},
+		{
+			name: "trojan_server",
+			uci: `
+config outbound 'my_trojan'
+	option type 'trojan'
+	option port '443'
+	option password 'secret'
+`,
+			want: "server is required",
+		},
+		{
+			name: "unsupported",
+			uci: `
+config outbound 'my_socks'
+	option type 'socks'
+`,
+			want: "unsupported type",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(tc.uci)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got error %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

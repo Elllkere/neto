@@ -44,6 +44,8 @@ func TestRulesLuCIExplicitEnabledAndPriorityRewrite(t *testing.T) {
 		"o.disabled = '0'",
 		"o.rmempty = false",
 		"uci.set('neto', sid, 'enabled', '1')",
+		"uci.get('neto', sid, 'action') == 'proxy'",
+		"uci.set('neto', sid, 'dns_mode', 'fakeip')",
 		"uci.set('neto', sid, 'priority', String(n * 100))",
 		"this.map.save(rewriteRuleState)",
 	} {
@@ -53,6 +55,25 @@ func TestRulesLuCIExplicitEnabledAndPriorityRewrite(t *testing.T) {
 	}
 	if strings.Contains(s, "on_before_save") {
 		t.Fatalf("rules.js must not use unsupported on_before_save hook:\n%s", s)
+	}
+}
+
+func TestRulesLuCIDNSModeHiddenAndForcedToFakeIP(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if strings.Contains(s, "s.option(form.ListValue, 'dns_mode'") || strings.Contains(s, "DNS mode") {
+		t.Fatalf("rules.js must not expose dns_mode in LuCI:\n%s", s)
+	}
+	for _, want := range []string{
+		"uci.get('neto', sid, 'action') == 'proxy'",
+		"uci.set('neto', sid, 'dns_mode', 'fakeip')",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("rules.js missing forced fakeip behavior %q:\n%s", want, s)
+		}
 	}
 }
 
@@ -106,5 +127,31 @@ func TestRulesLuCIOutboundVisibleInTable(t *testing.T) {
 	}
 	if !strings.Contains(block, "o.editable = true") {
 		t.Fatalf("outbound should be editable in rules table:\n%s", block)
+	}
+	if !strings.Contains(block, "addOutboundChoices(o)") || !strings.Contains(block, "o.default = 'direct'") {
+		t.Fatalf("outbound should use dynamic choices and default direct:\n%s", block)
+	}
+	for _, want := range []string{
+		"option.value('direct'",
+		"option.value('blocked'",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("rules.js missing builtin outbound choice %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(block, "proxy_default") {
+		t.Fatalf("rule outbound dropdown must not add proxy_default:\n%s", block)
+	}
+	if strings.Contains(s, "section.enabled") {
+		t.Fatalf("rules.js must not filter custom outbounds by removed enabled option:\n%s", s)
+	}
+	for _, want := range []string{
+		"var tag = String(section.tag || sid || section['.name'] || '').trim()",
+		"var label = String(section.label || section.name || tag).trim()",
+		"option.value(tag, label || tag)",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("rules.js should support pending custom outbounds; missing %q:\n%s", want, s)
+		}
 	}
 }

@@ -230,13 +230,14 @@ write_singbox_check_config() {
     { "type": "tproxy", "tag": "tproxy-in", "listen": "127.0.0.1", "listen_port": 16001 }
   ],
   "outbounds": [
-    { "type": "direct", "tag": "proxy_default" }
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "blocked" }
   ],
   "route": {
     "rules": [
       { "protocol": "dns", "action": "hijack-dns" }
     ],
-    "final": "proxy_default"
+    "final": "direct"
   }
 }
 JSON

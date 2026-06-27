@@ -1,6 +1,11 @@
 package status
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/elllkere/neto/internal/config"
+)
 
 func TestLocalRouteStatusMissingTable(t *testing.T) {
 	got := localRouteStatusResult("Error: ipv4: FIB table does not exist.\nDump terminated\n", 2, true)
@@ -45,5 +50,38 @@ tcp   LISTEN 0      4096       127.0.0.1:15353     0.0.0.0:*
 	}
 	if listenerPresent(output, "127.0.0.1:16001") {
 		t.Fatal("unexpected listener")
+	}
+}
+
+func TestOutboundSummaryRedactsSecrets(t *testing.T) {
+	out := config.Outbound{
+		Tag:              "my_vless",
+		Label:            "Primary VLESS",
+		Type:             "vless",
+		Server:           "example.com",
+		Port:             443,
+		UUID:             "a3482e88-686a-4a58-8126-99c9df64b060",
+		Password:         "secret-password",
+		RealityPublicKey: "public-key",
+		RealityShortID:   "0123456789abcdef",
+		TLS:              true,
+		Reality:          true,
+		Transport:        "tcp",
+	}
+	got := OutboundSummary(out)
+	if !strings.Contains(got, "my_vless(vless)") || !strings.Contains(got, "label=Primary VLESS") || !strings.Contains(got, "server=example.com:443") {
+		t.Fatalf("summary missing safe fields: %s", got)
+	}
+	for _, secret := range []string{out.UUID, out.Password, out.RealityPublicKey, out.RealityShortID} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("summary leaked secret %q: %s", secret, got)
+		}
+	}
+}
+
+func TestOutboundsSummaryIncludesBuiltins(t *testing.T) {
+	got := OutboundsSummary(config.Defaults())
+	if !strings.Contains(got, "direct(builtin)") || !strings.Contains(got, "blocked(builtin)") {
+		t.Fatalf("summary missing builtins: %s", got)
 	}
 }

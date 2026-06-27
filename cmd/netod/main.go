@@ -119,15 +119,20 @@ func usage() {
 }
 
 func commandCheck(opts options) error {
-	cfg, _, sbPath, err := compile(opts)
+	cfg, err := config.LoadFile(opts.configPath)
 	if err != nil {
 		return err
 	}
+	printWarnings(cfg)
 	if !cfg.Main.Enabled {
 		fmt.Println("config ok: neto is disabled")
 		return nil
 	}
-	printWarnings(cfg)
+
+	_, _, sbPath, err := compile(opts)
+	if err != nil {
+		return err
+	}
 	if !opts.skipRuntimeChecks {
 		if err := requireCommand("nft"); err != nil {
 			return err
@@ -149,7 +154,7 @@ func commandCheck(opts options) error {
 }
 
 func commandApply(opts options) error {
-	cfg, nftPath, _, err := compile(opts)
+	cfg, err := config.LoadFile(opts.configPath)
 	if err != nil {
 		return err
 	}
@@ -158,6 +163,10 @@ func commandApply(opts options) error {
 		_ = cleanupRouting(cfg.Main.Mark, cfg.Main.Table)
 		fmt.Println("neto is disabled; nft table and routing removed")
 		return nil
+	}
+	cfg, nftPath, _, err := compile(opts)
+	if err != nil {
+		return err
 	}
 	if err := requireCommand("nft"); err != nil {
 		return err
@@ -211,8 +220,10 @@ func commandDebug(opts options) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("=== uci show neto ===")
-	printCommand("uci", "show", "neto")
+	fmt.Println("=== neto config ===")
+	fmt.Printf("config: %s\n", opts.configPath)
+	fmt.Printf("outbounds: %s\n", status.OutboundsSummary(cfg))
+	printWarnings(cfg)
 	fmt.Println("=== generated files ===")
 	printPath("nft", nftPath(opts))
 	printPath("sing-box", singBoxPath(opts))

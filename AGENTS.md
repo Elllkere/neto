@@ -74,7 +74,7 @@ top-level `neto/` directory.
 Client policies:
 
 - absent/default: follow general `routing_mode`.
-- `proxy`: force non-reserved TCP/UDP from this client to `proxy_default`.
+- `proxy`: force non-reserved TCP/UDP from this client through neto.
 - `direct`: hard bypass. Real DNS only, no FakeIP, nft return before proxy rules.
 
 Routing modes:
@@ -133,6 +133,31 @@ Treat these as current handoff blockers until verified on router:
 5. `match_all` must be removed from v1.
 6. LuCI must write only the new matcher fields listed above.
 7. LuCI must not write deprecated matcher fields.
+8. Rules must default outbound to built-in `direct`, not `proxy_default`.
+9. Outbounds page must not expose `direct` as a creatable outbound type.
+10. Outbounds page must create a stable `tag` from the first Add input, then
+    only allow editing the human label/name.
+11. Outbounds table should only show name/label, type, address, and port.
+
+## Current Outbound Model
+
+- Built-in outbound tags are `direct` and `blocked`.
+- Built-ins are generated for sing-box and must not be created as
+  `config outbound` sections.
+- Creatable outbound types are `vless`, `hysteria2`, `shadowsocks`, and
+  `trojan`.
+- Custom outbounds use stable UCI section/tag IDs plus editable `label`.
+- Custom outbounds do not have an enable/disable switch in v1.
+- Outbounds LuCI should keep the table compact: text label/name section title,
+  type, address, and port only. Do not add a second editable name/input column.
+  Protocol details belong in the edit modal.
+- Outbounds LuCI should expose homeproxy-like controls for supported protocols:
+  VLESS flow dropdown, Shadowsocks method dropdown, TLS min/max/ciphers, allow
+  insecure, ECH, uTLS fingerprint, REALITY, and V2Ray transport fields. Hide
+  REALITY public key/short ID until REALITY is enabled.
+- `proxy_default` is deprecated. LuCI must not create or offer it.
+- Old rules with `option outbound 'proxy_default'` may be normalized to
+  `direct` for compatibility.
 
 Do not assume a LuCI issue is fixed until it has been checked on an actual
 OpenWrt/ImmortalWrt LuCI instance.
