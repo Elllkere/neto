@@ -83,6 +83,25 @@ NETO_BASE_URL='https://your-host/path' sh -c "$(wget -O- https://raw.githubuserc
 NETO_INSTALL_URL='https://your-host/install.sh' /usr/share/neto/upgrade.sh
 ```
 
+## Uninstall
+
+Обычное удаление оставляет `/etc/config/neto` и `/etc/neto`, чтобы можно было
+поставить neto заново без потери config:
+
+```sh
+/usr/share/neto/uninstall.sh
+```
+
+Полное удаление вместе с config:
+
+```sh
+/usr/share/neto/uninstall.sh --purge
+```
+
+Uninstall script останавливает service, убирает neto-owned DNS/dnsmasq changes,
+удаляет `netod`, LuCI files, `/usr/libexec/neto`, `/usr/share/neto`,
+`/tmp/neto` и `/var/lib/neto`.
+
 ## Quick Check
 
 На router:

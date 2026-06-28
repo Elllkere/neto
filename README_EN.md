@@ -27,6 +27,23 @@ https://github.com/elllkere/neto/releases/latest/download/
 
 Override the archive base URL with `NETO_BASE_URL` when using a mirror.
 
+## Uninstall
+
+Normal uninstall keeps `/etc/config/neto` and `/etc/neto` for later reinstall:
+
+```sh
+/usr/share/neto/uninstall.sh
+```
+
+Full removal including config:
+
+```sh
+/usr/share/neto/uninstall.sh --purge
+```
+
+The script stops the service, reverts neto-owned dnsmasq settings, and removes
+installed neto binaries, LuCI files, runtime files, and provider cache.
+
 For the public GitHub install command to work, upload
 `dist/neto-openwrt-embedded.tar.gz` as a GitHub Release asset named exactly:
 

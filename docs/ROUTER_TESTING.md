@@ -344,3 +344,12 @@ Dry-run:
 ./embedded/install.sh --dry-run
 ./embedded/install.sh --local ./dist/neto-openwrt-embedded.tar.gz --dry-run
 ```
+
+Uninstall on router:
+
+```sh
+/usr/share/neto/uninstall.sh
+/usr/share/neto/uninstall.sh --purge
+```
+
+Without `--purge`, `/etc/config/neto` and `/etc/neto` are kept for reinstall.
