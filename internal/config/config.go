@@ -456,6 +456,7 @@ func Parse(data string) (Config, error) {
 	sort.SliceStable(cfg.Rules, func(i, j int) bool {
 		return cfg.Rules[i].Priority < cfg.Rules[j].Priority
 	})
+	cfg.Main.LANSubnets = normalizeIPv4CIDRStrings(cfg.Main.LANSubnets)
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -776,6 +777,27 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func normalizeIPv4CIDRStrings(values []string) []string {
+	if len(values) == 0 {
+		return values
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		ipnet, err := policy.ParseIPv4CIDR(value)
+		if err != nil {
+			return values
+		}
+		normalized := ipnet.String()
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
 }
 
 func (c Config) validateRealDNSNoLoop(upstream DNSUpstream) error {

@@ -75,6 +75,20 @@ config rule
 	}
 }
 
+func TestParseNormalizesLANSubnetHostCIDR(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	list lan_subnet '192.168.8.1/24'
+	list lan_subnet '192.168.8.42/24'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Main.LANSubnets) != 1 || cfg.Main.LANSubnets[0] != "192.168.8.0/24" {
+		t.Fatalf("unexpected LAN subnets: %+v", cfg.Main.LANSubnets)
+	}
+}
+
 func TestClientPolicyAliases(t *testing.T) {
 	cfg, err := Parse(`
 config client

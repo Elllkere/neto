@@ -298,6 +298,30 @@ netmask_to_prefix() {
 	}'
 }
 
+network_from_ip_prefix() {
+	awk -v ip="$1" -v prefix="$2" '
+	BEGIN {
+		split(ip, o, ".");
+		p = prefix + 0;
+		if (p < 0 || p > 32 || ip !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/)
+			exit 1;
+		for (i = 1; i <= 4; i++) {
+			if (o[i] < 0 || o[i] > 255)
+				exit 1;
+			rem = p - ((i - 1) * 8);
+			if (rem >= 8)
+				n[i] = o[i] + 0;
+			else if (rem <= 0)
+				n[i] = 0;
+			else {
+				block = 2 ^ (8 - rem);
+				n[i] = int((o[i] + 0) / block) * block;
+			}
+		}
+		printf "%d.%d.%d.%d/%d\n", n[1], n[2], n[3], n[4], p;
+	}'
+}
+
 detect_lan_subnet() {
 	local ipaddr=""
 	local netmask=""
@@ -305,6 +329,9 @@ detect_lan_subnet() {
 	local route=""
 	local NETWORK=""
 	local PREFIX=""
+	local addr=""
+	local addr_cidr=""
+	local normalized=""
 
 	if command -v ip >/dev/null 2>&1; then
 		route="$(ip -4 route show dev br-lan scope link 2>/dev/null | awk '{ print $1; exit }' || true)"
@@ -321,7 +348,10 @@ detect_lan_subnet() {
 		netmask="$(uci -q get network.lan.netmask 2>/dev/null || true)"
 		case "$ipaddr" in
 			*/*)
-				echo "$ipaddr"
+				addr="${ipaddr%/*}"
+				prefix="${ipaddr##*/}"
+				normalized="$(network_from_ip_prefix "$addr" "$prefix" 2>/dev/null || true)"
+				echo "${normalized:-$ipaddr}"
 				return
 				;;
 		esac
@@ -336,14 +366,21 @@ detect_lan_subnet() {
 			fi
 			prefix="$(netmask_to_prefix "$netmask")"
 			if [ -n "$prefix" ]; then
-				echo "$ipaddr/$prefix"
+				normalized="$(network_from_ip_prefix "$ipaddr" "$prefix" 2>/dev/null || true)"
+				echo "${normalized:-$ipaddr/$prefix}"
 				return
 			fi
 		fi
 	fi
 
 	if command -v ip >/dev/null 2>&1; then
-		ip -4 addr show dev br-lan 2>/dev/null | awk '/ inet / { print $2; exit }'
+		addr_cidr="$(ip -4 addr show dev br-lan 2>/dev/null | awk '/ inet / { print $2; exit }')"
+		if [ -n "$addr_cidr" ]; then
+			addr="${addr_cidr%/*}"
+			prefix="${addr_cidr##*/}"
+			normalized="$(network_from_ip_prefix "$addr" "$prefix" 2>/dev/null || true)"
+			echo "${normalized:-$addr_cidr}"
+		fi
 		return
 	fi
 

@@ -62,6 +62,8 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"uci set neto.main.language_ru_installed='1'",
 		"ip -4 route show dev br-lan scope link",
 		"ipcalc.sh \"$ipaddr\" \"$netmask\"",
+		"network_from_ip_prefix",
+		"normalized=\"$(network_from_ip_prefix \"$ipaddr\" \"$prefix\"",
 		"ensure_lan_subnet_config",
 		"ensure_builtin_providers",
 		"https://www.cloudflare.com/ips-v4/",
