@@ -37,6 +37,35 @@
 - custom FakeIP allocator;
 - `.ipk` packaging.
 
+## Requirements
+
+Минимально:
+
+- OpenWrt/ImmortalWrt с firewall4 / `nftables`;
+- IPv4 LAN;
+- `sing-box` package или compatible `sing-box` binary;
+- 128 MB RAM;
+- 25 MB free flash/overlay после установки зависимостей;
+- 30 MB free `/tmp` на время install/upgrade.
+
+Рекомендуется:
+
+- 256 MB RAM или больше;
+- 40 MB+ free flash/overlay, особенно если `sing-box` ставится как package;
+- router class CPU уровня ARMv7/ARM64/MIPS 24Kc и выше.
+
+Current embedded archive:
+
+- download size: около 7 MB;
+- unpacked install archive in `/tmp`: около 19 MB, потому что внутри binaries
+  для нескольких CPU arch;
+- installed neto без `sing-box`: около 5 MB flash (`netod`, LuCI, scripts,
+  config templates).
+
+На устройствах с 64 MB RAM или 16 MB flash neto обычно нецелесообразен:
+`sing-box`, LuCI и provider caches быстро съедают запас. Для таких устройств
+лучше использовать более лёгкую схему без `sing-box`.
+
 ## Install
 
 Установка с GitHub:

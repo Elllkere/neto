@@ -87,6 +87,27 @@ Not in v1:
 - custom FakeIP allocator
 - `.ipk` packaging
 
+## Requirements
+
+Minimum:
+
+- OpenWrt/ImmortalWrt with firewall4 / nftables
+- IPv4 LAN
+- `sing-box` package or a compatible `sing-box` binary
+- 128 MB RAM
+- 25 MB free flash/overlay after dependencies
+- 30 MB free `/tmp` during install/upgrade
+
+Recommended:
+
+- 256 MB RAM or more
+- 40 MB+ free flash/overlay, especially when installing `sing-box` as a package
+- ARMv7/ARM64/MIPS 24Kc-class router CPU or better
+
+Current embedded archive is about 7 MB compressed and about 19 MB unpacked in
+`/tmp` because it carries `netod` binaries for multiple CPU architectures.
+Installed neto without `sing-box` takes about 5 MB of flash.
+
 ## DNS Semantics
 
 - Domain proxy rules in `custom` mode use FakeIP.
