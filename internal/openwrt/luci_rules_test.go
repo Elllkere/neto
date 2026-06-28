@@ -119,6 +119,13 @@ func TestRulesLuCICompactTableFields(t *testing.T) {
 		"setListOption(section_id, 'proto', [ 'tcp', 'udp' ])",
 		"form.DynamicList, 'src_port'",
 		"form.DynamicList, 'dst_port'",
+		"o.validate = validatePortMatch",
+		"function validatePortMatch(section_id, value)",
+		"Port must be a number or range, for example 443 or 1000-2000",
+		"Port must be between 1 and 65535",
+		"Port range start must be less than or equal to range end",
+		"Source ports are client-side ports chosen by the LAN device. Usually leave empty. Syntax: 443 or 1000-2000.",
+		"Destination ports are service ports on the remote IP, for example 443 for HTTPS or 53 for DNS. Syntax: 443 or 1000-2000.",
 		"Port matching is packet-level. It applies only to provider/CIDR/IP matches, not to DNS/FakeIP domain matching.",
 	} {
 		if !strings.Contains(s, want) {

@@ -241,6 +241,33 @@ function writePacketProto(section_id, formvalue) {
 	}
 }
 
+function validatePortMatch(section_id, value) {
+	var values = Array.isArray(value) ? value : [ value ];
+
+	for (var i = 0; i < values.length; i++) {
+		var port = String(values[i] || '').trim();
+		var parts, start, end;
+
+		if (port == '')
+			continue;
+
+		if (!/^[0-9]+(-[0-9]+)?$/.test(port))
+			return _('Port must be a number or range, for example 443 or 1000-2000');
+
+		parts = port.split('-');
+		start = parseInt(parts[0], 10);
+		end = parts.length > 1 ? parseInt(parts[1], 10) : start;
+
+		if (start < 1 || start > 65535 || end < 1 || end > 65535)
+			return _('Port must be between 1 and 65535');
+
+		if (start > end)
+			return _('Port range start must be less than or equal to range end');
+	}
+
+	return true;
+}
+
 return view.extend({
 	load: function() {
 		return uci.load('neto');
@@ -388,15 +415,19 @@ return view.extend({
 		o.cfgvalue = packetProtoValue;
 		o.write = writePacketProto;
 
-		o = s.option(form.DynamicList, 'src_port', _('Source ports'));
+		o = s.option(form.DynamicList, 'src_port', _('Source ports'),
+			_('Source ports are client-side ports chosen by the LAN device. Usually leave empty. Syntax: 443 or 1000-2000.'));
 		o.placeholder = '1000-2000';
 		o.rmempty = true;
 		o.modalonly = true;
+		o.validate = validatePortMatch;
 
-		o = s.option(form.DynamicList, 'dst_port', _('Destination ports'));
+		o = s.option(form.DynamicList, 'dst_port', _('Destination ports'),
+			_('Destination ports are service ports on the remote IP, for example 443 for HTTPS or 53 for DNS. Syntax: 443 or 1000-2000.'));
 		o.placeholder = '443';
 		o.rmempty = true;
 		o.modalonly = true;
+		o.validate = validatePortMatch;
 
 		return m.render();
 	}
