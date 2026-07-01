@@ -46,6 +46,7 @@ top-level `neto/` directory.
 - `/usr/bin/netod`
 - `/usr/libexec/neto/sing-box`
 - `/usr/share/neto/`
+- `/etc/neto/provider-cache/`
 - `/tmp/neto/neto.nft`
 - `/tmp/neto/sing-box.json`
 - `/var/lib/neto/`
@@ -172,7 +173,14 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
 
 - Provider is a reusable remote data source.
 - Provider types are `domain` and `ip`.
-- Providers download plain text lists from `url` into `/var/lib/neto/providers/`.
+- Providers download plain text lists from `url` into
+  `/etc/neto/provider-cache/`. Do not use `/var/lib/neto/providers/` as the
+  default cache location because OpenWrt `/var` may be volatile.
+- Legacy `local_path` values under `/var/lib/neto/providers/` are treated as
+  default provider cache paths and resolved to `/etc/neto/provider-cache/`.
+- Missing provider caches must not abort compile/startup. neto should warn and
+  compile that provider reference as empty until `netod providers update [name]`
+  succeeds.
 - `netod providers update [name]` updates providers using `curl`.
 - The installer seeds built-in IP providers for Cloudflare
   (`https://www.cloudflare.com/ips-v4/`) and Telegram

@@ -158,7 +158,7 @@ table does not exist. That means missing state, not fatal command failure.
 netod providers update
 netod providers update cloudflare_ipv4
 netod providers update telegram_ipv4
-ls -la /var/lib/neto/providers/
+ls -la /etc/neto/provider-cache/
 ```
 
 Telegram provider must save only IPv4 entries. IPv6 lines from the Telegram feed

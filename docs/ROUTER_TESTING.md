@@ -107,13 +107,17 @@ netod providers update cloudflare_ipv4
 /etc/init.d/neto restart
 ```
 
-Provider cache files live in:
+Provider cache files live in persistent storage:
 
 ```text
-/var/lib/neto/providers/
+/etc/neto/provider-cache/
 ```
 
-If compile fails with missing provider cache, update provider first:
+`/var/lib/neto/providers/` is a legacy cache path and may disappear on OpenWrt
+because `/var` can be linked to volatile `/tmp`.
+
+If a provider cache is missing, compile/startup should warn and continue with
+that provider reference empty. Update provider caches manually when needed:
 
 ```sh
 netod providers update telegram_ipv4

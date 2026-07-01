@@ -2,9 +2,11 @@ package config
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,7 +15,10 @@ import (
 )
 
 const DefaultPath = "/etc/config/neto"
-const ProviderCacheDir = "/var/lib/neto/providers"
+
+var ProviderCacheDir = "/etc/neto/provider-cache"
+var ProviderPersistentCacheDir = "/etc/neto/provider-cache"
+var ProviderLegacyCacheDir = "/var/lib/neto/providers"
 
 const (
 	BuiltinDirectOutbound  = "direct"
@@ -117,14 +122,96 @@ type Provider struct {
 }
 
 func (p Provider) CachePath() string {
-	if strings.TrimSpace(p.LocalPath) != "" {
-		return strings.TrimSpace(p.LocalPath)
+	localPath := strings.TrimSpace(p.LocalPath)
+	if localPath != "" && !p.isDefaultCachePath(localPath) {
+		return localPath
 	}
-	name := safeProviderName(p.Name)
-	if name == "" {
-		name = "provider"
+	return p.DefaultCachePath()
+}
+
+func (p Provider) DefaultCachePath() string {
+	return providerCachePath(ProviderCacheDir, p.Name)
+}
+
+func (p Provider) LegacyCachePath() string {
+	return providerCachePath(ProviderLegacyCacheDir, p.Name)
+}
+
+func providerCachePath(dir string, providerName string) string {
+	providerName = safeProviderName(providerName)
+	if providerName == "" {
+		providerName = "provider"
 	}
-	return ProviderCacheDir + "/" + name + ".txt"
+	return filepath.Join(dir, providerName+".txt")
+}
+
+func (p Provider) PersistentCachePath() string {
+	return providerCachePath(ProviderPersistentCacheDir, p.Name)
+}
+
+func (p Provider) UsesDefaultCachePath() bool {
+	localPath := strings.TrimSpace(p.LocalPath)
+	if localPath == "" {
+		return true
+	}
+	return p.isDefaultCachePath(localPath)
+}
+
+func (p Provider) isDefaultCachePath(path string) bool {
+	clean := filepath.Clean(path)
+	return clean == filepath.Clean(p.DefaultCachePath()) ||
+		clean == filepath.Clean(p.PersistentCachePath()) ||
+		clean == filepath.Clean(p.LegacyCachePath())
+}
+
+func (p Provider) RestoreDefaultCache() (bool, error) {
+	if !p.UsesDefaultCachePath() {
+		return false, nil
+	}
+	data, err := os.ReadFile(p.PersistentCachePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	cachePath := p.CachePath()
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0755); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(cachePath, data, 0644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (p Provider) MirrorDefaultCache() error {
+	if !p.UsesDefaultCachePath() {
+		return nil
+	}
+	data, err := os.ReadFile(p.CachePath())
+	if err != nil {
+		return err
+	}
+	return p.WritePersistentCache(data)
+}
+
+func (p Provider) WritePersistentCache(data []byte) error {
+	if !p.UsesDefaultCachePath() {
+		return nil
+	}
+	path := p.PersistentCachePath()
+	existing, err := os.ReadFile(path)
+	if err == nil && bytes.Equal(existing, data) {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func (c Config) ProviderByName(name string) (Provider, bool) {
@@ -1111,8 +1198,25 @@ func LoadRuleDomainFiles(cfg *Config) error {
 			}
 			values, err := loadDomainFile(provider.CachePath())
 			if err != nil {
+				if os.IsNotExist(err) {
+					restored, restoreErr := provider.RestoreDefaultCache()
+					if restoreErr != nil {
+						cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("provider %q cache restore failed: %v", provider.Name, restoreErr))
+						continue
+					}
+					if restored {
+						values, err = loadDomainFile(provider.CachePath())
+					}
+					if os.IsNotExist(err) {
+						cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("provider %q cache %q is missing; skipping provider until netod providers update %s", provider.Name, provider.CachePath(), provider.Name))
+						continue
+					}
+				}
+			}
+			if err != nil {
 				return fmt.Errorf("provider %q: %w", provider.Name, err)
 			}
+			_ = provider.MirrorDefaultCache()
 			domains = append(domains, values...)
 		}
 		if len(domains) > 0 {

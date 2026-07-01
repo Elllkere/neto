@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -72,6 +73,104 @@ config rule
 	}
 	if len(cfg.Outbounds) != 0 {
 		t.Fatalf("unexpected outbound: %+v", cfg.Outbounds)
+	}
+}
+
+func TestLoadRuleDomainFilesRestoresDefaultProviderCacheMirror(t *testing.T) {
+	dir := t.TempDir()
+	oldRuntimeDir := ProviderCacheDir
+	oldPersistentDir := ProviderPersistentCacheDir
+	ProviderCacheDir = filepath.Join(dir, "run")
+	ProviderPersistentCacheDir = filepath.Join(dir, "persist")
+	t.Cleanup(func() {
+		ProviderCacheDir = oldRuntimeDir
+		ProviderPersistentCacheDir = oldPersistentDir
+	})
+
+	provider := Provider{
+		Name:      "domains",
+		Enabled:   true,
+		Type:      "domain",
+		LocalPath: filepath.Join(ProviderCacheDir, "domains.txt"),
+		URL:       "https://example.com/domains.txt",
+	}
+	if err := os.MkdirAll(filepath.Dir(provider.PersistentCachePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(provider.PersistentCachePath(), []byte("Example.COM.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Defaults()
+	cfg.Rules = []Rule{{
+		Name:            "domain-provider",
+		Enabled:         true,
+		Action:          "proxy",
+		DomainProviders: []string{"domains"},
+	}}
+	cfg.Providers = []Provider{provider}
+
+	if err := LoadRuleDomainFiles(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.Rules[0].DomainEquals, []string{"example.com"}) {
+		t.Fatalf("unexpected restored domains: %+v", cfg.Rules[0].DomainEquals)
+	}
+	if _, err := os.Stat(provider.CachePath()); err != nil {
+		t.Fatalf("runtime cache was not restored: %v", err)
+	}
+}
+
+func TestLoadRuleDomainFilesMissingProviderCacheIsSkipped(t *testing.T) {
+	cfg := Defaults()
+	cfg.Rules = []Rule{{
+		Name:            "domain-provider",
+		Enabled:         true,
+		Action:          "proxy",
+		DomainProviders: []string{"domains"},
+	}}
+	cfg.Providers = []Provider{{
+		Name:      "domains",
+		Enabled:   true,
+		Type:      "domain",
+		LocalPath: filepath.Join(t.TempDir(), "domains.txt"),
+		URL:       "https://example.com/domains.txt",
+	}}
+
+	if err := LoadRuleDomainFiles(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rules[0].DomainEquals) != 0 {
+		t.Fatalf("got %+v, want missing provider to compile as empty", cfg.Rules[0].DomainEquals)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "skipping provider") {
+		t.Fatalf("unexpected warnings: %+v", cfg.Warnings)
+	}
+}
+
+func TestProviderCachePathTreatsLegacyVarPathAsDefault(t *testing.T) {
+	dir := t.TempDir()
+	oldCacheDir := ProviderCacheDir
+	oldPersistentDir := ProviderPersistentCacheDir
+	oldLegacyDir := ProviderLegacyCacheDir
+	ProviderCacheDir = filepath.Join(dir, "etc-cache")
+	ProviderPersistentCacheDir = filepath.Join(dir, "etc-cache")
+	ProviderLegacyCacheDir = filepath.Join(dir, "var-cache")
+	t.Cleanup(func() {
+		ProviderCacheDir = oldCacheDir
+		ProviderPersistentCacheDir = oldPersistentDir
+		ProviderLegacyCacheDir = oldLegacyDir
+	})
+
+	p := Provider{
+		Name:      "cloudflare_ipv4",
+		LocalPath: filepath.Join(ProviderLegacyCacheDir, "cloudflare_ipv4.txt"),
+	}
+	if got, want := p.CachePath(), filepath.Join(ProviderCacheDir, "cloudflare_ipv4.txt"); got != want {
+		t.Fatalf("got cache path %q, want persistent default %q", got, want)
+	}
+	if !p.UsesDefaultCachePath() {
+		t.Fatal("legacy /var cache path should be treated as default")
 	}
 }
 

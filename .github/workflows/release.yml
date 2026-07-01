@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate
+        run: |
+          go test ./...
+          sh -n embedded/*.sh scripts/*.sh
+          jq empty embedded/files/usr/share/luci/menu.d/*.json
+          jq empty embedded/files/usr/share/rpcd/acl.d/*.json
+          node --check embedded/files/www/luci-static/resources/view/neto/*.js
+
+      - name: Build archive
+        env:
+          NETO_VERSION: ${{ github.ref_name }}
+          GOCACHE: /tmp/neto-go-cache
+        run: |
+          ./embedded/pack.sh
+          ./scripts/test-archive.sh
+          sha256sum dist/neto-openwrt-embedded.tar.gz > dist/neto-openwrt-embedded.tar.gz.sha256
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              dist/neto-openwrt-embedded.tar.gz \
+              dist/neto-openwrt-embedded.tar.gz.sha256 \
+              --clobber
+          else
+            gh release create "$TAG" \
+              dist/neto-openwrt-embedded.tar.gz \
+              dist/neto-openwrt-embedded.tar.gz.sha256 \
+              --title "$TAG" \
+              --generate-notes \
+              --verify-tag
+          fi

@@ -40,10 +40,27 @@ func LoadRuleCIDRs(cfg config.Config) (map[int][]*net.IPNet, error) {
 			cidrs, err := policy.LoadIPv4CIDRsFile(cachePath)
 			if err != nil {
 				if os.IsNotExist(err) {
-					return nil, fmt.Errorf("provider %q cache %q is missing; run netod providers update %s before compiling rules", provider.Name, cachePath, provider.Name)
+					restored, restoreErr := provider.RestoreDefaultCache()
+					if restoreErr != nil {
+						fmt.Fprintf(os.Stderr, "warning: provider %q cache restore failed: %v\n", provider.Name, restoreErr)
+						continue
+					}
+					if restored {
+						cidrs, err = policy.LoadIPv4CIDRsFile(cachePath)
+						if err == nil {
+							all = append(all, cidrs...)
+							continue
+						}
+						if !os.IsNotExist(err) {
+							return nil, err
+						}
+					}
+					fmt.Fprintf(os.Stderr, "warning: provider %q cache %q is missing; skipping provider until netod providers update %s\n", provider.Name, cachePath, provider.Name)
+					continue
 				}
 				return nil, err
 			}
+			_ = provider.MirrorDefaultCache()
 			all = append(all, cidrs...)
 		}
 		out[i] = policy.NormalizeIPv4CIDRs(all)

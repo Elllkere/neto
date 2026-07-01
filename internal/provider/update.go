@@ -28,9 +28,6 @@ func NormalizeDownloadedList(provider config.Provider, data []byte) ([]string, e
 
 func WriteCache(provider config.Provider, items []string) (string, error) {
 	path := provider.CachePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return "", err
-	}
 	var b strings.Builder
 	for _, item := range items {
 		item = strings.TrimSpace(item)
@@ -40,10 +37,21 @@ func WriteCache(provider config.Provider, items []string) (string, error) {
 		b.WriteString(item)
 		b.WriteByte('\n')
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0644); err != nil {
+	data := []byte(b.String())
+	if err := writeCacheFile(path, data); err != nil {
+		return "", err
+	}
+	if err := provider.WritePersistentCache(data); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+func writeCacheFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 func UpdateMetadata(configPath string, providerName string, localPath string, itemCount int) error {

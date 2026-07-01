@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/elllkere/neto/internal/config"
@@ -55,7 +54,7 @@ func TestLoadRuleCIDRsCombinesInlineAndFileCIDRs(t *testing.T) {
 	}
 }
 
-func TestLoadRuleCIDRsMissingProviderCacheIsActionable(t *testing.T) {
+func TestLoadRuleCIDRsMissingProviderCacheIsSkipped(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Rules = []config.Rule{{
 		Name:        "telegram",
@@ -72,9 +71,137 @@ func TestLoadRuleCIDRsMissingProviderCacheIsActionable(t *testing.T) {
 		URL:       "https://core.telegram.org/resources/cidr.txt",
 	}}
 
-	_, err := LoadRuleCIDRs(cfg)
-	if err == nil || !strings.Contains(err.Error(), "netod providers update telegram_ipv4") {
-		t.Fatalf("got error %v, want actionable provider update command", err)
+	got, err := LoadRuleCIDRs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got[0]) != 0 {
+		t.Fatalf("got %v, want missing provider to compile as empty", got[0])
+	}
+}
+
+func TestLoadRuleCIDRsRestoresDefaultProviderCacheMirror(t *testing.T) {
+	dir := t.TempDir()
+	oldRuntimeDir := config.ProviderCacheDir
+	oldPersistentDir := config.ProviderPersistentCacheDir
+	config.ProviderCacheDir = filepath.Join(dir, "run")
+	config.ProviderPersistentCacheDir = filepath.Join(dir, "persist")
+	t.Cleanup(func() {
+		config.ProviderCacheDir = oldRuntimeDir
+		config.ProviderPersistentCacheDir = oldPersistentDir
+	})
+
+	providerCfg := config.Provider{
+		Name:      "telegram_ipv4",
+		Enabled:   true,
+		Type:      "ip",
+		LocalPath: filepath.Join(config.ProviderCacheDir, "telegram_ipv4.txt"),
+		URL:       "https://core.telegram.org/resources/cidr.txt",
+	}
+	if err := os.MkdirAll(filepath.Dir(providerCfg.PersistentCachePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(providerCfg.PersistentCachePath(), []byte("91.108.4.0/22\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Defaults()
+	cfg.Rules = []config.Rule{{
+		Name:        "telegram",
+		Enabled:     true,
+		Action:      "proxy",
+		DNSMode:     "real_ip",
+		IPProviders: []string{"telegram_ipv4"},
+	}}
+	cfg.Providers = []config.Provider{providerCfg}
+
+	got, err := LoadRuleCIDRs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := policy.CIDRStrings(got[0])
+	if !reflect.DeepEqual(values, []string{"91.108.4.0/22"}) {
+		t.Fatalf("got %v, want restored CIDR", values)
+	}
+	if _, err := os.Stat(providerCfg.CachePath()); err != nil {
+		t.Fatalf("runtime cache was not restored: %v", err)
+	}
+}
+
+func TestLoadRuleCIDRsMirrorsExistingDefaultProviderCache(t *testing.T) {
+	dir := t.TempDir()
+	oldRuntimeDir := config.ProviderCacheDir
+	oldPersistentDir := config.ProviderPersistentCacheDir
+	config.ProviderCacheDir = filepath.Join(dir, "run")
+	config.ProviderPersistentCacheDir = filepath.Join(dir, "persist")
+	t.Cleanup(func() {
+		config.ProviderCacheDir = oldRuntimeDir
+		config.ProviderPersistentCacheDir = oldPersistentDir
+	})
+
+	providerCfg := config.Provider{
+		Name:      "cloudflare_ipv4",
+		Enabled:   true,
+		Type:      "ip",
+		LocalPath: filepath.Join(config.ProviderCacheDir, "cloudflare_ipv4.txt"),
+		URL:       "https://www.cloudflare.com/ips-v4/",
+	}
+	if err := os.MkdirAll(filepath.Dir(providerCfg.CachePath()), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(providerCfg.CachePath(), []byte("1.1.1.0/24\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Defaults()
+	cfg.Rules = []config.Rule{{
+		Name:        "cloudflare",
+		Enabled:     true,
+		Action:      "direct",
+		DNSMode:     "real_ip",
+		IPProviders: []string{"cloudflare_ipv4"},
+	}}
+	cfg.Providers = []config.Provider{providerCfg}
+
+	if _, err := LoadRuleCIDRs(cfg); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(providerCfg.PersistentCachePath())
+	if err != nil {
+		t.Fatalf("persistent mirror was not created: %v", err)
+	}
+	if string(raw) != "1.1.1.0/24\n" {
+		t.Fatalf("unexpected persistent mirror contents: %q", raw)
+	}
+}
+
+func TestWriteCacheMirrorsDefaultProviderCache(t *testing.T) {
+	dir := t.TempDir()
+	oldRuntimeDir := config.ProviderCacheDir
+	oldPersistentDir := config.ProviderPersistentCacheDir
+	config.ProviderCacheDir = filepath.Join(dir, "run")
+	config.ProviderPersistentCacheDir = filepath.Join(dir, "persist")
+	t.Cleanup(func() {
+		config.ProviderCacheDir = oldRuntimeDir
+		config.ProviderPersistentCacheDir = oldPersistentDir
+	})
+
+	providerCfg := config.Provider{Name: "cloudflare_ipv4", Type: "ip"}
+	cachePath, err := WriteCache(providerCfg, []string{"1.1.1.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cachePath != providerCfg.CachePath() {
+		t.Fatalf("got cache path %q, want %q", cachePath, providerCfg.CachePath())
+	}
+	for _, path := range []string{providerCfg.CachePath(), providerCfg.PersistentCachePath()} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("cache %q was not written: %v", path, err)
+		}
+		if string(raw) != "1.1.1.0/24\n" {
+			t.Fatalf("unexpected cache %q contents: %q", path, raw)
+		}
 	}
 }
 

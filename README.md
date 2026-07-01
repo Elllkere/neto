@@ -129,7 +129,8 @@ NETO_INSTALL_URL='https://your-host/install.sh' /usr/share/neto/upgrade.sh
 
 Uninstall script останавливает service, убирает neto-owned DNS/dnsmasq changes,
 удаляет `netod`, LuCI files, `/usr/libexec/neto`, `/usr/share/neto`,
-`/tmp/neto` и `/var/lib/neto`.
+`/tmp/neto` и `/var/lib/neto`. Persistent provider cache under
+`/etc/neto/provider-cache/` is kept unless `--purge` is used.
 
 ## Quick Check
 
@@ -297,6 +298,14 @@ Manual update:
 netod providers update
 netod providers update telegram_ipv4
 ```
+
+Provider caches are written to `/etc/neto/provider-cache/` so rules can compile
+after an OpenWrt reboot even when `/var` is linked to volatile `/tmp`.
+Legacy `local_path` values under `/var/lib/neto/providers/` are treated as the
+default provider cache and resolved to the persistent path.
+
+If a referenced provider cache is missing, neto logs a warning and compiles
+that provider reference as empty until `netod providers update <name>` succeeds.
 
 ## LuCI
 

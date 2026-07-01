@@ -90,6 +90,7 @@ https://github.com/elllkere/neto/releases/latest/download/neto-openwrt-embedded.
 - `/usr/bin/netod`
 - `/usr/libexec/neto/sing-box`
 - `/usr/share/neto/`
+- `/etc/neto/provider-cache/`
 - `/tmp/neto/neto.nft`
 - `/tmp/neto/sing-box.json`
 - `/var/lib/neto/`
@@ -299,11 +300,24 @@ Provider types:
 - `domain`
 - `ip`
 
-Providers download plain text lists into:
+Providers download plain text lists into persistent storage:
 
 ```text
-/var/lib/neto/providers/
+/etc/neto/provider-cache/
 ```
+
+OpenWrt `/var` may be backed by volatile `/tmp`, so default provider caches
+must not live under `/var/lib/neto/providers/`. Legacy `local_path` metadata
+that points under `/var/lib/neto/providers/` is treated as the default cache and
+resolved to:
+
+```text
+/etc/neto/provider-cache/
+```
+
+If a referenced provider cache is still missing, compile warns and treats that
+provider reference as empty. Startup must continue so `netod` and `sing-box`
+can run with the remaining valid policy.
 
 Manual update:
 
