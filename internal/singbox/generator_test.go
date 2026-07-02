@@ -50,6 +50,9 @@ func TestGenerateUsesModernFakeIPServer(t *testing.T) {
 	if strings.Contains(raw, "rule_set") || strings.Contains(raw, "rule-set") || strings.Contains(raw, "/tmp/sing-box/rulesets") {
 		t.Fatalf("generated config must not reference external rule-set files:\n%s", raw)
 	}
+	if !strings.Contains(raw, `"level": "warn"`) {
+		t.Fatalf("sing-box log level should default to warn to avoid INFO connection log spam:\n%s", raw)
+	}
 	if !strings.Contains(raw, `"store_fakeip": true`) {
 		t.Fatalf("expected fakeip cache persistence:\n%s", raw)
 	}

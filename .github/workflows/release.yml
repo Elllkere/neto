@@ -38,7 +38,7 @@ jobs:
       - name: Validate
         run: |
           go test ./...
-          sh -n embedded/*.sh scripts/*.sh
+          sh -n embedded/*.sh scripts/*.sh embedded/files/usr/share/neto/*.sh embedded/files/usr/share/neto/providers/*.sh
           jq empty embedded/files/usr/share/luci/menu.d/*.json
           jq empty embedded/files/usr/share/rpcd/acl.d/*.json
           node --check embedded/files/www/luci-static/resources/view/neto/*.js

@@ -203,6 +203,10 @@ Local sing-box DNS listeners:
 - `singbox_dns_real_direct`: `127.0.0.1:15354`
 - `singbox_dns_real_proxy`: `127.0.0.1:15355`
 
+sing-box process logs are not forwarded to OpenWrt `logread`. `/etc/init.d/neto`
+starts sing-box through `/usr/share/neto/run-sing-box-log.sh`, which writes
+`/var/log/neto/sing-box.log`; LuCI exposes that file through the `Logs` page.
+
 Real DNS config:
 
 - `real_dns_mode`: `direct` or `proxy`
@@ -326,10 +330,27 @@ netod providers update
 netod providers update telegram_ipv4
 ```
 
-Installer seeds built-in IP providers if URL is not already present:
+Provider source defaults to `url`. URL providers use `curl` to download raw
+text. Providers may also set `source=script` and an absolute `script_path`;
+the script returns one domain/IP/CIDR per line on stdout or writes the final
+result to `NETO_PROVIDER_OUTPUT`, then `netod` normalizes and writes the
+standard provider cache. Script providers keep `type=domain|ip`, because `type`
+describes the output data consumed by rules.
+
+Provider auto-update cron supports `update_hour` and `update_minute`. Missing
+provider `update_minute` defaults to `5`, matching the old fixed minute.
+
+Installer seeds built-in IP providers if URL or script path is not already
+present. Seeded built-ins are convenience data sources only and must be created
+with `auto_update=0`; users opt into scheduled updates themselves.
 
 - Cloudflare IPv4: `https://www.cloudflare.com/ips-v4/`
 - Telegram IPv4: `https://core.telegram.org/resources/cidr.txt`
+- Akamai IPv4: `/usr/share/neto/providers/akamai-ipv4.sh`
+- AWS IPv4: `/usr/share/neto/providers/aws-ipv4.sh`
+
+Built-in JSON provider scripts use `jq` when it is already installed and fall
+back to POSIX tools otherwise. `jq` is not a required neto dependency.
 
 IP provider update keeps only valid IPv4 address/CIDR entries. IPv6 entries are
 ignored.

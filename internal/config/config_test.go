@@ -628,9 +628,11 @@ config outbound 'updater'
 config provider 'youtube'
 	option label 'YouTube'
 	option type 'domain'
+	option source 'url'
 	option url 'https://example.com/youtube.txt'
 	option auto_update '1'
 	option update_hour '3'
+	option update_minute '17'
 	option update_via 'proxy'
 	option update_outbound 'updater'
 	option local_path '/var/lib/neto/providers/youtube.txt'
@@ -649,7 +651,31 @@ config rule
 		t.Fatalf("unexpected providers: %+v", cfg.Providers)
 	}
 	p := cfg.Providers[0]
-	if p.Name != "youtube" || p.Label != "YouTube" || p.Type != "domain" || p.URL == "" || !p.AutoUpdate || p.UpdateHour != 3 || p.UpdateVia != "proxy" || p.UpdateOutbound != "updater" || p.ItemCount != 2 {
+	if p.Name != "youtube" || p.Label != "YouTube" || p.Type != "domain" || p.Source != "url" || p.URL == "" || !p.AutoUpdate || p.UpdateHour != 3 || p.UpdateMinute != 17 || p.UpdateVia != "proxy" || p.UpdateOutbound != "updater" || p.ItemCount != 2 {
+		t.Fatalf("unexpected provider: %+v", p)
+	}
+}
+
+func TestParseScriptProvider(t *testing.T) {
+	cfg, err := Parse(`
+config provider 'json_ips'
+	option label 'JSON IPs'
+	option type 'ip'
+	option source 'script'
+	option script_path '/usr/share/neto/providers/json-ips.sh'
+	option url 'https://example.com/ips.json'
+	option auto_update '1'
+	option update_hour '4'
+	option update_minute '42'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 {
+		t.Fatalf("unexpected providers: %+v", cfg.Providers)
+	}
+	p := cfg.Providers[0]
+	if p.Name != "json_ips" || p.Type != "ip" || p.Source != "script" || p.ScriptPath != "/usr/share/neto/providers/json-ips.sh" || p.UpdateHour != 4 || p.UpdateMinute != 42 {
 		t.Fatalf("unexpected provider: %+v", p)
 	}
 }
@@ -671,10 +697,50 @@ config provider 'p'
 			name: "type",
 			uci: `
 config provider 'p'
-	option type 'cidr'
-	option url 'https://example.com/list.txt'
+option type 'cidr'
+option url 'https://example.com/list.txt'
 `,
 			want: "unsupported type",
+		},
+		{
+			name: "source",
+			uci: `
+config provider 'p'
+	option type 'ip'
+	option source 'database'
+	option url 'https://example.com/list.txt'
+`,
+			want: "unsupported source",
+		},
+		{
+			name: "missing_script_path",
+			uci: `
+config provider 'p'
+	option type 'ip'
+	option source 'script'
+`,
+			want: "script_path is required",
+		},
+		{
+			name: "relative_script_path",
+			uci: `
+config provider 'p'
+	option type 'ip'
+	option source 'script'
+	option script_path 'filter.sh'
+`,
+			want: "script_path must be absolute",
+		},
+		{
+			name: "invalid_update_minute",
+			uci: `
+config provider 'p'
+	option type 'ip'
+	option url 'https://example.com/list.txt'
+	option auto_update '1'
+	option update_minute '60'
+`,
+			want: "invalid update_minute",
 		},
 		{
 			name: "unknown_ref",

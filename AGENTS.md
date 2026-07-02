@@ -49,6 +49,7 @@ top-level `neto/` directory.
 - `/etc/neto/provider-cache/`
 - `/tmp/neto/neto.nft`
 - `/tmp/neto/sing-box.json`
+- `/var/log/neto/sing-box.log`
 - `/var/lib/neto/`
 
 ## Critical Invariants
@@ -57,6 +58,9 @@ top-level `neto/` directory.
 - nftables decides packet routing before sing-box.
 - direct/bypass traffic must never enter sing-box.
 - sing-box owns FakeIP and the FakeIP domain mapping.
+- sing-box stdout/stderr must not be forwarded to OpenWrt system log. The init
+  script runs sing-box through `/usr/share/neto/run-sing-box-log.sh`, which
+  writes `/var/log/neto/sing-box.log` for the LuCI Logs page.
 - netod must not proxy transparent TCP/UDP traffic.
 - neto must only route LAN client traffic.
 - WAN, inbound, router self, and non-LAN prerouting traffic must return.
@@ -173,23 +177,37 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
 
 - Provider is a reusable remote data source.
 - Provider types are `domain` and `ip`.
-- Providers download plain text lists from `url` into
+- Provider source is `url` by default. URL providers download plain text lists
+  from `url` into
   `/etc/neto/provider-cache/`. Do not use `/var/lib/neto/providers/` as the
   default cache location because OpenWrt `/var` may be volatile.
+- Provider source may be `script`. Script providers keep `type=domain|ip`,
+  set `source=script`, and use an absolute `script_path`. The script returns
+  one domain/IP/CIDR per line either on stdout or by writing the final result to
+  the temp file path in `NETO_PROVIDER_OUTPUT`; netod reads that file only after
+  the script exits. netod still normalizes, filters IPv4 for IP providers,
+  writes the standard cache, and updates metadata. Scripts may use
+  `NETO_PROVIDER_*` environment variables; with `update_via=proxy`, netod starts
+  the temporary update proxy and exports `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`.
 - Legacy `local_path` values under `/var/lib/neto/providers/` are treated as
   default provider cache paths and resolved to `/etc/neto/provider-cache/`.
 - Missing provider caches must not abort compile/startup. neto should warn and
   compile that provider reference as empty until `netod providers update [name]`
   succeeds.
-- `netod providers update [name]` updates providers using `curl`.
+- `netod providers update [name]` updates URL providers using `curl` and script
+  providers by executing `script_path`.
 - The installer seeds built-in IP providers for Cloudflare
-  (`https://www.cloudflare.com/ips-v4/`) and Telegram
-  (`https://core.telegram.org/resources/cidr.txt`) if no provider with the same
-  URL already exists.
+  (`https://www.cloudflare.com/ips-v4/`), Telegram
+  (`https://core.telegram.org/resources/cidr.txt`), Akamai
+  (`/usr/share/neto/providers/akamai-ipv4.sh`), and AWS
+  (`/usr/share/neto/providers/aws-ipv4.sh`) if no provider with the same URL or
+  script path already exists. These built-ins are convenience data sources only:
+  they must be created with `auto_update=0` and no rules.
 - IP provider updates save only valid IPv4 CIDR/address entries; IPv6 entries
   from mixed feeds such as Telegram are ignored.
 - `auto_update=1` creates neto-owned cron entries, similar to protocol
-  subscriptions.
+  subscriptions. Providers support `update_hour` and `update_minute`; missing
+  `update_minute` defaults to `5` for backward-compatible cron timing.
 - `update_via=direct|proxy` follows the subscription update model and must not
   route router-self traffic through nftables.
 - Rules reference providers with `domain_provider` or `ip_provider`.
@@ -264,7 +282,8 @@ OpenWrt/ImmortalWrt LuCI instance.
 
 ```sh
 go test ./...
-sh -n embedded/*.sh scripts/*.sh
+sh -n embedded/*.sh scripts/*.sh embedded/files/usr/share/neto/*.sh embedded/files/usr/share/neto/providers/*.sh
+sh -n embedded/files/usr/share/neto/providers/*.sh
 jq empty embedded/files/usr/share/luci/menu.d/*.json
 jq empty embedded/files/usr/share/rpcd/acl.d/*.json
 node --check embedded/files/www/luci-static/resources/view/neto/*.js

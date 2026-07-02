@@ -453,6 +453,19 @@ provider_url_exists() {
 	return 1
 }
 
+provider_script_exists() {
+	local script_path="$1"
+	local section
+
+	command -v uci >/dev/null 2>&1 || return 1
+	for section in $(uci -q show neto | sed -n 's/^neto\.\([^=]*\)=provider$/\1/p'); do
+		if [ "$(uci -q get "neto.$section.script_path" 2>/dev/null || true)" = "$script_path" ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
 unique_provider_section() {
 	local base="$1"
 	local section="$base"
@@ -469,6 +482,7 @@ ensure_builtin_provider() {
 	local base="$1"
 	local label="$2"
 	local url="$3"
+	local minute="${4:-5}"
 	local section
 
 	command -v uci >/dev/null 2>&1 || return 0
@@ -482,15 +496,46 @@ ensure_builtin_provider() {
 	uci set "neto.$section.enabled=1"
 	uci set "neto.$section.label=$label"
 	uci set "neto.$section.type=ip"
+	uci set "neto.$section.source=url"
 	uci set "neto.$section.url=$url"
 	uci set "neto.$section.update_via=direct"
+	uci set "neto.$section.update_hour=0"
+	uci set "neto.$section.update_minute=$minute"
+	uci set "neto.$section.auto_update=0"
+}
+
+ensure_builtin_script_provider() {
+	local base="$1"
+	local label="$2"
+	local script_path="$3"
+	local minute="$4"
+	local section
+
+	command -v uci >/dev/null 2>&1 || return 0
+	if provider_script_exists "$script_path"; then
+		return 0
+	fi
+
+	section="$(unique_provider_section "$base")"
+	log "adding built-in provider $label"
+	uci set "neto.$section=provider"
+	uci set "neto.$section.enabled=1"
+	uci set "neto.$section.label=$label"
+	uci set "neto.$section.type=ip"
+	uci set "neto.$section.source=script"
+	uci set "neto.$section.script_path=$script_path"
+	uci set "neto.$section.update_via=direct"
+	uci set "neto.$section.update_hour=0"
+	uci set "neto.$section.update_minute=$minute"
 	uci set "neto.$section.auto_update=0"
 }
 
 ensure_builtin_providers() {
 	command -v uci >/dev/null 2>&1 || return 0
-	ensure_builtin_provider "cloudflare_ipv4" "Cloudflare IPv4" "https://www.cloudflare.com/ips-v4/"
-	ensure_builtin_provider "telegram_ipv4" "Telegram IPv4" "https://core.telegram.org/resources/cidr.txt"
+	ensure_builtin_provider "cloudflare_ipv4" "Cloudflare IPv4" "https://www.cloudflare.com/ips-v4/" "5"
+	ensure_builtin_provider "telegram_ipv4" "Telegram IPv4" "https://core.telegram.org/resources/cidr.txt" "10"
+	ensure_builtin_script_provider "akamai_ipv4" "Akamai IPv4" "/usr/share/neto/providers/akamai-ipv4.sh" "15"
+	ensure_builtin_script_provider "aws_ipv4" "AWS IPv4" "/usr/share/neto/providers/aws-ipv4.sh" "20"
 	uci commit neto
 }
 
@@ -512,6 +557,12 @@ install_files() {
 
 	cp -R "$WORK_DIR/files/." /
 	chmod 0755 /etc/init.d/neto
+	[ -f /usr/share/neto/run-sing-box-log.sh ] && chmod 0755 /usr/share/neto/run-sing-box-log.sh
+	if [ -d /usr/share/neto/providers ]; then
+		for script in /usr/share/neto/providers/*.sh; do
+			[ -f "$script" ] && chmod 0755 "$script"
+		done
+	fi
 
 	cp "$WORK_DIR/install.sh" /usr/share/neto/install.sh
 	cp "$WORK_DIR/uninstall.sh" /usr/share/neto/uninstall.sh

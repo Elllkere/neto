@@ -28,6 +28,10 @@ func TestLuCIMenuOrderAndDebugPage(t *testing.T) {
 		`"admin/services/neto/advanced"`,
 		`"title": "Advanced"`,
 		`"path": "neto/advanced"`,
+		`"admin/services/neto/logs"`,
+		`"title": "Logs"`,
+		`"order": 80`,
+		`"path": "neto/logs"`,
 		`"admin/services/neto/debug"`,
 		`"title": "Debug"`,
 		`"order": 90`,
@@ -48,6 +52,9 @@ func TestLuCIMenuOrderAndDebugPage(t *testing.T) {
 	}
 
 	if _, err := os.Stat("../../embedded/files/www/luci-static/resources/view/neto/debug.js"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("../../embedded/files/www/luci-static/resources/view/neto/logs.js"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat("../../embedded/files/www/luci-static/resources/view/neto/overview.js"); !os.IsNotExist(err) {

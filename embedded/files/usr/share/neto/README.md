@@ -6,3 +6,6 @@ Runtime scripts copied here:
 - `install.sh`
 - `upgrade.sh`
 - `uninstall.sh`
+- `run-sing-box-log.sh`
+- `providers/akamai-ipv4.sh`
+- `providers/aws-ipv4.sh`

@@ -19,15 +19,96 @@ function normalizeProviders() {
 		if (uci.get('neto', sid, 'type') == null)
 			uci.set('neto', sid, 'type', 'domain');
 
+		if (uci.get('neto', sid, 'source') == null)
+			uci.set('neto', sid, 'source', 'url');
+
 		if (uci.get('neto', sid, 'auto_update') == null)
 			uci.set('neto', sid, 'auto_update', '0');
 
 		if (uci.get('neto', sid, 'update_hour') == null)
 			uci.set('neto', sid, 'update_hour', '0');
 
+		if (uci.get('neto', sid, 'update_minute') == null)
+			uci.set('neto', sid, 'update_minute', '5');
+
 		if (uci.get('neto', sid, 'update_via') == null)
 			uci.set('neto', sid, 'update_via', 'direct');
 	});
+}
+
+function cleanValues(value) {
+	var values = [];
+
+	if (Array.isArray(value)) {
+		values = value;
+	} else if (value != null) {
+		values = String(value).split(/\s+/);
+	}
+
+	var out = [];
+	var seen = {};
+	for (var i = 0; i < values.length; i++) {
+		var item = String(values[i] || '').trim();
+
+		if (item == '' || seen[item])
+			continue;
+
+		seen[item] = true;
+		out.push(item);
+	}
+
+	return out;
+}
+
+function optionValues(section_id, option) {
+	return cleanValues(uci.get('neto', section_id, option));
+}
+
+function activeProviderNames() {
+	var names = {};
+
+	uci.sections('neto', 'provider', function(section, sid) {
+		if (uci.get('neto', sid, 'enabled') == '0')
+			return;
+
+		names[sid] = true;
+
+		var name = String(uci.get('neto', sid, 'name') || '').trim();
+		if (name != '')
+			names[name] = true;
+	});
+
+	return names;
+}
+
+function referencedProviders(section_id) {
+	return cleanValues([]
+		.concat(optionValues(section_id, 'domain_provider'))
+		.concat(optionValues(section_id, 'ip_provider'))
+		.concat(optionValues(section_id, 'provider')));
+}
+
+function validateProviderReferences() {
+	var providers = activeProviderNames();
+	var error = null;
+
+	uci.sections('neto', 'rule', function(section, sid) {
+		if (error != null || uci.get('neto', sid, 'enabled') == '0')
+			return;
+
+		var ruleName = String(uci.get('neto', sid, 'name') || sid).trim();
+		var refs = referencedProviders(sid);
+
+		for (var i = 0; i < refs.length; i++) {
+			if (!providers[refs[i]]) {
+				error = _('Rule "%s" references missing or disabled provider "%s". Remove the provider from the rule before deleting or disabling it.').format(ruleName, refs[i]);
+				return;
+			}
+		}
+	});
+
+	if (error != null)
+		throw new Error(error);
 }
 
 function addProxyOutboundChoices(option) {
@@ -50,9 +131,30 @@ return view.extend({
 	},
 
 	handleSave: function() {
-		return this.map.save(normalizeProviders).then(function() {
-			return ui.changes.init();
-		});
+		return this.map.save(normalizeProviders)
+			.then(function() {
+				validateProviderReferences();
+				return ui.changes.init();
+			})
+			.catch(function(err) {
+				ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+				if (err != null && typeof err == 'object')
+					err.notified = true;
+				return Promise.reject(err);
+			});
+	},
+
+	handleSaveCommit: function() {
+		return this.handleSave()
+			.then(function() {
+				return uci.commit('neto');
+			})
+			.then(function(ok) {
+				if (ok === false)
+					throw new Error(_('Commit failed'));
+
+				return uci.load('neto');
+			});
 	},
 
 	handleSaveApply: function(ev) {
@@ -69,14 +171,8 @@ return view.extend({
 	},
 
 	handleProviderUpdate: function(section_id) {
-		return this.handleSave()
+		return this.handleSaveCommit()
 			.then(function() {
-				return fs.exec('/sbin/uci', [ 'commit', 'neto' ]);
-			})
-			.then(function(res) {
-				if (res.code)
-					throw new Error(res.stderr || res.stdout || _('Commit failed'));
-
 				return fs.exec('/usr/bin/netod', [ 'providers', 'update', section_id ]);
 			})
 			.then(function(res) {
@@ -128,9 +224,36 @@ return view.extend({
 		o.default = 'domain';
 		o.rmempty = false;
 
+		o = s.option(form.ListValue, 'source', _('Source'));
+		o.value('url', _('URL'));
+		o.value('script', _('Script'));
+		o.default = 'url';
+		o.rmempty = false;
+
 		o = s.option(form.Value, 'url', _('URL'));
 		o.datatype = 'url';
-		o.rmempty = false;
+		o.depends('source', 'url');
+		o.rmempty = true;
+
+		o = s.option(form.DummyValue, '_url_help', _('URL provider notes'));
+		o.cfgvalue = function() {
+			return _('Use a plain text URL with one domain, IPv4 address, or IPv4 CIDR per line. Use Script for JSON feeds or custom filtering.');
+		};
+		o.depends('source', 'url');
+		o.modalonly = true;
+
+		o = s.option(form.Value, 'script_path', _('Script path'));
+		o.placeholder = '/usr/share/neto/providers/custom.sh';
+		o.depends('source', 'script');
+		o.rmempty = true;
+		o.modalonly = true;
+
+		o = s.option(form.DummyValue, '_script_help', _('Script provider notes'));
+		o.cfgvalue = function() {
+			return _('Use an absolute executable path. The script must print the final list to stdout or write it to NETO_PROVIDER_OUTPUT; one item per line. In proxy mode, neto exports NETO_PROVIDER_PROXY and HTTP_PROXY/HTTPS_PROXY/ALL_PROXY to the script.');
+		};
+		o.depends('source', 'script');
+		o.modalonly = true;
 
 		o = s.option(form.Flag, 'auto_update', _('Auto update'));
 		o.enabled = '1';
@@ -143,6 +266,14 @@ return view.extend({
 		for (var hour = 0; hour < 24; hour++)
 			o.value(String(hour), _('%d:00').format(hour));
 		o.default = '0';
+		o.depends('auto_update', '1');
+		o.rmempty = false;
+		o.modalonly = true;
+
+		o = s.option(form.ListValue, 'update_minute', _('Update minute'));
+		for (var minute = 0; minute < 60; minute++)
+			o.value(String(minute), String(minute));
+		o.default = '5';
 		o.depends('auto_update', '1');
 		o.rmempty = false;
 		o.modalonly = true;
@@ -173,7 +304,6 @@ return view.extend({
 
 			return new Date(timestamp * 1000).toLocaleString();
 		};
-		o.modalonly = true;
 
 		o = s.option(form.DummyValue, 'local_path', _('Local cache'));
 		o.cfgvalue = function(section_id) {
@@ -181,14 +311,18 @@ return view.extend({
 		};
 		o.modalonly = true;
 
-		o = s.option(form.Value, 'description', _('Description'));
-		o.rmempty = true;
-		o.modalonly = true;
-
 		o = s.option(form.Button, '_update', _('Update'));
 		o.inputstyle = 'action';
-		o.onclick = L.bind(function(section_id) {
-			return this.handleProviderUpdate(section_id);
+		o.inputtitle = _('Update');
+		o.cfgvalue = function() {
+			return true;
+		};
+		o.modalonly = true;
+		o.onclick = L.bind(function(ev, section_id) {
+			return this.handleProviderUpdate(section_id).catch(function(err) {
+				if (!(err != null && typeof err == 'object' && err.notified))
+					ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+			});
 		}, this);
 
 		return m.render();

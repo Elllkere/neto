@@ -120,6 +120,12 @@ Installed neto without `sing-box` takes about 5 MB of flash.
 - `proto`, `src_port`, and `dst_port` are packet/nft phase only and never affect
   DNS/FakeIP matching.
 
+## Logs
+
+sing-box stdout/stderr is not forwarded to OpenWrt `logread` / LuCI System Log.
+neto writes sing-box process logs to `/var/log/neto/sing-box.log` and exposes
+them on the LuCI `Logs` page.
+
 ## Docs
 
 The main docs are currently maintained in Russian:

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -33,6 +34,7 @@ const (
 )
 
 var version = "dev"
+var singBoxLogPath = "/var/log/neto/sing-box.log"
 
 type options struct {
 	configPath        string
@@ -128,6 +130,8 @@ func run(args []string) error {
 			return err
 		}
 		return commandProvidersUpdate(opts)
+	case "logs":
+		return commandLogs(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
@@ -215,7 +219,7 @@ func parseProviderOptions(args []string) (providerOptions, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions|providers> [options]")
+	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions|providers|logs> [options]")
 }
 
 func commandCheck(opts options) error {
@@ -297,6 +301,72 @@ func commandStatus(opts options) error {
 	}
 	fmt.Println(status.Summary(cfg))
 	return nil
+}
+
+func commandLogs(args []string) error {
+	if len(args) == 0 || args[0] != "sing-box" {
+		return fmt.Errorf("usage: netod logs sing-box [clear]")
+	}
+	if len(args) > 2 {
+		return fmt.Errorf("unexpected argument %q", args[2])
+	}
+	if len(args) == 2 {
+		if args[1] != "clear" {
+			return fmt.Errorf("unexpected argument %q", args[1])
+		}
+		if err := os.MkdirAll(filepath.Dir(singBoxLogPath), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(singBoxLogPath, nil, 0644); err != nil {
+			return err
+		}
+		fmt.Println("sing-box log cleared")
+		return nil
+	}
+
+	data, err := readFileTail(singBoxLogPath, 128<<10)
+	if err != nil {
+		return err
+	}
+	fmt.Print(string(data))
+	return nil
+}
+
+func readFileTail(path string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		maxBytes = 128 << 10
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	var offset int64
+	if st.Size() > maxBytes {
+		offset = st.Size() - maxBytes
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return nil, err
+		}
+	}
+
+	data, err := io.ReadAll(io.LimitReader(f, maxBytes))
+	if err != nil {
+		return nil, err
+	}
+	if offset > 0 {
+		return append([]byte("[older log lines omitted]\n"), data...), nil
+	}
+	return data, nil
 }
 
 func commandRun(opts options) error {
@@ -397,8 +467,11 @@ func commandProvidersUpdate(opts providerOptions) error {
 			fmt.Printf("provider %s is disabled; skipped\n", p.Name)
 			continue
 		}
-		if strings.TrimSpace(p.URL) == "" {
+		if p.Source != "script" && strings.TrimSpace(p.URL) == "" {
 			return fmt.Errorf("provider %s: url is required", p.Name)
+		}
+		if p.Source == "script" && strings.TrimSpace(p.ScriptPath) == "" {
+			return fmt.Errorf("provider %s: script_path is required", p.Name)
 		}
 		body, err := fetchProvider(cfg, p)
 		if err != nil {
@@ -507,6 +580,13 @@ func fetchSubscription(cfg config.Config, sub config.Subscription) ([]byte, erro
 }
 
 func fetchProvider(cfg config.Config, p config.Provider) ([]byte, error) {
+	switch p.Source {
+	case "", "url":
+	case "script":
+		return fetchProviderWithScript(cfg, p)
+	default:
+		return nil, fmt.Errorf("unsupported provider source %q", p.Source)
+	}
 	switch p.UpdateVia {
 	case "", "direct":
 		return fetchURLWithCurl(p.URL, "")
@@ -518,6 +598,25 @@ func fetchProvider(cfg config.Config, p config.Provider) ([]byte, error) {
 }
 
 func fetchURLViaProxy(cfg config.Config, rawURL string, updateOutbound string) ([]byte, error) {
+	return withTemporaryProxy(cfg, updateOutbound, func(proxy string) ([]byte, error) {
+		return fetchURLWithCurl(rawURL, proxy)
+	})
+}
+
+func fetchProviderWithScript(cfg config.Config, p config.Provider) ([]byte, error) {
+	switch p.UpdateVia {
+	case "", "direct":
+		return runProviderScript(p, "")
+	case "proxy":
+		return withTemporaryProxy(cfg, p.UpdateOutbound, func(proxy string) ([]byte, error) {
+			return runProviderScript(p, proxy)
+		})
+	default:
+		return nil, fmt.Errorf("unsupported update_via %q", p.UpdateVia)
+	}
+}
+
+func withTemporaryProxy(cfg config.Config, updateOutbound string, fn func(proxy string) ([]byte, error)) ([]byte, error) {
 	if !singbox.BinaryExists(cfg.Main.SingBoxBin) {
 		return nil, fmt.Errorf("sing-box binary is missing or not executable: %s", cfg.Main.SingBoxBin)
 	}
@@ -556,7 +655,129 @@ func fetchURLViaProxy(cfg config.Config, rawURL string, updateOutbound string) (
 		return nil, fmt.Errorf("temporary sing-box did not start: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
-	return fetchURLWithCurl(rawURL, fmt.Sprintf("http://127.0.0.1:%d", port))
+	return fn(fmt.Sprintf("http://127.0.0.1:%d", port))
+}
+
+func runProviderScript(p config.Provider, proxy string) ([]byte, error) {
+	const (
+		maxStdout = 16 << 20
+		maxStderr = 64 << 10
+	)
+
+	dir, err := os.MkdirTemp("", "neto-provider-script-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	outputPath := filepath.Join(dir, "output.txt")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, p.ScriptPath)
+	cmd.Env = providerScriptEnv(p, proxy, outputPath)
+
+	var stdout cappedBuffer
+	var stderr cappedBuffer
+	stdout.limit = maxStdout
+	stderr.limit = maxStderr
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("script timed out")
+	}
+	if err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return nil, fmt.Errorf("script failed: %w: %s", err, msg)
+		}
+		return nil, fmt.Errorf("script failed: %w", err)
+	}
+	if data, ok, err := readProviderScriptOutput(outputPath, maxStdout); err != nil {
+		return nil, err
+	} else if ok {
+		return data, nil
+	}
+	if stdout.truncated {
+		return nil, fmt.Errorf("script output is too large")
+	}
+	return append([]byte(nil), stdout.Bytes()...), nil
+}
+
+func readProviderScriptOutput(path string, maxSize int64) ([]byte, bool, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	if st.Size() == 0 {
+		return nil, false, nil
+	}
+	if st.Size() > maxSize {
+		return nil, false, fmt.Errorf("script output file is too large")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
+}
+
+func providerScriptEnv(p config.Provider, proxy string, outputPath string) []string {
+	env := append([]string{}, os.Environ()...)
+	env = append(env,
+		"NETO_PROVIDER_NAME="+p.Name,
+		"NETO_PROVIDER_LABEL="+p.Label,
+		"NETO_PROVIDER_TYPE="+p.Type,
+		"NETO_PROVIDER_URL="+p.URL,
+		"NETO_PROVIDER_CACHE="+p.CachePath(),
+		"NETO_PROVIDER_OUTPUT="+outputPath,
+		"NETO_PROVIDER_UPDATE_VIA="+p.UpdateVia,
+	)
+	if proxy != "" {
+		env = append(env,
+			"NETO_PROVIDER_PROXY="+proxy,
+			"HTTP_PROXY="+proxy,
+			"HTTPS_PROXY="+proxy,
+			"ALL_PROXY="+proxy,
+			"http_proxy="+proxy,
+			"https_proxy="+proxy,
+			"all_proxy="+proxy,
+			"NO_PROXY=127.0.0.1,localhost,::1",
+			"no_proxy=127.0.0.1,localhost,::1",
+		)
+	}
+	return env
+}
+
+type cappedBuffer struct {
+	bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.limit <= 0 {
+		return len(p), nil
+	}
+	remaining := b.limit - b.Len()
+	if remaining <= 0 {
+		if len(p) > 0 {
+			b.truncated = true
+		}
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		_, _ = b.Buffer.Write(p[:remaining])
+		b.truncated = true
+		return len(p), nil
+	}
+	_, _ = b.Buffer.Write(p)
+	return len(p), nil
 }
 
 func fetchURLWithCurl(rawURL string, proxy string) ([]byte, error) {

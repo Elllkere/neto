@@ -58,6 +58,14 @@
       "path": "neto/advanced"
     }
   },
+  "admin/services/neto/logs": {
+    "title": "Logs",
+    "order": 80,
+    "action": {
+      "type": "view",
+      "path": "neto/logs"
+    }
+  },
   "admin/services/neto/debug": {
     "title": "Debug",
     "order": 90,

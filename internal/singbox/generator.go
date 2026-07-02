@@ -73,7 +73,7 @@ func Generate(cfg config.Config) ([]byte, error) {
 
 	doc := Config{
 		Log: map[string]any{
-			"level":     "info",
+			"level":     "warn",
 			"timestamp": true,
 		},
 		DNS: DNS{

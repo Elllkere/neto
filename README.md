@@ -219,6 +219,10 @@ Local DNS listeners:
 - real-direct: `127.0.0.1:15354`
 - real-proxy: `127.0.0.1:15355`
 
+sing-box logs are kept out of OpenWrt `logread` / LuCI System Log. neto starts
+sing-box through a small wrapper that writes `/var/log/neto/sing-box.log`; LuCI
+shows it in the `Logs` page.
+
 Semantics:
 
 - domain `proxy` rules in `custom` mode use `FakeIP`;
@@ -284,13 +288,45 @@ list domain_provider 'youtube_domains'
 list ip_provider 'cloudflare_ipv4'
 ```
 
-Installer добавляет built-in IP providers, если providers с такими URL еще нет:
+Installer добавляет built-in IP providers, если providers с таким URL или
+script path еще нет:
 
 - Cloudflare IPv4: `https://www.cloudflare.com/ips-v4/`
 - Telegram IPv4: `https://core.telegram.org/resources/cidr.txt`
+- Akamai IPv4: `/usr/share/neto/providers/akamai-ipv4.sh`
+- AWS IPv4: `/usr/share/neto/providers/aws-ipv4.sh`
+
+Built-in providers добавляются только для удобства. Они не создают rules и
+создаются с `auto_update '0'`; включать автообновление пользователь решает сам.
+Built-in JSON scripts используют `jq`, если он уже установлен, но не требуют
+его: без `jq` работает POSIX fallback.
 
 Telegram feed содержит IPv6; neto сохраняет только valid IPv4 CIDR/address
 entries.
+
+URL provider - дефолтный источник. Для feed в JSON или с лишними полями можно
+использовать script provider: `type` всё ещё задаёт формат результата
+(`domain`/`ip`), а `source 'script'` только меняет способ получения данных.
+Скрипт должен вернуть по одному домену/IP/CIDR на строку: либо в stdout, либо
+записав финальный результат в temp-файл из `NETO_PROVIDER_OUTPUT`. neto читает
+этот файл только после завершения скрипта, сам нормализует результат, сохраняет
+`/etc/neto/provider-cache/<name>.txt` и обновляет metadata.
+
+```uci
+config provider 'json_ips'
+	option label 'JSON IPs'
+	option type 'ip'
+	option source 'script'
+	option script_path '/usr/share/neto/providers/json-ips.sh'
+	option auto_update '1'
+	option update_hour '3'
+	option update_minute '17'
+```
+
+Скрипту передаются `NETO_PROVIDER_NAME`, `NETO_PROVIDER_TYPE`,
+`NETO_PROVIDER_CACHE`, `NETO_PROVIDER_OUTPUT` и другие `NETO_PROVIDER_*`
+переменные. При `update_via 'proxy'` neto также выставляет
+`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`.
 
 Manual update:
 

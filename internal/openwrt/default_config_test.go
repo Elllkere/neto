@@ -69,9 +69,74 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"https://www.cloudflare.com/ips-v4/",
 		"https://core.telegram.org/resources/cidr.txt",
 		"provider_url_exists \"$url\"",
+		"provider_script_exists \"$script_path\"",
+		"ensure_builtin_script_provider \"akamai_ipv4\" \"Akamai IPv4\" \"/usr/share/neto/providers/akamai-ipv4.sh\" \"15\"",
+		"ensure_builtin_script_provider \"aws_ipv4\" \"AWS IPv4\" \"/usr/share/neto/providers/aws-ipv4.sh\" \"20\"",
+		"uci set \"neto.$section.source=script\"",
+		"uci set \"neto.$section.auto_update=0\"",
+		"chmod 0755 /usr/share/neto/run-sing-box-log.sh",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("installer missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestEmbeddedSingBoxLogWrapperIsInstalledAsset(t *testing.T) {
+	path := "../../embedded/files/usr/share/neto/run-sing-box-log.sh"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0111 == 0 {
+		t.Fatalf("sing-box log wrapper is not executable: %s", path)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"#!/bin/sh",
+		"/var/log/neto/sing-box.log",
+		"tail -c \"$log_keep_bytes\"",
+		"exec \"$bin\" run -c \"$config\" >> \"$log_file\" 2>&1",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("%s missing %q:\n%s", path, want, s)
+		}
+	}
+}
+
+func TestEmbeddedProviderScriptsAreInstalledAssets(t *testing.T) {
+	for _, path := range []string{
+		"../../embedded/files/usr/share/neto/providers/akamai-ipv4.sh",
+		"../../embedded/files/usr/share/neto/providers/aws-ipv4.sh",
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm()&0111 == 0 {
+			t.Fatalf("provider script is not executable: %s", path)
+		}
+		s := string(data)
+		for _, want := range []string{
+			"#!/bin/sh",
+			"NETO_PROVIDER_OUTPUT",
+			"curl -fsSL",
+			"command -v jq",
+		} {
+			if !strings.Contains(s, want) {
+				t.Fatalf("%s missing %q:\n%s", path, want, s)
+			}
+		}
+		if strings.Contains(s, "select(test(") {
+			t.Fatalf("%s must not use jq regex functions; OpenWrt jq may be built without ONIGURUMA:\n%s", path, s)
 		}
 	}
 }

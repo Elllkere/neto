@@ -110,10 +110,13 @@ type Provider struct {
 	Label          string
 	Enabled        bool
 	Type           string
+	Source         string
 	URL            string
+	ScriptPath     string
 	LocalPath      string
 	AutoUpdate     bool
 	UpdateHour     int
+	UpdateMinute   int
 	UpdateVia      string
 	UpdateOutbound string
 	LastUpdate     string
@@ -739,7 +742,19 @@ func (c Config) Validate() error {
 		default:
 			return fmt.Errorf("provider %q has unsupported type %q", name, p.Type)
 		}
-		if strings.TrimSpace(p.URL) == "" && len(p.Files) == 0 && strings.TrimSpace(p.LocalPath) == "" {
+		switch p.Source {
+		case "", "url":
+		case "script":
+			if strings.TrimSpace(p.ScriptPath) == "" {
+				return fmt.Errorf("provider %q script_path is required", name)
+			}
+			if !filepath.IsAbs(strings.TrimSpace(p.ScriptPath)) {
+				return fmt.Errorf("provider %q script_path must be absolute", name)
+			}
+		default:
+			return fmt.Errorf("provider %q has unsupported source %q", name, p.Source)
+		}
+		if p.Source != "script" && strings.TrimSpace(p.URL) == "" && len(p.Files) == 0 && strings.TrimSpace(p.LocalPath) == "" {
 			return fmt.Errorf("provider %q url is required", name)
 		}
 		switch p.UpdateVia {
@@ -749,6 +764,9 @@ func (c Config) Validate() error {
 		}
 		if p.UpdateHour < 0 || p.UpdateHour > 23 {
 			return fmt.Errorf("provider %q has invalid update_hour %d", name, p.UpdateHour)
+		}
+		if p.UpdateMinute < 0 || p.UpdateMinute > 59 {
+			return fmt.Errorf("provider %q has invalid update_minute %d", name, p.UpdateMinute)
 		}
 		if p.UpdateVia == "proxy" && strings.TrimSpace(p.UpdateOutbound) != "" {
 			if _, ok := seenOutboundTags[p.UpdateOutbound]; !ok {
@@ -1151,9 +1169,12 @@ func parseProvider(s section) Provider {
 		Label:          strings.TrimSpace(firstNonEmpty(s.options["label"], s.options["name"], name)),
 		Enabled:        true,
 		Type:           strings.TrimSpace(firstNonEmpty(s.options["type"], "ip")),
+		Source:         strings.TrimSpace(firstNonEmpty(s.options["source"], "url")),
 		URL:            strings.TrimSpace(s.options["url"]),
+		ScriptPath:     strings.TrimSpace(s.options["script_path"]),
 		LocalPath:      strings.TrimSpace(s.options["local_path"]),
 		AutoUpdate:     false,
+		UpdateMinute:   5,
 		UpdateVia:      strings.TrimSpace(firstNonEmpty(s.options["update_via"], "direct")),
 		UpdateOutbound: strings.TrimSpace(s.options["update_outbound"]),
 		LastUpdate:     strings.TrimSpace(s.options["last_update"]),
@@ -1168,6 +1189,11 @@ func parseProvider(s section) Provider {
 	if v := firstNonEmpty(s.options["update_hour"], s.options["update_interval"], "0"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(v), "h")); err == nil {
 			p.UpdateHour = n
+		}
+	}
+	if v := firstNonEmpty(s.options["update_minute"], "5"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			p.UpdateMinute = n
 		}
 	}
 	if v := firstNonEmpty(s.options["item_count"], s.options["node_count"]); v != "" {

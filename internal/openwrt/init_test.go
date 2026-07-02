@@ -21,8 +21,23 @@ func TestInitScriptStartsTwoProcdInstances(t *testing.T) {
 	if !strings.Contains(s, "procd_open_instance sing-box") {
 		t.Fatalf("missing sing-box procd instance:\n%s", s)
 	}
+	if !strings.Contains(s, `procd_set_param command /usr/share/neto/run-sing-box-log.sh "$singbox_bin" /tmp/neto/sing-box.json`) {
+		t.Fatalf("sing-box must run through neto log wrapper:\n%s", s)
+	}
 	if !strings.Contains(s, `"$singbox_bin" check -c /tmp/neto/sing-box.json`) {
 		t.Fatalf("missing sing-box check before procd start:\n%s", s)
+	}
+	start := strings.Index(s, "procd_open_instance sing-box")
+	if start < 0 {
+		t.Fatalf("missing sing-box procd block:\n%s", s)
+	}
+	end := strings.Index(s[start:], "procd_close_instance")
+	if end < 0 {
+		t.Fatalf("missing sing-box procd close:\n%s", s[start:])
+	}
+	block := s[start : start+end]
+	if strings.Contains(block, "procd_set_param stdout 1") || strings.Contains(block, "procd_set_param stderr 1") {
+		t.Fatalf("sing-box stdout/stderr must not be forwarded to system log:\n%s", block)
 	}
 }
 
@@ -58,6 +73,7 @@ func TestInitScriptManagesSubscriptionCron(t *testing.T) {
 		`CRON_BEGIN="# neto subscriptions begin"`,
 		"config_get_bool auto_update \"$section\" auto_update 0",
 		"config_get hour \"$section\" update_hour \"0\"",
+		"config_get minute \"$section\" update_minute \"5\"",
 		"config_foreach neto_append_subscription_cron subscription",
 		"config_foreach neto_append_provider_cron provider",
 		"/usr/bin/netod subscriptions update %s",
