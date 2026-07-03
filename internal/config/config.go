@@ -77,6 +77,7 @@ type Main struct {
 	DefaultAction         string
 	RoutingMode           string
 	DefaultOutbound       string
+	SimpleRule            Rule
 	LANSubnets            []string
 	LANIfaces             []string
 }
@@ -350,7 +351,14 @@ func Defaults() Config {
 			DefaultAction:         "direct",
 			RoutingMode:           "custom",
 			DefaultOutbound:       "direct",
-			LANSubnets:            []string{"192.168.8.0/24"},
+			SimpleRule: Rule{
+				Name:     "simple",
+				Enabled:  true,
+				Priority: 100,
+				Action:   "proxy",
+				DNSMode:  "auto",
+			},
+			LANSubnets: []string{"192.168.8.0/24"},
 		},
 	}
 }
@@ -376,6 +384,30 @@ func (c Config) AllowedOutboundTags() map[string]struct{} {
 		}
 	}
 	return tags
+}
+
+func (c Config) EffectiveRules() []Rule {
+	if c.Main.RoutingMode != "simple" {
+		return c.Rules
+	}
+	return []Rule{c.Main.EffectiveSimpleRule()}
+}
+
+func (m Main) EffectiveSimpleRule() Rule {
+	r := m.SimpleRule
+	if strings.TrimSpace(r.Name) == "" {
+		r.Name = "simple"
+	}
+	r.Enabled = true
+	if r.Priority == 0 {
+		r.Priority = 100
+	}
+	r.Action = strings.ToLower(strings.TrimSpace(firstNonEmpty(r.Action, "proxy")))
+	r.DNSMode = strings.ToLower(strings.TrimSpace(firstNonEmpty(r.DNSMode, "auto")))
+	if r.Action != "proxy" {
+		r.Outbound = BuiltinDirectOutbound
+	}
+	return r
 }
 
 func (m Main) DNSUpstream() DNSUpstream {
@@ -572,7 +604,7 @@ func (c Config) Validate() error {
 	}
 
 	switch c.Main.RoutingMode {
-	case "custom", "global":
+	case "custom", "simple", "global":
 	default:
 		return fmt.Errorf("unsupported routing_mode %q", c.Main.RoutingMode)
 	}
@@ -846,7 +878,11 @@ func (c Config) Validate() error {
 			}
 		}
 	}
-	for _, r := range c.Rules {
+	rules := c.Rules
+	if c.Main.RoutingMode == "simple" {
+		rules = append(append([]Rule(nil), rules...), c.Main.EffectiveSimpleRule())
+	}
+	for _, r := range rules {
 		if strings.TrimSpace(r.Name) == "" {
 			return fmt.Errorf("rule name must not be empty")
 		}
@@ -1142,12 +1178,48 @@ func applyMain(m *Main, s section) {
 	if v := s.options["default_action"]; v != "" {
 		m.DefaultAction = v
 	}
+	applySimpleRule(m, s)
 	if values, ok := s.lists["lan_subnet"]; ok {
 		m.LANSubnets = cleanList(values)
 	}
 	if values, ok := s.lists["lan_iface"]; ok {
 		m.LANIfaces = cleanList(values)
 	}
+}
+
+func applySimpleRule(m *Main, s section) {
+	r := m.EffectiveSimpleRule()
+	if v := s.options["simple_action"]; v != "" {
+		r.Action = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := s.options["simple_outbound"]; ok {
+		r.Outbound = strings.TrimSpace(v)
+		if r.Outbound == "proxy_default" {
+			r.Outbound = BuiltinDirectOutbound
+		}
+	}
+	r.DomainEquals = cleanDomainList(appendList(s.lists["simple_domain_equals"], splitListOption(s.options["simple_domain_equals"])))
+	r.DomainContains = cleanDomainList(appendList(s.lists["simple_domain_contains"], splitListOption(s.options["simple_domain_contains"])))
+	r.DomainStartsWith = cleanDomainList(appendList(s.lists["simple_domain_starts_with"], splitListOption(s.options["simple_domain_starts_with"])))
+	r.DomainEndsWith = cleanDomainList(appendList(s.lists["simple_domain_ends_with"], splitListOption(s.options["simple_domain_ends_with"])))
+	r.ExcludeDomainEquals = cleanDomainList(appendList(s.lists["simple_exclude_domain_equals"], splitListOption(s.options["simple_exclude_domain_equals"])))
+	r.ExcludeDomainContains = cleanDomainList(appendList(s.lists["simple_exclude_domain_contains"], splitListOption(s.options["simple_exclude_domain_contains"])))
+	r.ExcludeDomainStartsWith = cleanDomainList(appendList(s.lists["simple_exclude_domain_starts_with"], splitListOption(s.options["simple_exclude_domain_starts_with"])))
+	r.ExcludeDomainEndsWith = cleanDomainList(appendList(s.lists["simple_exclude_domain_ends_with"], splitListOption(s.options["simple_exclude_domain_ends_with"])))
+	r.DomainFiles = cleanList(appendList(s.lists["simple_domain_file"], splitListOption(s.options["simple_domain_file"])))
+	r.IPCIDRs = cleanList(appendList(s.lists["simple_ip_cidr"], splitListOption(s.options["simple_ip_cidr"])))
+	r.Files = cleanList(appendList(appendList(s.lists["simple_ip_file"], s.lists["simple_file"]), splitListOption(s.options["simple_ip_file"])))
+	r.DomainProviders = cleanList(appendList(s.lists["simple_domain_provider"], splitListOption(s.options["simple_domain_provider"])))
+	r.IPProviders = cleanList(appendList(s.lists["simple_ip_provider"], splitListOption(s.options["simple_ip_provider"])))
+	r.Providers = cleanList(appendList(s.lists["simple_provider"], splitListOption(s.options["simple_provider"])))
+	r.Proto = cleanList(appendList(s.lists["simple_proto"], splitListOption(s.options["simple_proto"])))
+	for i := range r.Proto {
+		r.Proto[i] = strings.ToLower(strings.TrimSpace(r.Proto[i]))
+	}
+	r.SrcPorts = cleanList(appendList(s.lists["simple_src_port"], splitListOption(s.options["simple_src_port"])))
+	r.DstPorts = cleanList(appendList(s.lists["simple_dst_port"], splitListOption(s.options["simple_dst_port"])))
+	r.DNSMode = "auto"
+	m.SimpleRule = r
 }
 
 func parseRule(s section, order int) (Rule, []string) {
@@ -1298,45 +1370,57 @@ func LoadRuleDomainFiles(cfg *Config) error {
 		return nil
 	}
 	for i := range cfg.Rules {
-		var domains []string
-		for _, path := range cfg.Rules[i].DomainFiles {
-			values, err := loadDomainFile(path)
-			if err != nil {
-				return err
-			}
-			domains = append(domains, values...)
+		if err := loadRuleDomainFiles(cfg, &cfg.Rules[i]); err != nil {
+			return err
 		}
-		for _, providerName := range appendList(cfg.Rules[i].DomainProviders, cfg.Rules[i].Providers) {
-			provider, ok := cfg.ProviderByName(providerName)
-			if !ok || !provider.Enabled || provider.Type != "domain" {
-				continue
-			}
-			values, err := loadDomainFile(provider.CachePath())
-			if err != nil {
+	}
+	if cfg.Main.RoutingMode == "simple" {
+		if err := loadRuleDomainFiles(cfg, &cfg.Main.SimpleRule); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadRuleDomainFiles(cfg *Config, rule *Rule) error {
+	var domains []string
+	for _, path := range rule.DomainFiles {
+		values, err := loadDomainFile(path)
+		if err != nil {
+			return err
+		}
+		domains = append(domains, values...)
+	}
+	for _, providerName := range appendList(rule.DomainProviders, rule.Providers) {
+		provider, ok := cfg.ProviderByName(providerName)
+		if !ok || !provider.Enabled || provider.Type != "domain" {
+			continue
+		}
+		values, err := loadDomainFile(provider.CachePath())
+		if err != nil {
+			if os.IsNotExist(err) {
+				restored, restoreErr := provider.RestoreDefaultCache()
+				if restoreErr != nil {
+					cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("provider %q cache restore failed: %v", provider.Name, restoreErr))
+					continue
+				}
+				if restored {
+					values, err = loadDomainFile(provider.CachePath())
+				}
 				if os.IsNotExist(err) {
-					restored, restoreErr := provider.RestoreDefaultCache()
-					if restoreErr != nil {
-						cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("provider %q cache restore failed: %v", provider.Name, restoreErr))
-						continue
-					}
-					if restored {
-						values, err = loadDomainFile(provider.CachePath())
-					}
-					if os.IsNotExist(err) {
-						cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("provider %q cache %q is missing; skipping provider until netod providers update %s", provider.Name, provider.CachePath(), provider.Name))
-						continue
-					}
+					cfg.Warnings = append(cfg.Warnings, fmt.Sprintf("provider %q cache %q is missing; skipping provider until netod providers update %s", provider.Name, provider.CachePath(), provider.Name))
+					continue
 				}
 			}
-			if err != nil {
-				return fmt.Errorf("provider %q: %w", provider.Name, err)
-			}
-			_ = provider.MirrorDefaultCache()
-			domains = append(domains, values...)
 		}
-		if len(domains) > 0 {
-			cfg.Rules[i].DomainEquals = cleanDomainList(appendList(cfg.Rules[i].DomainEquals, domains))
+		if err != nil {
+			return fmt.Errorf("provider %q: %w", provider.Name, err)
 		}
+		_ = provider.MirrorDefaultCache()
+		domains = append(domains, values...)
+	}
+	if len(domains) > 0 {
+		rule.DomainEquals = cleanDomainList(appendList(rule.DomainEquals, domains))
 	}
 	return nil
 }

@@ -244,6 +244,59 @@ config main 'main'
 	}
 }
 
+func TestParseSimpleRoutingMode(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option routing_mode 'simple'
+	option simple_action 'proxy'
+	option simple_outbound 'my_vless'
+	list simple_domain_provider 'telegram'
+	list simple_ip_provider 'cloudflare'
+	list simple_domain_equals 'Example.COM.'
+	list simple_domain_ends_with '.Example.ORG.'
+	list simple_ip_cidr '1.1.1.1'
+
+config provider 'telegram'
+	option enabled '1'
+	option type 'domain'
+	option url 'https://example.com/domains.txt'
+
+config provider 'cloudflare'
+	option enabled '1'
+	option type 'ip'
+	option url 'https://example.com/ips.txt'
+
+config outbound 'my_vless'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rules) != 0 {
+		t.Fatalf("simple mode must not create config rule sections: %+v", cfg.Rules)
+	}
+	rules := cfg.EffectiveRules()
+	if len(rules) != 1 {
+		t.Fatalf("got %d effective rules, want 1", len(rules))
+	}
+	r := rules[0]
+	if r.Name != "simple" || r.Action != "proxy" || r.Outbound != "my_vless" || r.DNSMode != "auto" {
+		t.Fatalf("unexpected simple rule: %+v", r)
+	}
+	if strings.Join(r.DomainProviders, ",") != "telegram" || strings.Join(r.IPProviders, ",") != "cloudflare" {
+		t.Fatalf("unexpected simple providers: %+v", r)
+	}
+	if strings.Join(r.DomainEquals, ",") != "example.com" || strings.Join(r.DomainEndsWith, ",") != ".example.org" {
+		t.Fatalf("unexpected simple domains: %+v", r)
+	}
+	if strings.Join(r.IPCIDRs, ",") != "1.1.1.1" {
+		t.Fatalf("unexpected simple CIDRs: %+v", r)
+	}
+}
+
 func TestParseOrderedRules(t *testing.T) {
 	cfg, err := Parse(`
 config rule

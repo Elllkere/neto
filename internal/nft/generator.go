@@ -62,7 +62,7 @@ func Generate(in Input) (string, error) {
 }
 
 func writeRuleSets(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet) {
-	for i, rule := range cfg.Rules {
+	for i, rule := range cfg.EffectiveRules() {
 		if !ruleengine.HasIPMatch(rule) || len(ruleCIDRs[i]) == 0 {
 			continue
 		}
@@ -71,7 +71,7 @@ func writeRuleSets(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*n
 }
 
 func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet) error {
-	for i, rule := range cfg.Rules {
+	for i, rule := range cfg.EffectiveRules() {
 		if !ruleengine.HasIPMatch(rule) {
 			continue
 		}

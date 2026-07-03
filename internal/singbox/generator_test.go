@@ -219,6 +219,46 @@ func TestGenerateRoutesCapturedTrafficToReferencedProxyOutbound(t *testing.T) {
 	}
 }
 
+func TestGenerateRoutesSimpleModeToReferencedProxyOutbound(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.RoutingMode = "simple"
+	cfg.Outbounds = []config.Outbound{{
+		Enabled: true,
+		Tag:     "test",
+		Type:    "vless",
+		Server:  "example.com",
+		Port:    443,
+		UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
+		TLS:     true,
+	}}
+	cfg.Main.SimpleRule.Outbound = "test"
+	cfg.Main.SimpleRule.DomainContains = []string{"check-host"}
+	route := generatedRoute(t, cfg)
+	if route["final"] != "test" {
+		t.Fatalf("simple mode captured traffic should use referenced proxy outbound, got route %+v", route)
+	}
+}
+
+func TestGenerateRoutesSimpleModeUsesFirstCustomOutboundWhenUnset(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.RoutingMode = "simple"
+	cfg.Outbounds = []config.Outbound{{
+		Enabled: true,
+		Tag:     "first",
+		Type:    "vless",
+		Server:  "example.com",
+		Port:    443,
+		UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
+		TLS:     true,
+	}}
+	cfg.Main.SimpleRule.Outbound = ""
+	cfg.Main.SimpleRule.DomainContains = []string{"check-host"}
+	route := generatedRoute(t, cfg)
+	if route["final"] != "first" {
+		t.Fatalf("simple mode without selected outbound should use first custom outbound, got route %+v", route)
+	}
+}
+
 func TestGenerateKeepsDirectFinalWhenProxyRuleUsesDirect(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Outbounds = []config.Outbound{{

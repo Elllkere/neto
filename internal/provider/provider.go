@@ -12,7 +12,7 @@ import (
 
 func LoadRuleCIDRs(cfg config.Config) (map[int][]*net.IPNet, error) {
 	out := map[int][]*net.IPNet{}
-	for i, rule := range cfg.Rules {
+	for i, rule := range cfg.EffectiveRules() {
 		if !ruleengine.HasIPMatch(rule) {
 			continue
 		}

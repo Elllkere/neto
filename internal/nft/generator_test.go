@@ -279,6 +279,26 @@ func TestGenerateCustomModeNoGlobalCatchAll(t *testing.T) {
 	}
 }
 
+func TestGenerateSimpleModeUsesSimpleIPRule(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Main.RoutingMode = "simple"
+	cfg.Main.SimpleRule = providerRule("simple_ips", 100, "proxy")
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } jump to_proxy_default") {
+		t.Fatalf("simple mode must include fakeip proxy rule:\n%s", out)
+	}
+	if !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") {
+		t.Fatalf("simple IP provider rule missing:\n%s", out)
+	}
+	if strings.Contains(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_default\n") {
+		t.Fatalf("simple mode must not include global catch-all:\n%s", out)
+	}
+}
+
 func TestGenerateGlobalModeCatchAll(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Main.NFTCounters = false

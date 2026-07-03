@@ -100,6 +100,30 @@ function addProxyOutboundChoices(option) {
 	});
 }
 
+function addProviderChoices(option, type) {
+	uci.sections('neto', 'provider', function(section, sid) {
+		var name = String(sid || section['.name'] || '').trim();
+		var label = String(section.label || section.name || name).trim();
+		var providerType = String(section.type || '').trim();
+
+		if (name == '' || providerType != type)
+			return;
+
+		option.value(name, label || name);
+	});
+}
+
+function addSimpleProviderList(section, option, title, providerType) {
+	var o = section.option(form.DynamicList, option, title);
+
+	o.depends('routing_mode', 'simple');
+	o.rmempty = true;
+	o.retain = true;
+	addProviderChoices(o, providerType);
+
+	return o;
+}
+
 function normalizeDNSPreset(preset) {
 	preset = String(preset || '').trim();
 	if (preset == 'google' || preset == 'custom')
@@ -220,9 +244,32 @@ function normalizeDNSState() {
 	uci.unset('neto', 'main', '_real_dns_doh');
 }
 
+function normalizeSimpleRuleState() {
+	var routingMode = String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim();
+	var action = String(uci.get('neto', 'main', 'simple_action') || 'proxy').trim();
+	var outbound = String(uci.get('neto', 'main', 'simple_outbound') || '').trim();
+
+	if (routingMode != 'simple')
+		return;
+
+	if (action != 'proxy' && action != 'direct' && action != 'block')
+		action = 'proxy';
+
+	if (action != 'proxy') {
+		uci.set('neto', 'main', 'simple_outbound', 'direct');
+	} else if (outbound == '' || isReservedOutboundTag(outbound) || !proxyOutboundExists(outbound)) {
+		uci.unset('neto', 'main', 'simple_outbound');
+	} else {
+		uci.set('neto', 'main', 'simple_outbound', outbound);
+	}
+
+	uci.set('neto', 'main', 'simple_action', action);
+}
+
 function forceGeneralState() {
 	uci.set('neto', 'main', 'fakeip_enabled', '1');
 	normalizeDNSState();
+	normalizeSimpleRuleState();
 }
 
 return view.extend({
@@ -430,12 +477,50 @@ return view.extend({
 
 		o = s.option(form.ListValue, 'routing_mode', _('Routing mode'));
 		o.value('custom', _('Custom'));
+		o.value('simple', _('Simple'));
 		o.value('global', _('Global'));
 		o.default = 'custom';
 
 		o = s.option(form.ListValue, 'default_outbound', _('Default outbound'));
 		o.value('direct', 'direct');
 		o.default = 'direct';
+
+		o = s.option(form.ListValue, 'simple_action', _('Simple action'));
+		o.value('proxy', 'proxy');
+		o.value('direct', 'direct');
+		o.value('block', 'block');
+		o.default = 'proxy';
+		o.rmempty = false;
+		o.retain = true;
+		o.depends('routing_mode', 'simple');
+
+		o = s.option(form.ListValue, 'simple_outbound', _('Simple outbound'));
+		addProxyOutboundChoices(o);
+		o.default = '';
+		o.rmempty = true;
+		o.retain = true;
+		o.depends({ 'routing_mode': 'simple', 'simple_action': 'proxy' });
+
+		addSimpleProviderList(s, 'simple_domain_provider', _('Domain providers'), 'domain');
+		addSimpleProviderList(s, 'simple_ip_provider', _('IP providers'), 'ip');
+
+		o = s.option(form.DynamicList, 'simple_domain_equals', _('Equals'));
+		o.depends('routing_mode', 'simple');
+		o.placeholder = 'example.com';
+		o.rmempty = true;
+		o.retain = true;
+
+		o = s.option(form.DynamicList, 'simple_domain_ends_with', _('Ends with'));
+		o.depends('routing_mode', 'simple');
+		o.placeholder = '.example.com';
+		o.rmempty = true;
+		o.retain = true;
+
+		o = s.option(form.DynamicList, 'simple_ip_cidr', _('IP/CIDR list'));
+		o.depends('routing_mode', 'simple');
+		o.placeholder = '1.1.1.1';
+		o.rmempty = true;
+		o.retain = true;
 
 		return m.render();
 	}

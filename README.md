@@ -176,6 +176,8 @@ ip -4 route show table 101
 `routing_mode`:
 
 - `custom`: proxy только по rules/client policy/FakeIP/IP provider.
+- `simple`: proxy по одному правилу из `config main` (`simple_*`), без
+  автосоздания `config rule`.
 - `global`: весь non-reserved LAN TCP/UDP идет в proxy, кроме direct clients.
 
 Client policy:
@@ -225,7 +227,7 @@ shows it in the `Logs` page.
 
 Semantics:
 
-- domain `proxy` rules in `custom` mode use `FakeIP`;
+- domain `proxy` rules in `custom`/`simple` mode use `FakeIP`;
 - provider/CIDR/IP rules use real DNS, потому что nft должен видеть real
   destination IP;
 - direct rules and direct clients always use real DNS;

@@ -54,6 +54,22 @@ func TestLoadRuleCIDRsCombinesInlineAndFileCIDRs(t *testing.T) {
 	}
 }
 
+func TestLoadRuleCIDRsUsesSimpleEffectiveRule(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.RoutingMode = "simple"
+	cfg.Main.SimpleRule.IPCIDRs = []string{"1.1.1.1"}
+
+	got, err := LoadRuleCIDRs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := policy.CIDRStrings(got[0])
+	want := []string{"1.1.1.1/32"}
+	if !reflect.DeepEqual(values, want) {
+		t.Fatalf("got %v, want %v", values, want)
+	}
+}
+
 func TestLoadRuleCIDRsMissingProviderCacheIsSkipped(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Rules = []config.Rule{{

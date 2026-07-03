@@ -274,7 +274,7 @@ func generateOutbounds(cfg config.Config) ([]any, error) {
 
 func SelectedProxyOutbound(cfg config.Config) string {
 	allowed := cfg.AllowedOutboundTags()
-	for _, rule := range cfg.Rules {
+	for _, rule := range cfg.EffectiveRules() {
 		if !rule.Enabled || rule.Action != "proxy" {
 			continue
 		}
@@ -286,10 +286,21 @@ func SelectedProxyOutbound(cfg config.Config) string {
 			return tag
 		}
 	}
-	if cfg.Main.RoutingMode == "global" || hasProxyClient(cfg) {
-		for _, outbound := range cfg.EnabledCustomOutbounds() {
-			return outbound.Tag
+	if cfg.Main.RoutingMode == "simple" {
+		rule := cfg.Main.EffectiveSimpleRule()
+		if rule.Enabled && rule.Action == "proxy" && strings.TrimSpace(rule.Outbound) == "" {
+			return firstCustomOutboundTag(cfg)
 		}
+	}
+	if cfg.Main.RoutingMode == "global" || hasProxyClient(cfg) {
+		return firstCustomOutboundTag(cfg)
+	}
+	return config.BuiltinDirectOutbound
+}
+
+func firstCustomOutboundTag(cfg config.Config) string {
+	for _, outbound := range cfg.EnabledCustomOutbounds() {
+		return outbound.Tag
 	}
 	return config.BuiltinDirectOutbound
 }

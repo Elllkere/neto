@@ -154,6 +154,8 @@ Client policy:
 `routing_mode`:
 
 - `custom`: selective routing через ordered rules; unmatched traffic -> direct.
+- `simple`: single-rule mode через `simple_*` fields in `config main`;
+  regular `config rule` sections are not created or mutated.
 - `global`: all LAN non-reserved TCP/UDP traffic -> proxy, кроме direct clients.
 
 Rule action:
@@ -220,7 +222,7 @@ Real DNS config:
 
 ### DNS Rules
 
-- Domain `proxy` rules in `custom` mode use `FakeIP`.
+- Domain `proxy` rules in `custom`/`simple` mode use `FakeIP`.
 - Provider/CIDR/IP rules use real DNS so nft can see real destination IP.
 - Direct rules and direct clients always use real DNS.
 - `routing_mode=global` returns real DNS by default.

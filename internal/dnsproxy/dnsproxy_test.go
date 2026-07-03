@@ -105,6 +105,20 @@ func TestDNSPolicyCustomDefaultFakeIP(t *testing.T) {
 	}
 }
 
+func TestDNSPolicySimpleUsesSimpleRule(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.RoutingMode = "simple"
+	cfg.Main.SimpleRule = fakeRule("youtube.com")
+	cfg.Main.SimpleRule.Name = ""
+	p := New(cfg)
+	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.10"); got != p.FakeUpstream {
+		t.Fatalf("got %s, want fake upstream", got)
+	}
+	if len(p.Rules) != 1 || p.Rules[0].Name != "simple" {
+		t.Fatalf("unexpected effective rules: %+v", p.Rules)
+	}
+}
+
 func TestDNSPolicyCustomDirectNoFakeIP(t *testing.T) {
 	p := Proxy{
 		Rules:              []config.Rule{fakeRule("youtube.com")},

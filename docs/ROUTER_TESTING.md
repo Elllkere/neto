@@ -33,6 +33,8 @@ logread | grep -E 'netod|sing-box|dnsmasq' | tail -n 120
 `routing_mode`:
 
 - `custom`: ordered `config rule` decide `proxy`/`direct`/`block`.
+- `simple`: one rule from `config main` `simple_*` fields decides
+  `proxy`/`direct`/`block`.
 - `global`: all LAN non-reserved TCP/UDP traffic goes to proxy except direct
   clients.
 

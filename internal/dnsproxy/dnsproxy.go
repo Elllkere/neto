@@ -52,7 +52,7 @@ func New(cfg config.Config) Proxy {
 		RealDNSMode:         cfg.Main.RealDNSMode,
 		RoutingMode:         cfg.Main.RoutingMode,
 		ClientPolicies:      clientPolicies,
-		Rules:               append([]config.Rule(nil), cfg.Rules...),
+		Rules:               append([]config.Rule(nil), cfg.EffectiveRules()...),
 		FilterAAAAForFakeIP: cfg.Main.FilterAAAAForFakeIP,
 		Timeout:             5 * time.Second,
 	}

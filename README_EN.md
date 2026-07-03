@@ -120,7 +120,7 @@ Installed neto without `sing-box` takes about 5 MB of flash.
 
 ## DNS Semantics
 
-- Domain proxy rules in `custom` mode use FakeIP.
+- Domain proxy rules in `custom` and `simple` mode use FakeIP.
 - Provider/CIDR/IP rules use real DNS so nftables can match real destination
   IPs.
 - Direct rules and direct clients always use real DNS.

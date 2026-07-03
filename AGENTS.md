@@ -86,6 +86,8 @@ Routing modes:
 
 - `custom`: selective routing by ordered rules. Unmatched traffic follows
   `default_outbound`, currently only `direct`.
+- `simple`: single-rule mode using `simple_*` fields in `config main`. It does
+  not create or mutate `config rule` sections.
 - `global`: all LAN client TCP/UDP goes to proxy except direct clients and
   reserved/local destinations.
 
@@ -114,8 +116,8 @@ Routing modes:
 - dnsmasq `addsubnet=32` is used only as local metadata so netod can recover
   the original LAN client IP. netod must strip EDNS Client Subnet before
   forwarding DNS queries to sing-box/public resolvers.
-- Domain proxy rules in custom mode may use FakeIP. Direct clients, direct
-  rules, provider/CIDR-only rules, and global mode use real DNS.
+- Domain proxy rules in custom and simple mode may use FakeIP. Direct clients,
+  direct rules, provider/CIDR-only rules, and global mode use real DNS.
 - A rule may mix domain matchers with provider/CIDR/IP matchers. Domain matchers
   are DNS-phase only; provider/CIDR/IP matchers are packet/nft-phase only. This
   is not an AND between domain and IP.
