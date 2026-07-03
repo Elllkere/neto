@@ -215,12 +215,46 @@ detect_arch() {
 download() {
 	local url="$1"
 	local dest="$2"
+	local tmp="$dest.tmp"
+	local attempts=""
+
+	rm -f "$tmp"
+	if command -v wget >/dev/null 2>&1; then
+		attempts="$attempts wget"
+		if wget -O "$tmp" "$url"; then
+			mv "$tmp" "$dest"
+			return 0
+		fi
+		rm -f "$tmp"
+	fi
+	if curl_usable; then
+		attempts="$attempts curl"
+		if curl -fsSL "$url" -o "$tmp"; then
+			mv "$tmp" "$dest"
+			return 0
+		fi
+		rm -f "$tmp"
+	elif command -v curl >/dev/null 2>&1; then
+		attempts="$attempts broken-curl"
+	fi
+
+	die "failed to download $url; attempted:${attempts:- none}"
+}
+
+curl_usable() {
+	command -v curl >/dev/null 2>&1 || return 1
+	curl --version >/dev/null 2>&1
+}
+
+check_runtime_curl() {
+	if curl_usable; then
+		return 0
+	fi
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL "$url" -o "$dest"
-	elif command -v wget >/dev/null 2>&1; then
-		wget -O "$dest" "$url"
+		log "warning: /usr/bin/curl is installed but cannot start"
+		log "warning: neto will install using wget where possible, but provider and subscription updates need a working curl"
 	else
-		die "curl or wget is required to download $url"
+		log "warning: curl is not installed; provider and subscription updates need curl"
 	fi
 }
 
@@ -643,6 +677,7 @@ pkg_install "$pm" \
 if ! pkg_install "$pm" sing-box; then
 	log "system sing-box package was not installed; managed sing-box will be used if present"
 fi
+check_runtime_curl
 
 need_cmd tar
 mkdir -p "$WORK_DIR"

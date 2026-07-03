@@ -75,9 +75,34 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"uci set \"neto.$section.source=script\"",
 		"uci set \"neto.$section.auto_update=0\"",
 		"chmod 0755 /usr/share/neto/run-sing-box-log.sh",
+		"curl_usable()",
+		"wget -O \"$tmp\" \"$url\"",
+		"curl -fsSL \"$url\" -o \"$tmp\"",
+		"attempts=\"$attempts broken-curl\"",
+		"check_runtime_curl",
+		"warning: /usr/bin/curl is installed but cannot start",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("installer missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestUpgradeScriptFallsBackAroundBrokenCurl(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/upgrade.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"curl_usable()",
+		"wget -O \"$tmp\" \"$url\"",
+		"curl -fsSL \"$url\" -o \"$tmp\"",
+		"attempts=\"$attempts broken-curl\"",
+		"download \"$INSTALL_URL\" \"$TMP\"",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("upgrade script missing %q:\n%s", want, s)
 		}
 	}
 }
