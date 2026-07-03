@@ -210,7 +210,7 @@ function addCommunityDomainProvider(def) {
 		return false;
 
 	section = uniqueProviderSection(def.section);
-	uci.set('neto', section, 'provider');
+	uci.add('neto', 'provider', section);
 	uci.set('neto', section, 'enabled', '1');
 	uci.set('neto', section, 'label', def.label);
 	uci.set('neto', section, 'type', 'domain');

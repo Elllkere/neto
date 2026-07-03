@@ -97,7 +97,7 @@ func TestProvidersLuCIAddsCommunityDomainProviders(t *testing.T) {
 		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Categories/anime.lst",
 		"providerURLExists(def.url)",
 		"uniqueProviderSection(def.section)",
-		"uci.set('neto', section, 'provider')",
+		"uci.add('neto', 'provider', section)",
 		"uci.set('neto', section, 'type', 'domain')",
 		"uci.set('neto', section, 'source', 'url')",
 		"uci.set('neto', section, 'auto_update', '0')",
