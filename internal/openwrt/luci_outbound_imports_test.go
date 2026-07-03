@@ -29,9 +29,10 @@ func TestOutboundsLuCIContainsImportAndSubscriptions(t *testing.T) {
 		"}, _('Import')))",
 		"form.GridSection, 'subscription', _('Subscriptions')",
 		"handleSubscriptionUpdate: function(section_id)",
-		"handleSaveCommit: function()",
-		"return uci.commit('neto')",
-		"throw new Error(_('Commit failed'))",
+		"handleSaveCommitConfig: function()",
+		"return this.handleSaveCommitConfig()",
+		"fs.exec('/sbin/uci', [ 'commit', 'neto' ])",
+		"throw new Error(res.stderr || res.stdout || _('Commit failed'))",
 		"fs.exec('/usr/bin/netod', [ 'subscriptions', 'update', section_id ])",
 		"form.Value, 'url'",
 		"form.Flag, 'auto_update'",
@@ -54,8 +55,7 @@ func TestOutboundsLuCIContainsImportAndSubscriptions(t *testing.T) {
 		"form.GridSection, 'outbound', _('Subscription nodes')",
 		"uci.get('neto', section_id, 'subscription') != null",
 		"uci.get('neto', section_id, 'subscription') == null",
-		"handleSubscriptionUpdate: function(section_id) {\n\t\treturn this.handleSave()\n\t\t\t.then(function() {\n\t\t\t\treturn uci.apply();",
-		"handleSubscriptionUpdate: function(section_id) {\n\t\treturn this.handleSave()\n\t\t\t.then(function() {\n\t\t\t\treturn fs.exec('/sbin/uci'",
+		"uci.commit(",
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("subscription nodes must remain editable in the regular Outbounds table, found %q:\n%s", forbidden, s)

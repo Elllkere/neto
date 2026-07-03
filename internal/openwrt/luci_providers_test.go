@@ -32,8 +32,10 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"form.DummyValue, 'last_update'",
 		"validateProviderReferences()",
 		"referencedProviders(section_id)",
-		"handleSaveCommit: function()",
-		"return uci.commit('neto')",
+		"handleSaveCommitConfig: function()",
+		"return this.handleSaveCommitConfig()",
+		"fs.exec('/sbin/uci', [ 'commit', 'neto' ])",
+		"throw new Error(res.stderr || res.stdout || _('Commit failed'))",
 		"domain_provider",
 		"ip_provider",
 		"Rule \"%s\" references missing or disabled provider \"%s\"",
@@ -55,6 +57,7 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"form.ListValue, 'dns_mode'",
 		"form.ListValue, 'outbound'",
 		"sortable = true",
+		"uci.commit(",
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("providers.js must not contain policy field %q:\n%s", forbidden, s)

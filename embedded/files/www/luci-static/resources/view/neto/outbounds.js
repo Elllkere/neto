@@ -154,14 +154,14 @@ return view.extend({
 		});
 	},
 
-	handleSaveCommit: function() {
+	handleSaveCommitConfig: function() {
 		return this.handleSave()
 			.then(function() {
-				return uci.commit('neto');
+				return fs.exec('/sbin/uci', [ 'commit', 'neto' ]);
 			})
-			.then(function(ok) {
-				if (ok === false)
-					throw new Error(_('Commit failed'));
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Commit failed'));
 
 				return uci.load('neto');
 			});
@@ -260,7 +260,7 @@ return view.extend({
 	},
 
 	handleSubscriptionUpdate: function(section_id) {
-		return this.handleSaveCommit()
+		return this.handleSaveCommitConfig()
 			.then(function() {
 				return fs.exec('/usr/bin/netod', [ 'subscriptions', 'update', section_id ]);
 			})
