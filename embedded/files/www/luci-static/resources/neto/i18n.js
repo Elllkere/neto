@@ -213,6 +213,7 @@ var ru = {
 	'Update': 'Обновить',
 	'Update failed': 'Обновление не удалось',
 	'Commit failed': 'Сохранение не удалось',
+	'Save failed': 'Сохранение не удалось',
 	'sing-box Logs': 'Логи sing-box',
 	'Refresh': 'Обновить',
 	'Clear': 'Очистить',

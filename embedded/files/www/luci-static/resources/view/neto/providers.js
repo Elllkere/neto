@@ -287,24 +287,39 @@ return view.extend({
 	},
 
 	handleAddCommunityProviders: function() {
-		var added = 0;
-
-		for (var i = 0; i < communityDomainProviders.length; i++) {
-			if (addCommunityDomainProvider(communityDomainProviders[i]))
-				added++;
-		}
-
-		if (added == 0) {
-			ui.addNotification(null, E('p', {}, [ _('Community lists already exist') ]), 'info');
-			return Promise.resolve();
-		}
-
-		return this.handleSaveCommitConfig()
+		return this.handleSave()
 			.then(function() {
-				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
-			})
-			.then(function() {
-				window.location.reload();
+				var added = 0;
+
+				for (var i = 0; i < communityDomainProviders.length; i++) {
+					if (addCommunityDomainProvider(communityDomainProviders[i]))
+						added++;
+				}
+
+				if (added == 0) {
+					ui.addNotification(null, E('p', {}, [ _('Community lists already exist') ]), 'info');
+					return Promise.resolve();
+				}
+
+				return uci.save('neto')
+					.then(function(ok) {
+						if (ok === false)
+							throw new Error(_('Save failed'));
+
+						return fs.exec('/sbin/uci', [ 'commit', 'neto' ]);
+					})
+					.then(function(res) {
+						if (res.code)
+							throw new Error(res.stderr || res.stdout || _('Commit failed'));
+
+						return uci.load('neto');
+					})
+					.then(function() {
+						return fs.exec('/etc/init.d/neto', [ 'restart' ]);
+					})
+					.then(function() {
+						window.location.reload();
+					});
 			});
 	},
 
