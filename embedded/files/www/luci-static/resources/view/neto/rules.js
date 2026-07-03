@@ -11,6 +11,9 @@ var _ = netoI18n.translate;
 function rewriteRuleState() {
 	var n = 0;
 
+	if (String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim() != 'custom')
+		return;
+
 	uci.sections('neto', 'rule', function(section, sid) {
 		var action = String(uci.get('neto', sid, 'action') || 'proxy').trim();
 		var outbound = uci.get('neto', sid, 'outbound');
@@ -293,10 +296,14 @@ return view.extend({
 	},
 
 	render: function() {
-		var m, s, o;
+		var m, s, o, routingMode;
 
 		m = new form.Map('neto', _('neto'));
 		this.map = m;
+		routingMode = String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim();
+
+		if (routingMode != 'custom')
+			return m.render();
 
 		s = m.section(form.GridSection, 'rule', _('Rules'),
 			_('These are literal string operations, not DNS-aware matching.') + ' ' +

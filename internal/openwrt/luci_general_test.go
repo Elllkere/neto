@@ -53,11 +53,21 @@ func TestGeneralLuCIShowsStatusControlsAndOnlyCoreSettings(t *testing.T) {
 		"o.value('direct', 'direct')",
 		"form.ListValue, 'simple_action'",
 		"form.ListValue, 'simple_outbound'",
+		"form.ListValue, 'simple_domain_input'",
+		"form.ListValue, 'simple_ip_input'",
 		"addSimpleProviderList(s, 'simple_domain_provider'",
 		"addSimpleProviderList(s, 'simple_ip_provider'",
-		"form.DynamicList, 'simple_domain_equals'",
-		"form.DynamicList, 'simple_domain_ends_with'",
-		"form.DynamicList, 'simple_ip_cidr'",
+		"addSimpleDynamicList(s, 'simple_domain_equals'",
+		"addSimpleDynamicList(s, 'simple_domain_ends_with'",
+		"addSimpleTextList(s, '_simple_domain_equals_text'",
+		"addSimpleTextList(s, '_simple_domain_ends_with_text'",
+		"addSimpleDynamicList(s, 'simple_domain_file'",
+		"addSimpleDynamicList(s, 'simple_ip_cidr'",
+		"addSimpleTextList(s, '_simple_ip_cidr_text'",
+		"addSimpleDynamicList(s, 'simple_ip_file'",
+		"setListOption(section_id, target, splitTextValues(formvalue))",
+		"uci.set('neto', 'main', 'simple_domain_input', domainInput)",
+		"uci.set('neto', 'main', 'simple_ip_input', ipInput)",
 		"normalizeSimpleRuleState()",
 		"if (routingMode != 'simple')",
 		"o.retain = true",
@@ -80,6 +90,12 @@ func TestGeneralLuCIShowsStatusControlsAndOnlyCoreSettings(t *testing.T) {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("general.js should not expose %q:\n%s", forbidden, s)
 		}
+	}
+
+	simpleEnd := strings.Index(s, "addSimpleDynamicList(s, 'simple_ip_file'")
+	defaultOutbound := strings.LastIndex(s, "form.ListValue, 'default_outbound'")
+	if simpleEnd < 0 || defaultOutbound < 0 || defaultOutbound < simpleEnd {
+		t.Fatalf("default_outbound should be rendered after simple rule fields:\n%s", s)
 	}
 }
 

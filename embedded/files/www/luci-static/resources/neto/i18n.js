@@ -37,6 +37,8 @@ var ru = {
 	'Simple': 'Простой',
 	'Simple action': 'Действие простого правила',
 	'Simple outbound': 'Исходящий простого правила',
+	'Simple domain input': 'Ввод доменов простого правила',
+	'Simple IP input': 'Ввод IP простого правила',
 	'Global': 'Глобально',
 	'Default outbound': 'Исходящий по умолчанию',
 	'Direct': 'direct',

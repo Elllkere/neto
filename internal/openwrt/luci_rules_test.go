@@ -57,6 +57,24 @@ func TestRulesLuCIExplicitEnabledAndPriorityRewrite(t *testing.T) {
 	}
 }
 
+func TestRulesLuCIHiddenOutsideCustomMode(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"if (String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim() != 'custom')",
+		"routingMode = String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim()",
+		"if (routingMode != 'custom')",
+		"return m.render()",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("rules.js missing custom-mode visibility guard %q:\n%s", want, s)
+		}
+	}
+}
+
 func TestRulesLuCIDNSModeHiddenAndAutomatic(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
 	if err != nil {

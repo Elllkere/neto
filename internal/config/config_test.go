@@ -254,7 +254,9 @@ config main 'main'
 	list simple_ip_provider 'cloudflare'
 	list simple_domain_equals 'Example.COM.'
 	list simple_domain_ends_with '.Example.ORG.'
+	list simple_domain_file '/etc/neto/domains.txt'
 	list simple_ip_cidr '1.1.1.1'
+	list simple_ip_file '/etc/neto/ips.txt'
 
 config provider 'telegram'
 	option enabled '1'
@@ -294,6 +296,9 @@ config outbound 'my_vless'
 	}
 	if strings.Join(r.IPCIDRs, ",") != "1.1.1.1" {
 		t.Fatalf("unexpected simple CIDRs: %+v", r)
+	}
+	if strings.Join(r.DomainFiles, ",") != "/etc/neto/domains.txt" || strings.Join(r.Files, ",") != "/etc/neto/ips.txt" {
+		t.Fatalf("unexpected simple files: %+v", r)
 	}
 }
 

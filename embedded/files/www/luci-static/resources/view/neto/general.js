@@ -113,13 +113,111 @@ function addProviderChoices(option, type) {
 	});
 }
 
-function addSimpleProviderList(section, option, title, providerType) {
+function inputDepends(modeOption, modeValue) {
+	var depends = { 'routing_mode': 'simple' };
+
+	depends[modeOption] = modeValue;
+	return depends;
+}
+
+function addSimpleProviderList(section, option, title, providerType, modeOption, modeValue) {
 	var o = section.option(form.DynamicList, option, title);
 
-	o.depends('routing_mode', 'simple');
+	o.depends(inputDepends(modeOption, modeValue));
 	o.rmempty = true;
 	o.retain = true;
 	addProviderChoices(o, providerType);
+
+	return o;
+}
+
+function toArray(value) {
+	if (Array.isArray(value))
+		return value;
+	if (value == null || value == '')
+		return [];
+	return [ value ];
+}
+
+function cleanValues(values) {
+	var seen = {};
+	var out = [];
+
+	values = toArray(values);
+	for (var i = 0; i < values.length; i++) {
+		var value = String(values[i] || '').trim();
+
+		if (value == '' || seen[value])
+			continue;
+
+		seen[value] = true;
+		out.push(value);
+	}
+
+	return out;
+}
+
+function splitTextValues(value) {
+	var values = [];
+	var lines = String(value || '').replace(/\r/g, '\n').split('\n');
+
+	for (var i = 0; i < lines.length; i++) {
+		var line = lines[i];
+		var comment = line.indexOf('#');
+
+		if (comment >= 0)
+			line = line.slice(0, comment);
+
+		values.push(line);
+	}
+
+	return cleanValues(values);
+}
+
+function optionValues(section_id, option) {
+	return cleanValues(uci.get('neto', section_id, option));
+}
+
+function setListOption(section_id, option, values) {
+	values = cleanValues(values);
+	if (values.length > 0)
+		uci.set('neto', section_id, option, values);
+	else
+		uci.unset('neto', section_id, option);
+}
+
+function unsetMainOptions(options) {
+	for (var i = 0; i < options.length; i++)
+		uci.unset('neto', 'main', options[i]);
+}
+
+function addSimpleDynamicList(section, option, title, modeOption, modeValue, placeholder) {
+	var o = section.option(form.DynamicList, option, title);
+
+	o.depends(inputDepends(modeOption, modeValue));
+	o.rmempty = true;
+	o.retain = true;
+	if (placeholder)
+		o.placeholder = placeholder;
+
+	return o;
+}
+
+function addSimpleTextList(section, option, target, title, modeOption, modeValue, placeholder) {
+	var o = section.option(form.TextValue, option, title);
+
+	o.depends(inputDepends(modeOption, modeValue));
+	o.rows = 6;
+	o.rmempty = true;
+	o.retain = true;
+	if (placeholder)
+		o.placeholder = placeholder;
+	o.cfgvalue = function(section_id) {
+		return optionValues(section_id, target).join('\n');
+	};
+	o.write = function(section_id, formvalue) {
+		setListOption(section_id, target, splitTextValues(formvalue));
+	};
 
 	return o;
 }
@@ -248,6 +346,8 @@ function normalizeSimpleRuleState() {
 	var routingMode = String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim();
 	var action = String(uci.get('neto', 'main', 'simple_action') || 'proxy').trim();
 	var outbound = String(uci.get('neto', 'main', 'simple_outbound') || '').trim();
+	var domainInput = String(uci.get('neto', 'main', 'simple_domain_input') || '').trim();
+	var ipInput = String(uci.get('neto', 'main', 'simple_ip_input') || '').trim();
 
 	if (routingMode != 'simple')
 		return;
@@ -264,6 +364,57 @@ function normalizeSimpleRuleState() {
 	}
 
 	uci.set('neto', 'main', 'simple_action', action);
+
+	if (domainInput == '') {
+		if (optionValues('main', 'simple_domain_provider').length > 0)
+			domainInput = 'provider';
+		else if (optionValues('main', 'simple_domain_file').length > 0)
+			domainInput = 'file';
+		else
+			domainInput = 'fields';
+	}
+	if (domainInput != 'text' && domainInput != 'provider' && domainInput != 'file')
+		domainInput = 'fields';
+	uci.set('neto', 'main', 'simple_domain_input', domainInput);
+
+	if (domainInput == 'provider') {
+		unsetMainOptions([
+			'simple_domain_equals', 'simple_domain_contains', 'simple_domain_starts_with', 'simple_domain_ends_with',
+			'simple_exclude_domain_equals', 'simple_exclude_domain_contains', 'simple_exclude_domain_starts_with', 'simple_exclude_domain_ends_with',
+			'simple_domain_file'
+		]);
+	} else if (domainInput == 'file') {
+		unsetMainOptions([
+			'simple_domain_equals', 'simple_domain_contains', 'simple_domain_starts_with', 'simple_domain_ends_with',
+			'simple_exclude_domain_equals', 'simple_exclude_domain_contains', 'simple_exclude_domain_starts_with', 'simple_exclude_domain_ends_with',
+			'simple_domain_provider'
+		]);
+	} else {
+		uci.unset('neto', 'main', 'simple_domain_provider');
+		uci.unset('neto', 'main', 'simple_domain_file');
+	}
+
+	if (ipInput == '') {
+		if (optionValues('main', 'simple_ip_provider').length > 0)
+			ipInput = 'provider';
+		else if (optionValues('main', 'simple_ip_file').length > 0 || optionValues('main', 'simple_file').length > 0)
+			ipInput = 'file';
+		else
+			ipInput = 'list';
+	}
+	if (ipInput != 'text' && ipInput != 'provider' && ipInput != 'file')
+		ipInput = 'list';
+	uci.set('neto', 'main', 'simple_ip_input', ipInput);
+
+	if (ipInput == 'provider') {
+		unsetMainOptions([ 'simple_ip_cidr', 'simple_ip_file', 'simple_file' ]);
+	} else if (ipInput == 'file') {
+		unsetMainOptions([ 'simple_ip_cidr', 'simple_ip_provider', 'simple_file' ]);
+	} else {
+		uci.unset('neto', 'main', 'simple_ip_provider');
+		uci.unset('neto', 'main', 'simple_ip_file');
+		uci.unset('neto', 'main', 'simple_file');
+	}
 }
 
 function forceGeneralState() {
@@ -481,10 +632,6 @@ return view.extend({
 		o.value('global', _('Global'));
 		o.default = 'custom';
 
-		o = s.option(form.ListValue, 'default_outbound', _('Default outbound'));
-		o.value('direct', 'direct');
-		o.default = 'direct';
-
 		o = s.option(form.ListValue, 'simple_action', _('Simple action'));
 		o.value('proxy', 'proxy');
 		o.value('direct', 'direct');
@@ -501,26 +648,64 @@ return view.extend({
 		o.retain = true;
 		o.depends({ 'routing_mode': 'simple', 'simple_action': 'proxy' });
 
-		addSimpleProviderList(s, 'simple_domain_provider', _('Domain providers'), 'domain');
-		addSimpleProviderList(s, 'simple_ip_provider', _('IP providers'), 'ip');
-
-		o = s.option(form.DynamicList, 'simple_domain_equals', _('Equals'));
-		o.depends('routing_mode', 'simple');
-		o.placeholder = 'example.com';
-		o.rmempty = true;
+		o = s.option(form.ListValue, 'simple_domain_input', _('Simple domain input'));
+		o.value('fields', _('Fields'));
+		o.value('text', _('Textbox'));
+		o.value('file', _('File paths'));
+		o.value('provider', _('Providers'));
+		o.default = 'fields';
+		o.rmempty = false;
 		o.retain = true;
-
-		o = s.option(form.DynamicList, 'simple_domain_ends_with', _('Ends with'));
 		o.depends('routing_mode', 'simple');
-		o.placeholder = '.example.com';
-		o.rmempty = true;
-		o.retain = true;
+		o.cfgvalue = function(section_id) {
+			var value = String(uci.get('neto', section_id, 'simple_domain_input') || '').trim();
 
-		o = s.option(form.DynamicList, 'simple_ip_cidr', _('IP/CIDR list'));
-		o.depends('routing_mode', 'simple');
-		o.placeholder = '1.1.1.1';
-		o.rmempty = true;
+			if (value != '')
+				return value;
+			if (optionValues(section_id, 'simple_domain_provider').length > 0)
+				return 'provider';
+			if (optionValues(section_id, 'simple_domain_file').length > 0)
+				return 'file';
+			return 'fields';
+		};
+
+		addSimpleProviderList(s, 'simple_domain_provider', _('Domain providers'), 'domain', 'simple_domain_input', 'provider');
+
+		addSimpleDynamicList(s, 'simple_domain_equals', _('Equals'), 'simple_domain_input', 'fields', 'example.com');
+		addSimpleDynamicList(s, 'simple_domain_ends_with', _('Ends with'), 'simple_domain_input', 'fields', '.example.com');
+		addSimpleTextList(s, '_simple_domain_equals_text', 'simple_domain_equals', _('Equals text'), 'simple_domain_input', 'text', 'example.com\nexample.org');
+		addSimpleTextList(s, '_simple_domain_ends_with_text', 'simple_domain_ends_with', _('Ends with text'), 'simple_domain_input', 'text', '.example.com');
+		addSimpleDynamicList(s, 'simple_domain_file', _('Domain file paths'), 'simple_domain_input', 'file', '/etc/neto/domains.txt');
+
+		o = s.option(form.ListValue, 'simple_ip_input', _('Simple IP input'));
+		o.value('list', _('List'));
+		o.value('text', _('Textbox'));
+		o.value('file', _('File paths'));
+		o.value('provider', _('Providers'));
+		o.default = 'list';
+		o.rmempty = false;
 		o.retain = true;
+		o.depends('routing_mode', 'simple');
+		o.cfgvalue = function(section_id) {
+			var value = String(uci.get('neto', section_id, 'simple_ip_input') || '').trim();
+
+			if (value != '')
+				return value;
+			if (optionValues(section_id, 'simple_ip_provider').length > 0)
+				return 'provider';
+			if (optionValues(section_id, 'simple_ip_file').length > 0 || optionValues(section_id, 'simple_file').length > 0)
+				return 'file';
+			return 'list';
+		};
+
+		addSimpleProviderList(s, 'simple_ip_provider', _('IP providers'), 'ip', 'simple_ip_input', 'provider');
+		addSimpleDynamicList(s, 'simple_ip_cidr', _('IP/CIDR list'), 'simple_ip_input', 'list', '1.1.1.1');
+		addSimpleTextList(s, '_simple_ip_cidr_text', 'simple_ip_cidr', _('IP/CIDR text'), 'simple_ip_input', 'text', '1.1.1.1\n8.8.8.0/24');
+		addSimpleDynamicList(s, 'simple_ip_file', _('IP/CIDR file paths'), 'simple_ip_input', 'file', '/etc/neto/ipv4-cidr.txt');
+
+		o = s.option(form.ListValue, 'default_outbound', _('Default outbound'));
+		o.value('direct', 'direct');
+		o.default = 'direct';
 
 		return m.render();
 	}
