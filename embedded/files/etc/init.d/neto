@@ -38,8 +38,65 @@ neto_remove_cron() {
 	neto_reload_cron
 }
 
+neto_interval_minutes() {
+	local value="$1" n
+
+	case "$value" in
+		*h)
+			n="${value%h}"
+			case "$n" in ""|*[!0-9]*) return 1 ;; esac
+			printf "%s\n" "$((n * 60))"
+			;;
+		*m)
+			n="${value%m}"
+			case "$n" in ""|*[!0-9]*) return 1 ;; esac
+			printf "%s\n" "$n"
+			;;
+		*d)
+			n="${value%d}"
+			case "$n" in ""|*[!0-9]*) return 1 ;; esac
+			printf "%s\n" "$((n * 1440))"
+			;;
+		*)
+			case "$value" in ""|*[!0-9]*) return 1 ;; esac
+			printf "%s\n" "$value"
+			;;
+	esac
+}
+
+neto_interval_cron_spec() {
+	local interval="$1"
+
+	case "$interval" in
+		15|30)
+			printf "*/%s * * * *\n" "$interval"
+			;;
+		60)
+			printf "0 * * * *\n"
+			;;
+		120)
+			printf "0 */2 * * *\n"
+			;;
+		180)
+			printf "0 */3 * * *\n"
+			;;
+		360)
+			printf "0 */6 * * *\n"
+			;;
+		720)
+			printf "0 */12 * * *\n"
+			;;
+		1440)
+			printf "0 0 * * *\n"
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
 neto_append_subscription_cron() {
-	local section="$1" enabled auto_update hour
+	local section="$1" enabled auto_update schedule interval cron_spec hour minute
 	config_get_bool enabled "$section" enabled 1
 	config_get_bool auto_update "$section" auto_update 0
 	[ "$enabled" -eq 1 ] && [ "$auto_update" -eq 1 ] || return 0
@@ -48,6 +105,16 @@ neto_append_subscription_cron() {
 			return 0
 			;;
 	esac
+	config_get schedule "$section" update_schedule "time"
+	if [ "$schedule" = "interval" ]; then
+		config_get interval "$section" update_interval_minutes ""
+		[ -n "$interval" ] || config_get interval "$section" update_interval "360"
+		interval="$(neto_interval_minutes "$interval" 2>/dev/null || true)"
+		cron_spec="$(neto_interval_cron_spec "$interval" 2>/dev/null || true)"
+		[ -n "$cron_spec" ] || cron_spec="$(neto_interval_cron_spec "360")"
+		printf "%s /usr/bin/netod subscriptions update %s >/dev/null 2>&1 && /etc/init.d/neto restart >/dev/null 2>&1\n" "$cron_spec" "$section" >>"$NETO_CRON_LINES"
+		return 0
+	fi
 	config_get hour "$section" update_hour "0"
 	case "$hour" in
 		""|*[!0-9]*)
@@ -55,11 +122,18 @@ neto_append_subscription_cron() {
 			;;
 	esac
 	[ "$hour" -ge 0 ] && [ "$hour" -le 23 ] || hour="0"
-	printf "0 %s * * * /usr/bin/netod subscriptions update %s >/dev/null 2>&1 && /etc/init.d/neto restart >/dev/null 2>&1\n" "$hour" "$section" >>"$NETO_CRON_LINES"
+	config_get minute "$section" update_minute "0"
+	case "$minute" in
+		""|*[!0-9]*)
+			minute="0"
+			;;
+	esac
+	[ "$minute" -ge 0 ] && [ "$minute" -le 59 ] || minute="0"
+	printf "%s %s * * * /usr/bin/netod subscriptions update %s >/dev/null 2>&1 && /etc/init.d/neto restart >/dev/null 2>&1\n" "$minute" "$hour" "$section" >>"$NETO_CRON_LINES"
 }
 
 neto_append_provider_cron() {
-	local section="$1" enabled auto_update hour minute
+	local section="$1" enabled auto_update schedule interval cron_spec hour minute
 	config_get_bool enabled "$section" enabled 1
 	config_get_bool auto_update "$section" auto_update 0
 	[ "$enabled" -eq 1 ] && [ "$auto_update" -eq 1 ] || return 0
@@ -68,6 +142,16 @@ neto_append_provider_cron() {
 			return 0
 			;;
 	esac
+	config_get schedule "$section" update_schedule "time"
+	if [ "$schedule" = "interval" ]; then
+		config_get interval "$section" update_interval_minutes ""
+		[ -n "$interval" ] || config_get interval "$section" update_interval "360"
+		interval="$(neto_interval_minutes "$interval" 2>/dev/null || true)"
+		cron_spec="$(neto_interval_cron_spec "$interval" 2>/dev/null || true)"
+		[ -n "$cron_spec" ] || cron_spec="$(neto_interval_cron_spec "360")"
+		printf "%s /usr/bin/netod providers update %s >/dev/null 2>&1 && /etc/init.d/neto restart >/dev/null 2>&1\n" "$cron_spec" "$section" >>"$NETO_CRON_LINES"
+		return 0
+	fi
 	config_get hour "$section" update_hour "0"
 	case "$hour" in
 		""|*[!0-9]*)

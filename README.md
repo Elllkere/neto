@@ -319,9 +319,20 @@ config provider 'json_ips'
 	option source 'script'
 	option script_path '/usr/share/neto/providers/json-ips.sh'
 	option auto_update '1'
+	option update_schedule 'time'
 	option update_hour '3'
 	option update_minute '17'
 ```
+
+Для автообновления по интервалу вместо фиксированного времени:
+
+```uci
+	option update_schedule 'interval'
+	option update_interval_minutes '360'
+```
+
+Поддерживаемые интервалы: `15`, `30`, `60`, `120`, `180`, `360`, `720`,
+`1440` минут.
 
 Скрипту передаются `NETO_PROVIDER_NAME`, `NETO_PROVIDER_TYPE`,
 `NETO_PROVIDER_CACHE`, `NETO_PROVIDER_OUTPUT` и другие `NETO_PROVIDER_*`

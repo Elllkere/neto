@@ -206,8 +206,12 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
 - IP provider updates save only valid IPv4 CIDR/address entries; IPv6 entries
   from mixed feeds such as Telegram are ignored.
 - `auto_update=1` creates neto-owned cron entries, similar to protocol
-  subscriptions. Providers support `update_hour` and `update_minute`; missing
+  subscriptions. Fixed-time scheduling uses `update_schedule=time`.
+  Providers support `update_hour` and `update_minute`; missing
   `update_minute` defaults to `5` for backward-compatible cron timing.
+  Providers and subscriptions may instead use `update_schedule=interval` with
+  `update_interval_minutes` set to `15`, `30`, `60`, `120`, `180`, `360`,
+  `720`, or `1440`.
 - `update_via=direct|proxy` follows the subscription update model and must not
   route router-self traffic through nftables.
 - Rules reference providers with `domain_provider` or `ip_provider`.
@@ -245,7 +249,8 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
 - Subscription nodes are ordinary editable outbounds in the main Outbounds
   table. A later update of the same subscription overwrites those nodes again.
 - `config subscription '<name>'` supports `enabled`, `label`, `url`,
-  `auto_update`, `update_hour`, `update_via`, and `update_outbound`.
+  `auto_update`, `update_schedule`, `update_hour`,
+  `update_interval_minutes`, `update_via`, and `update_outbound`.
 - Supported import URI schemes are `vless://`, `hysteria2://`/`hy2://`,
   `ss://`, and `trojan://`.
 - `netod import-uri -file <path>` imports one or more share links from a local

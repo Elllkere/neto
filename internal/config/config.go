@@ -25,6 +25,14 @@ const (
 	BuiltinBlockedOutbound = "blocked"
 )
 
+const (
+	UpdateScheduleTime              = "time"
+	UpdateScheduleInterval          = "interval"
+	DefaultUpdateIntervalMinutes    = 360
+	defaultProviderUpdateMinute     = 5
+	defaultSubscriptionUpdateMinute = 0
+)
+
 type Config struct {
 	Main          Main
 	Clients       []Client
@@ -106,22 +114,24 @@ type Rule struct {
 }
 
 type Provider struct {
-	Name           string
-	Label          string
-	Enabled        bool
-	Type           string
-	Source         string
-	URL            string
-	ScriptPath     string
-	LocalPath      string
-	AutoUpdate     bool
-	UpdateHour     int
-	UpdateMinute   int
-	UpdateVia      string
-	UpdateOutbound string
-	LastUpdate     string
-	ItemCount      int
-	Files          []string
+	Name                  string
+	Label                 string
+	Enabled               bool
+	Type                  string
+	Source                string
+	URL                   string
+	ScriptPath            string
+	LocalPath             string
+	AutoUpdate            bool
+	UpdateSchedule        string
+	UpdateHour            int
+	UpdateMinute          int
+	UpdateIntervalMinutes int
+	UpdateVia             string
+	UpdateOutbound        string
+	LastUpdate            string
+	ItemCount             int
+	Files                 []string
 }
 
 func (p Provider) CachePath() string {
@@ -270,17 +280,19 @@ type Outbound struct {
 }
 
 type Subscription struct {
-	Name           string
-	Label          string
-	Enabled        bool
-	URL            string
-	AutoUpdate     bool
-	UpdateHour     int
-	UpdateInterval string
-	UpdateVia      string
-	UpdateOutbound string
-	LastUpdate     string
-	NodeCount      int
+	Name                  string
+	Label                 string
+	Enabled               bool
+	URL                   string
+	AutoUpdate            bool
+	UpdateSchedule        string
+	UpdateHour            int
+	UpdateMinute          int
+	UpdateIntervalMinutes int
+	UpdateVia             string
+	UpdateOutbound        string
+	LastUpdate            string
+	NodeCount             int
 }
 
 type DNSUpstream struct {
@@ -762,11 +774,22 @@ func (c Config) Validate() error {
 		default:
 			return fmt.Errorf("provider %q has unsupported update_via %q", name, p.UpdateVia)
 		}
-		if p.UpdateHour < 0 || p.UpdateHour > 23 {
-			return fmt.Errorf("provider %q has invalid update_hour %d", name, p.UpdateHour)
-		}
-		if p.UpdateMinute < 0 || p.UpdateMinute > 59 {
-			return fmt.Errorf("provider %q has invalid update_minute %d", name, p.UpdateMinute)
+		if p.AutoUpdate {
+			switch p.UpdateSchedule {
+			case UpdateScheduleTime:
+				if p.UpdateHour < 0 || p.UpdateHour > 23 {
+					return fmt.Errorf("provider %q has invalid update_hour %d", name, p.UpdateHour)
+				}
+				if p.UpdateMinute < 0 || p.UpdateMinute > 59 {
+					return fmt.Errorf("provider %q has invalid update_minute %d", name, p.UpdateMinute)
+				}
+			case UpdateScheduleInterval:
+				if !validUpdateIntervalMinutes(p.UpdateIntervalMinutes) {
+					return fmt.Errorf("provider %q has invalid update_interval_minutes %d", name, p.UpdateIntervalMinutes)
+				}
+			default:
+				return fmt.Errorf("provider %q has unsupported update_schedule %q", name, p.UpdateSchedule)
+			}
 		}
 		if p.UpdateVia == "proxy" && strings.TrimSpace(p.UpdateOutbound) != "" {
 			if _, ok := seenOutboundTags[p.UpdateOutbound]; !ok {
@@ -797,8 +820,22 @@ func (c Config) Validate() error {
 		default:
 			return fmt.Errorf("subscription %q has unsupported update_via %q", name, sub.UpdateVia)
 		}
-		if sub.UpdateHour < 0 || sub.UpdateHour > 23 {
-			return fmt.Errorf("subscription %q has invalid update_hour %d", name, sub.UpdateHour)
+		if sub.AutoUpdate {
+			switch sub.UpdateSchedule {
+			case UpdateScheduleTime:
+				if sub.UpdateHour < 0 || sub.UpdateHour > 23 {
+					return fmt.Errorf("subscription %q has invalid update_hour %d", name, sub.UpdateHour)
+				}
+				if sub.UpdateMinute < 0 || sub.UpdateMinute > 59 {
+					return fmt.Errorf("subscription %q has invalid update_minute %d", name, sub.UpdateMinute)
+				}
+			case UpdateScheduleInterval:
+				if !validUpdateIntervalMinutes(sub.UpdateIntervalMinutes) {
+					return fmt.Errorf("subscription %q has invalid update_interval_minutes %d", name, sub.UpdateIntervalMinutes)
+				}
+			default:
+				return fmt.Errorf("subscription %q has unsupported update_schedule %q", name, sub.UpdateSchedule)
+			}
 		}
 		if sub.UpdateVia == "proxy" && strings.TrimSpace(sub.UpdateOutbound) != "" {
 			if _, ok := seenOutboundTags[sub.UpdateOutbound]; !ok {
@@ -1162,23 +1199,71 @@ func parseRule(s section, order int) (Rule, []string) {
 	return r, warnings
 }
 
+func parseUpdateSchedule(s section) string {
+	value := strings.ToLower(strings.TrimSpace(s.options["update_schedule"]))
+	if value != "" {
+		return value
+	}
+	if strings.TrimSpace(s.options["update_interval_minutes"]) != "" {
+		return UpdateScheduleInterval
+	}
+	return UpdateScheduleTime
+}
+
+func parseUpdateIntervalMinutes(value string, fallback int) int {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return fallback
+	}
+
+	multiplier := 1
+	switch {
+	case strings.HasSuffix(value, "m"):
+		value = strings.TrimSuffix(value, "m")
+	case strings.HasSuffix(value, "h"):
+		value = strings.TrimSuffix(value, "h")
+		multiplier = 60
+	case strings.HasSuffix(value, "d"):
+		value = strings.TrimSuffix(value, "d")
+		multiplier = 1440
+	}
+
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0
+	}
+	return n * multiplier
+}
+
+func validUpdateIntervalMinutes(minutes int) bool {
+	switch minutes {
+	case 15, 30, 60, 120, 180, 360, 720, 1440:
+		return true
+	default:
+		return false
+	}
+}
+
 func parseProvider(s section) Provider {
 	name := strings.TrimSpace(firstNonEmpty(s.name, s.options["name"], s.options["label"]))
+	updateSchedule := parseUpdateSchedule(s)
 	p := Provider{
-		Name:           safeProviderName(name),
-		Label:          strings.TrimSpace(firstNonEmpty(s.options["label"], s.options["name"], name)),
-		Enabled:        true,
-		Type:           strings.TrimSpace(firstNonEmpty(s.options["type"], "ip")),
-		Source:         strings.TrimSpace(firstNonEmpty(s.options["source"], "url")),
-		URL:            strings.TrimSpace(s.options["url"]),
-		ScriptPath:     strings.TrimSpace(s.options["script_path"]),
-		LocalPath:      strings.TrimSpace(s.options["local_path"]),
-		AutoUpdate:     false,
-		UpdateMinute:   5,
-		UpdateVia:      strings.TrimSpace(firstNonEmpty(s.options["update_via"], "direct")),
-		UpdateOutbound: strings.TrimSpace(s.options["update_outbound"]),
-		LastUpdate:     strings.TrimSpace(s.options["last_update"]),
-		Files:          cleanList(appendList(s.lists["file"], splitListOption(s.options["file"]))),
+		Name:                  safeProviderName(name),
+		Label:                 strings.TrimSpace(firstNonEmpty(s.options["label"], s.options["name"], name)),
+		Enabled:               true,
+		Type:                  strings.TrimSpace(firstNonEmpty(s.options["type"], "ip")),
+		Source:                strings.TrimSpace(firstNonEmpty(s.options["source"], "url")),
+		URL:                   strings.TrimSpace(s.options["url"]),
+		ScriptPath:            strings.TrimSpace(s.options["script_path"]),
+		LocalPath:             strings.TrimSpace(s.options["local_path"]),
+		AutoUpdate:            false,
+		UpdateSchedule:        updateSchedule,
+		UpdateMinute:          defaultProviderUpdateMinute,
+		UpdateIntervalMinutes: parseUpdateIntervalMinutes(firstNonEmpty(s.options["update_interval_minutes"], s.options["update_interval"]), DefaultUpdateIntervalMinutes),
+		UpdateVia:             strings.TrimSpace(firstNonEmpty(s.options["update_via"], "direct")),
+		UpdateOutbound:        strings.TrimSpace(s.options["update_outbound"]),
+		LastUpdate:            strings.TrimSpace(s.options["last_update"]),
+		Files:                 cleanList(appendList(s.lists["file"], splitListOption(s.options["file"]))),
 	}
 	if v, ok := s.options["enabled"]; ok {
 		p.Enabled = parseBool(v, p.Enabled)
@@ -1186,12 +1271,16 @@ func parseProvider(s section) Provider {
 	if v, ok := s.options["auto_update"]; ok {
 		p.AutoUpdate = parseBool(v, p.AutoUpdate)
 	}
-	if v := firstNonEmpty(s.options["update_hour"], s.options["update_interval"], "0"); v != "" {
+	hourValue := s.options["update_hour"]
+	if hourValue == "" && updateSchedule == UpdateScheduleTime {
+		hourValue = s.options["update_interval"]
+	}
+	if v := firstNonEmpty(hourValue, "0"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(v), "h")); err == nil {
 			p.UpdateHour = n
 		}
 	}
-	if v := firstNonEmpty(s.options["update_minute"], "5"); v != "" {
+	if v := firstNonEmpty(s.options["update_minute"], strconv.Itoa(defaultProviderUpdateMinute)); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 			p.UpdateMinute = n
 		}
@@ -1365,16 +1454,19 @@ func parseOutbound(s section) (Outbound, []string) {
 }
 
 func parseSubscription(s section) Subscription {
+	updateSchedule := parseUpdateSchedule(s)
 	sub := Subscription{
-		Name:           strings.TrimSpace(s.name),
-		Label:          strings.TrimSpace(firstNonEmpty(s.options["label"], s.options["name"], s.name)),
-		Enabled:        true,
-		URL:            strings.TrimSpace(s.options["url"]),
-		AutoUpdate:     false,
-		UpdateInterval: strings.TrimSpace(s.options["update_interval"]),
-		UpdateVia:      strings.TrimSpace(firstNonEmpty(s.options["update_via"], "direct")),
-		UpdateOutbound: strings.TrimSpace(s.options["update_outbound"]),
-		LastUpdate:     strings.TrimSpace(s.options["last_update"]),
+		Name:                  strings.TrimSpace(s.name),
+		Label:                 strings.TrimSpace(firstNonEmpty(s.options["label"], s.options["name"], s.name)),
+		Enabled:               true,
+		URL:                   strings.TrimSpace(s.options["url"]),
+		AutoUpdate:            false,
+		UpdateSchedule:        updateSchedule,
+		UpdateMinute:          defaultSubscriptionUpdateMinute,
+		UpdateIntervalMinutes: parseUpdateIntervalMinutes(firstNonEmpty(s.options["update_interval_minutes"], s.options["update_interval"]), DefaultUpdateIntervalMinutes),
+		UpdateVia:             strings.TrimSpace(firstNonEmpty(s.options["update_via"], "direct")),
+		UpdateOutbound:        strings.TrimSpace(s.options["update_outbound"]),
+		LastUpdate:            strings.TrimSpace(s.options["last_update"]),
 	}
 	if v, ok := s.options["enabled"]; ok {
 		sub.Enabled = parseBool(v, sub.Enabled)
@@ -1382,9 +1474,18 @@ func parseSubscription(s section) Subscription {
 	if v, ok := s.options["auto_update"]; ok {
 		sub.AutoUpdate = parseBool(v, sub.AutoUpdate)
 	}
-	if v := firstNonEmpty(s.options["update_hour"], s.options["update_interval"], "0"); v != "" {
+	hourValue := s.options["update_hour"]
+	if hourValue == "" && updateSchedule == UpdateScheduleTime {
+		hourValue = s.options["update_interval"]
+	}
+	if v := firstNonEmpty(hourValue, "0"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(v), "h")); err == nil {
 			sub.UpdateHour = n
+		}
+	}
+	if v := firstNonEmpty(s.options["update_minute"], strconv.Itoa(defaultSubscriptionUpdateMinute)); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			sub.UpdateMinute = n
 		}
 	}
 	if v := s.options["node_count"]; v != "" {

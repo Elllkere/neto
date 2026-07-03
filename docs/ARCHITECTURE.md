@@ -337,8 +337,12 @@ result to `NETO_PROVIDER_OUTPUT`, then `netod` normalizes and writes the
 standard provider cache. Script providers keep `type=domain|ip`, because `type`
 describes the output data consumed by rules.
 
-Provider auto-update cron supports `update_hour` and `update_minute`. Missing
+Auto-update cron defaults to fixed time scheduling with `update_schedule=time`.
+Provider fixed-time cron supports `update_hour` and `update_minute`. Missing
 provider `update_minute` defaults to `5`, matching the old fixed minute.
+Providers and subscriptions may instead use `update_schedule=interval` with
+`update_interval_minutes` set to `15`, `30`, `60`, `120`, `180`, `360`, `720`,
+or `1440`.
 
 Installer seeds built-in IP providers if URL or script path is not already
 present. Seeded built-ins are convenience data sources only and must be created

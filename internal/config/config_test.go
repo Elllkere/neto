@@ -651,8 +651,29 @@ config rule
 		t.Fatalf("unexpected providers: %+v", cfg.Providers)
 	}
 	p := cfg.Providers[0]
-	if p.Name != "youtube" || p.Label != "YouTube" || p.Type != "domain" || p.Source != "url" || p.URL == "" || !p.AutoUpdate || p.UpdateHour != 3 || p.UpdateMinute != 17 || p.UpdateVia != "proxy" || p.UpdateOutbound != "updater" || p.ItemCount != 2 {
+	if p.Name != "youtube" || p.Label != "YouTube" || p.Type != "domain" || p.Source != "url" || p.URL == "" || !p.AutoUpdate || p.UpdateSchedule != UpdateScheduleTime || p.UpdateHour != 3 || p.UpdateMinute != 17 || p.UpdateIntervalMinutes != DefaultUpdateIntervalMinutes || p.UpdateVia != "proxy" || p.UpdateOutbound != "updater" || p.ItemCount != 2 {
 		t.Fatalf("unexpected provider: %+v", p)
+	}
+}
+
+func TestParseProviderIntervalSchedule(t *testing.T) {
+	cfg, err := Parse(`
+config provider 'telegram'
+	option type 'ip'
+	option url 'https://example.com/telegram.txt'
+	option auto_update '1'
+	option update_schedule 'interval'
+	option update_interval_minutes '720'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 {
+		t.Fatalf("unexpected providers: %+v", cfg.Providers)
+	}
+	p := cfg.Providers[0]
+	if p.UpdateSchedule != UpdateScheduleInterval || p.UpdateIntervalMinutes != 720 {
+		t.Fatalf("unexpected provider interval schedule: %+v", p)
 	}
 }
 
@@ -741,6 +762,29 @@ config provider 'p'
 	option update_minute '60'
 `,
 			want: "invalid update_minute",
+		},
+		{
+			name: "invalid_update_schedule",
+			uci: `
+config provider 'p'
+	option type 'ip'
+	option url 'https://example.com/list.txt'
+	option auto_update '1'
+	option update_schedule 'random'
+`,
+			want: "unsupported update_schedule",
+		},
+		{
+			name: "invalid_update_interval_minutes",
+			uci: `
+config provider 'p'
+	option type 'ip'
+	option url 'https://example.com/list.txt'
+	option auto_update '1'
+	option update_schedule 'interval'
+	option update_interval_minutes '90'
+`,
+			want: "invalid update_interval_minutes",
 		},
 		{
 			name: "unknown_ref",
@@ -1213,8 +1257,29 @@ config subscription 'my_sub'
 		t.Fatalf("unexpected subscriptions: %+v", cfg.Subscriptions)
 	}
 	sub := cfg.Subscriptions[0]
-	if sub.Name != "my_sub" || sub.Label != "My subscription" || !sub.AutoUpdate || sub.UpdateHour != 12 || sub.UpdateVia != "proxy" || sub.UpdateOutbound != "updater" || sub.NodeCount != 2 {
+	if sub.Name != "my_sub" || sub.Label != "My subscription" || !sub.AutoUpdate || sub.UpdateSchedule != UpdateScheduleTime || sub.UpdateHour != 12 || sub.UpdateMinute != 0 || sub.UpdateIntervalMinutes != DefaultUpdateIntervalMinutes || sub.UpdateVia != "proxy" || sub.UpdateOutbound != "updater" || sub.NodeCount != 2 {
 		t.Fatalf("unexpected subscription: %+v", sub)
+	}
+}
+
+func TestParseSubscriptionIntervalSchedule(t *testing.T) {
+	cfg, err := Parse(`
+config subscription 'my_sub'
+	option label 'My subscription'
+	option url 'https://example.com/sub'
+	option auto_update '1'
+	option update_schedule 'interval'
+	option update_interval_minutes '6h'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Subscriptions) != 1 {
+		t.Fatalf("unexpected subscriptions: %+v", cfg.Subscriptions)
+	}
+	sub := cfg.Subscriptions[0]
+	if sub.UpdateSchedule != UpdateScheduleInterval || sub.UpdateIntervalMinutes != 360 {
+		t.Fatalf("unexpected subscription interval schedule: %+v", sub)
 	}
 }
 
@@ -1259,6 +1324,17 @@ config subscription 'sub'
 	option update_hour '24'
 `,
 			want: "invalid update_hour",
+		},
+		{
+			name: "invalid_update_interval_minutes",
+			uci: `
+config subscription 'sub'
+	option url 'https://example.com/sub'
+	option auto_update '1'
+	option update_schedule 'interval'
+	option update_interval_minutes '90'
+`,
+			want: "invalid update_interval_minutes",
 		},
 	}
 	for _, tc := range tests {

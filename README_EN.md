@@ -27,6 +27,11 @@ https://github.com/elllkere/neto/releases/latest/download/
 
 Override the archive base URL with `NETO_BASE_URL` when using a mirror.
 
+Auto-update schedules default to fixed-time mode. Providers and subscriptions
+can use interval mode with `option update_schedule 'interval'` and
+`option update_interval_minutes '360'`. Supported intervals are `15`, `30`,
+`60`, `120`, `180`, `360`, `720`, and `1440` minutes.
+
 ## Uninstall
 
 Normal uninstall keeps `/etc/config/neto` and `/etc/neto` for later reinstall:

@@ -25,11 +25,17 @@ function normalizeProviders() {
 		if (uci.get('neto', sid, 'auto_update') == null)
 			uci.set('neto', sid, 'auto_update', '0');
 
+		if (uci.get('neto', sid, 'update_schedule') == null)
+			uci.set('neto', sid, 'update_schedule', 'time');
+
 		if (uci.get('neto', sid, 'update_hour') == null)
 			uci.set('neto', sid, 'update_hour', '0');
 
 		if (uci.get('neto', sid, 'update_minute') == null)
 			uci.set('neto', sid, 'update_minute', '5');
+
+		if (uci.get('neto', sid, 'update_interval_minutes') == null)
+			uci.set('neto', sid, 'update_interval_minutes', '360');
 
 		if (uci.get('neto', sid, 'update_via') == null)
 			uci.set('neto', sid, 'update_via', 'direct');
@@ -123,6 +129,17 @@ function addProxyOutboundChoices(option) {
 
 		option.value(tag, label || tag);
 	});
+}
+
+function addUpdateIntervalChoices(option) {
+	option.value('15', _('Every 15 minutes'));
+	option.value('30', _('Every 30 minutes'));
+	option.value('60', _('Every hour'));
+	option.value('120', _('Every 2 hours'));
+	option.value('180', _('Every 3 hours'));
+	option.value('360', _('Every 6 hours'));
+	option.value('720', _('Every 12 hours'));
+	option.value('1440', _('Every day'));
 }
 
 return view.extend({
@@ -262,11 +279,19 @@ return view.extend({
 		o.rmempty = false;
 		o.editable = true;
 
+		o = s.option(form.ListValue, 'update_schedule', _('Schedule'));
+		o.value('time', _('Fixed time'));
+		o.value('interval', _('Interval'));
+		o.default = 'time';
+		o.depends('auto_update', '1');
+		o.rmempty = false;
+		o.modalonly = true;
+
 		o = s.option(form.ListValue, 'update_hour', _('Update time'));
 		for (var hour = 0; hour < 24; hour++)
 			o.value(String(hour), _('%d:00').format(hour));
 		o.default = '0';
-		o.depends('auto_update', '1');
+		o.depends({ 'auto_update': '1', 'update_schedule': 'time' });
 		o.rmempty = false;
 		o.modalonly = true;
 
@@ -274,7 +299,14 @@ return view.extend({
 		for (var minute = 0; minute < 60; minute++)
 			o.value(String(minute), String(minute));
 		o.default = '5';
-		o.depends('auto_update', '1');
+		o.depends({ 'auto_update': '1', 'update_schedule': 'time' });
+		o.rmempty = false;
+		o.modalonly = true;
+
+		o = s.option(form.ListValue, 'update_interval_minutes', _('Update interval'));
+		addUpdateIntervalChoices(o);
+		o.default = '360';
+		o.depends({ 'auto_update': '1', 'update_schedule': 'interval' });
 		o.rmempty = false;
 		o.modalonly = true;
 
