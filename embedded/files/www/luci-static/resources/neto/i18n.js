@@ -145,6 +145,8 @@ var ru = {
 	'Script provider notes': 'Подсказки Script provider',
 	'Use a plain text URL with one domain, IPv4 address, or IPv4 CIDR per line. Use Script for JSON feeds or custom filtering.': 'Используйте plain text URL с одним доменом, IPv4-адресом или IPv4 CIDR на строку. Для JSON feeds или своей фильтрации используйте Script.',
 	'Use an absolute executable path. The script must print the final list to stdout or write it to NETO_PROVIDER_OUTPUT; one item per line. In proxy mode, neto exports NETO_PROVIDER_PROXY and HTTP_PROXY/HTTPS_PROXY/ALL_PROXY to the script.': 'Укажите абсолютный исполняемый путь. Скрипт должен вывести финальный список в stdout или записать его в NETO_PROVIDER_OUTPUT; один элемент на строку. В режиме proxy neto передаёт скрипту NETO_PROVIDER_PROXY и HTTP_PROXY/HTTPS_PROXY/ALL_PROXY.',
+	'Add community lists': 'Добавить community списки',
+	'Community lists already exist': 'Community списки уже добавлены',
 	'Rule "%s" references missing or disabled provider "%s". Remove the provider from the rule before deleting or disabling it.': 'Правило "%s" ссылается на отсутствующего или выключенного провайдера "%s". Уберите провайдера из правила перед удалением или выключением.',
 	'Schedule': 'Расписание',
 	'Fixed time': 'По времени',

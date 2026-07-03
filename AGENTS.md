@@ -216,6 +216,9 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
   route router-self traffic through nftables.
 - Rules reference providers with `domain_provider` or `ip_provider`.
 - Creating or updating a provider must not create rules.
+- LuCI Providers page may offer convenience buttons for community domain
+  provider sources. These must only create provider sections, with
+  `auto_update=0`, and must not create rules.
 
 ## Current Outbound Model
 

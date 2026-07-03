@@ -348,6 +348,10 @@ Installer seeds built-in IP providers if URL or script path is not already
 present. Seeded built-ins are convenience data sources only and must be created
 with `auto_update=0`; users opt into scheduled updates themselves.
 
+LuCI Providers can add community domain provider sources from itdoginfo
+allow-domains. This creates only reusable `provider` sections with
+`auto_update=0`; users still decide which rules reference them.
+
 - Cloudflare IPv4: `https://www.cloudflare.com/ips-v4/`
 - Telegram IPv4: `https://core.telegram.org/resources/cidr.txt`
 - Akamai IPv4: `/usr/share/neto/providers/akamai-ipv4.sh`

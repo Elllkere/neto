@@ -49,6 +49,8 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"function(ev, section_id)",
 		"NETO_PROVIDER_PROXY",
 		"fs.exec('/usr/bin/netod', [ 'providers', 'update', section_id ])",
+		"handleAddCommunityProviders: function()",
+		"Add community lists",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("providers.js missing %q:\n%s", want, s)
@@ -67,6 +69,44 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("providers.js must not contain policy field %q:\n%s", forbidden, s)
+		}
+	}
+}
+
+func TestProvidersLuCIAddsCommunityDomainProviders(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/providers.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"var communityDomainProviders = [",
+		"community_telegram_domains",
+		"community_tiktok_domains",
+		"community_twitter_domains",
+		"community_youtube_domains",
+		"community_meta_domains",
+		"community_discord_domains",
+		"community_anime_domains",
+		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/telegram.lst",
+		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/tiktok.lst",
+		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/twitter.lst",
+		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/youtube.lst",
+		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/meta.lst",
+		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/discord.lst",
+		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Categories/anime.lst",
+		"providerURLExists(def.url)",
+		"uniqueProviderSection(def.section)",
+		"uci.set('neto', section, 'provider')",
+		"uci.set('neto', section, 'type', 'domain')",
+		"uci.set('neto', section, 'source', 'url')",
+		"uci.set('neto', section, 'auto_update', '0')",
+		"return self.handleAddCommunityProviders().catch(function(err) {",
+		"fs.exec('/etc/init.d/neto', [ 'restart' ])",
+		"Community lists already exist",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("providers.js missing community provider preset %q:\n%s", want, s)
 		}
 	}
 }

@@ -346,6 +346,11 @@ netod providers update
 netod providers update telegram_ipv4
 ```
 
+LuCI Providers page has an `Add community lists` action that adds reusable
+domain provider sources for Telegram, TikTok, Twitter, YouTube, Meta, Discord,
+and Anime from `itdoginfo/allow-domains`. It only creates providers, with
+`auto_update '0'`; rules are still configured separately.
+
 Provider caches are written to `/etc/neto/provider-cache/` so rules can compile
 after an OpenWrt reboot even when `/var` is linked to volatile `/tmp`.
 Legacy `local_path` values under `/var/lib/neto/providers/` are treated as the

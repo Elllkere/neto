@@ -32,6 +32,11 @@ can use interval mode with `option update_schedule 'interval'` and
 `option update_interval_minutes '360'`. Supported intervals are `15`, `30`,
 `60`, `120`, `180`, `360`, `720`, and `1440` minutes.
 
+The LuCI Providers page can add community domain provider sources for Telegram,
+TikTok, Twitter, YouTube, Meta, Discord, and Anime from
+`itdoginfo/allow-domains`. This only creates provider sections with
+`auto_update '0'`; rules are configured separately.
+
 ## Uninstall
 
 Normal uninstall keeps `/etc/config/neto` and `/etc/neto` for later reinstall:
