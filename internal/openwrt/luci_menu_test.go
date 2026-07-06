@@ -80,3 +80,43 @@ func TestLuCIACLAllowsStatusAndVersionCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestLuCIHidesRulesTabOutsideCustomMode(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/neto/ui.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"routing_mode",
+		"rulesTabVisible()",
+		"document.querySelectorAll('a[href]')",
+		"/admin/services/neto/rules",
+		"/neto/rules",
+		"hideElement(tabContainer(links[i]), hidden)",
+		"syncRulesTab: syncRulesTab",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("neto/ui.js missing rules tab visibility behavior %q:\n%s", want, s)
+		}
+	}
+
+	for _, path := range []string{
+		"advanced.js",
+		"clients.js",
+		"debug.js",
+		"general.js",
+		"logs.js",
+		"outbounds.js",
+		"providers.js",
+		"rules.js",
+	} {
+		view, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/" + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(view), "'require neto.ui as netoUI'") || !strings.Contains(string(view), "netoUI.syncRulesTab()") {
+			t.Fatalf("%s must sync Rules tab visibility:\n%s", path, string(view))
+		}
+	}
+}

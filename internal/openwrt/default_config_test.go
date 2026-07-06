@@ -71,7 +71,8 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"provider_url_exists \"$url\"",
 		"provider_script_exists \"$script_path\"",
 		"ensure_builtin_script_provider \"akamai_ipv4\" \"Akamai IPv4\" \"/usr/share/neto/providers/akamai-ipv4.sh\" \"15\"",
-		"ensure_builtin_script_provider \"aws_ipv4\" \"AWS IPv4\" \"/usr/share/neto/providers/aws-ipv4.sh\" \"20\"",
+		"ensure_builtin_script_provider \"aws_ipv4\" \"AWS CDN IPv4\" \"/usr/share/neto/providers/aws-ipv4.sh\" \"20\"",
+		"ensure_builtin_script_provider \"aws_full_ipv4\" \"AWS Full IPv4 (may affect game ping)\" \"/usr/share/neto/providers/aws-full-ipv4.sh\" \"25\"",
 		"uci set \"neto.$section.source=script\"",
 		"uci set \"neto.$section.auto_update=0\"",
 		"chmod 0755 /usr/share/neto/run-sing-box-log.sh",
@@ -85,6 +86,9 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("installer missing %q:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "neto.$section.enabled") {
+		t.Fatalf("installer must not write provider enabled fields:\n%s", s)
 	}
 }
 
@@ -137,6 +141,7 @@ func TestEmbeddedProviderScriptsAreInstalledAssets(t *testing.T) {
 	for _, path := range []string{
 		"../../embedded/files/usr/share/neto/providers/akamai-ipv4.sh",
 		"../../embedded/files/usr/share/neto/providers/aws-ipv4.sh",
+		"../../embedded/files/usr/share/neto/providers/aws-full-ipv4.sh",
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -162,6 +167,40 @@ func TestEmbeddedProviderScriptsAreInstalledAssets(t *testing.T) {
 		}
 		if strings.Contains(s, "select(test(") {
 			t.Fatalf("%s must not use jq regex functions; OpenWrt jq may be built without ONIGURUMA:\n%s", path, s)
+		}
+	}
+}
+
+func TestEmbeddedAWSProviderScriptsAreSplitByService(t *testing.T) {
+	cdnData, err := os.ReadFile("../../embedded/files/usr/share/neto/providers/aws-ipv4.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullData, err := os.ReadFile("../../embedded/files/usr/share/neto/providers/aws-full-ipv4.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cdn := string(cdnData)
+	full := string(fullData)
+
+	for _, want := range []string{"CLOUDFRONT", "S3", "AWS CDN IPv4"} {
+		if !strings.Contains(cdn, want) {
+			t.Fatalf("AWS CDN provider missing %q:\n%s", want, cdn)
+		}
+	}
+	for _, forbidden := range []string{"AMAZON", "EC2", "GLOBALACCELERATOR", "game ping"} {
+		if strings.Contains(cdn, forbidden) {
+			t.Fatalf("AWS CDN provider must not include broad service %q:\n%s", forbidden, cdn)
+		}
+	}
+	for _, want := range []string{"AMAZON", "EC2", "GLOBALACCELERATOR", "AWS Full IPv4", "may affect ping to games hosted on Amazon/AWS servers"} {
+		if !strings.Contains(full, want) {
+			t.Fatalf("AWS Full provider missing %q:\n%s", want, full)
+		}
+	}
+	for _, forbidden := range []string{"CLOUDFRONT", "S3"} {
+		if strings.Contains(full, forbidden) {
+			t.Fatalf("AWS Full provider must not include CDN service %q:\n%s", forbidden, full)
 		}
 	}
 }

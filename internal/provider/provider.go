@@ -33,7 +33,7 @@ func LoadRuleCIDRs(cfg config.Config) (map[int][]*net.IPNet, error) {
 		}
 		for _, providerName := range append(rule.IPProviders, rule.Providers...) {
 			provider, ok := cfg.ProviderByName(providerName)
-			if !ok || !provider.Enabled || provider.Type != "ip" {
+			if !ok || provider.Type != "ip" {
 				continue
 			}
 			cachePath := provider.CachePath()

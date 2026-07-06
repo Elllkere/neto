@@ -16,22 +16,79 @@ dns_listen="$(uci -q get neto.main.dns_listen || echo '127.0.0.1:5353')"
 dns_host="${dns_listen%:*}"
 dns_port="${dns_listen##*:}"
 dns_server="$dns_host#$dns_port"
+state_dir="/etc/neto/dnsmasq-state"
+legacy_state_dir="/var/lib/neto"
+server_state="$state_dir/dnsmasq-server.prev"
+legacy_server_state="$legacy_state_dir/dnsmasq-server.prev"
+noresolv_state="$state_dir/dnsmasq-noresolv.prev"
+legacy_noresolv_state="$legacy_state_dir/dnsmasq-noresolv.prev"
+addsubnet_state="$state_dir/dnsmasq-addsubnet.prev"
+legacy_addsubnet_state="$legacy_state_dir/dnsmasq-addsubnet.prev"
+
+read_state() {
+	if [ -f "$1" ]; then
+		cat "$1"
+		return 0
+	fi
+	if [ -f "$2" ]; then
+		cat "$2"
+		return 0
+	fi
+	return 1
+}
+
+is_neto_dnsmasq_server() {
+	value="$1"
+	current="$2"
+	saved="$3"
+
+	[ -n "$current" ] && [ "$value" = "$current" ] && return 0
+	[ -n "$saved" ] && [ "$value" = "$saved" ] && return 0
+	[ "$value" = "127.0.0.1#5353" ] && return 0
+	return 1
+}
+
+has_non_neto_dnsmasq_server() {
+	current="$1"
+	saved="$2"
+	servers="$(uci -q get dhcp.@dnsmasq[0].server || true)"
+	for value in $servers; do
+		if ! is_neto_dnsmasq_server "$value" "$current" "$saved"; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+saved_server="$(read_state "$server_state" "$legacy_server_state" 2>/dev/null || true)"
 uci -q del_list dhcp.@dnsmasq[0].server="$dns_server" || true
-if [ -f /var/lib/neto/dnsmasq-noresolv.prev ]; then
-	old_noresolv="$(cat /var/lib/neto/dnsmasq-noresolv.prev)"
+if [ -n "$saved_server" ] && [ "$saved_server" != "$dns_server" ]; then
+	uci -q del_list dhcp.@dnsmasq[0].server="$saved_server" || true
+fi
+if [ "$dns_server" != "127.0.0.1#5353" ] && [ "$saved_server" != "127.0.0.1#5353" ]; then
+	uci -q del_list dhcp.@dnsmasq[0].server="127.0.0.1#5353" || true
+fi
+if old_noresolv="$(read_state "$noresolv_state" "$legacy_noresolv_state" 2>/dev/null)"; then
 	if [ "$old_noresolv" = "__missing__" ]; then
 		uci -q delete dhcp.@dnsmasq[0].noresolv || true
 	else
 		uci set dhcp.@dnsmasq[0].noresolv="$old_noresolv"
 	fi
 fi
-if [ -f /var/lib/neto/dnsmasq-addsubnet.prev ]; then
-	old_addsubnet="$(cat /var/lib/neto/dnsmasq-addsubnet.prev)"
+if old_addsubnet="$(read_state "$addsubnet_state" "$legacy_addsubnet_state" 2>/dev/null)"; then
 	if [ "$old_addsubnet" = "__missing__" ]; then
 		uci -q delete dhcp.@dnsmasq[0].addsubnet || true
 	else
 		uci set dhcp.@dnsmasq[0].addsubnet="$old_addsubnet"
 	fi
+fi
+current_noresolv="$(uci -q get dhcp.@dnsmasq[0].noresolv || true)"
+if [ "$current_noresolv" = "1" ] && ! has_non_neto_dnsmasq_server "$dns_server" "$saved_server"; then
+	uci -q delete dhcp.@dnsmasq[0].noresolv || true
+fi
+current_addsubnet="$(uci -q get dhcp.@dnsmasq[0].addsubnet || true)"
+if [ "$current_addsubnet" = "32" ] && ! has_non_neto_dnsmasq_server "$dns_server" "$saved_server"; then
+	uci -q delete dhcp.@dnsmasq[0].addsubnet || true
 fi
 uci commit dhcp || true
 
@@ -44,6 +101,7 @@ rm -f /usr/share/rpcd/acl.d/luci-app-neto.json
 rm -rf /www/luci-static/resources/view/neto
 rm -rf /tmp/neto
 rm -rf /var/lib/neto
+rm -rf /etc/neto/dnsmasq-state
 rm -f /tmp/dnsmasq.d/neto.conf /etc/dnsmasq.d/neto.conf
 
 if [ "$PURGE" -eq 1 ]; then

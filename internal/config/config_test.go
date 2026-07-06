@@ -714,6 +714,26 @@ config rule
 	}
 }
 
+func TestParseProviderEnabledOptionIsIgnored(t *testing.T) {
+	cfg, err := Parse(`
+config provider 'domains'
+	option enabled '0'
+	option type 'domain'
+	option url 'https://example.com/domains.txt'
+
+config rule
+	option name 'domains'
+	option action 'direct'
+	list domain_provider 'domains'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Providers) != 1 || !cfg.Providers[0].Enabled {
+		t.Fatalf("provider enabled option should be ignored: %+v", cfg.Providers)
+	}
+}
+
 func TestParseProviderIntervalSchedule(t *testing.T) {
 	cfg, err := Parse(`
 config provider 'telegram'

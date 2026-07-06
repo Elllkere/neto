@@ -5,8 +5,29 @@
 'require uci';
 'require view';
 'require neto.i18n as netoI18n';
+'require neto.ui as netoUI';
 
 var _ = netoI18n.translate;
+var ruleListOptions = [
+	'domain_equals',
+	'domain_contains',
+	'domain_starts_with',
+	'domain_ends_with',
+	'exclude_domain_equals',
+	'exclude_domain_contains',
+	'exclude_domain_starts_with',
+	'exclude_domain_ends_with',
+	'domain_provider',
+	'domain_file',
+	'ip_cidr',
+	'ip_provider',
+	'ip_file',
+	'file',
+	'provider',
+	'proto',
+	'src_port',
+	'dst_port'
+];
 
 function rewriteRuleState() {
 	var n = 0;
@@ -19,6 +40,9 @@ function rewriteRuleState() {
 		var outbound = uci.get('neto', sid, 'outbound');
 		var domainInput = String(uci.get('neto', sid, 'domain_input') || '').trim();
 		var ipInput = String(uci.get('neto', sid, 'ip_input') || '').trim();
+		var protoValues = optionValues(sid, 'proto');
+		var hasTCP = protoValues.indexOf('tcp') >= 0;
+		var hasUDP = protoValues.indexOf('udp') >= 0;
 
 		n++;
 		uci.set('neto', sid, 'priority', String(n * 100));
@@ -27,6 +51,13 @@ function rewriteRuleState() {
 			uci.set('neto', sid, 'enabled', '1');
 
 		uci.set('neto', sid, 'dns_mode', 'auto');
+
+		if (hasTCP && !hasUDP)
+			setListOption(sid, 'proto', [ 'tcp' ]);
+		else if (hasUDP && !hasTCP)
+			setListOption(sid, 'proto', [ 'udp' ]);
+		else
+			uci.unset('neto', sid, 'proto');
 
 		if (action != 'proxy') {
 			uci.set('neto', sid, 'outbound', 'direct');
@@ -220,7 +251,7 @@ function packetProtoValue(section_id) {
 	var hasUDP = values.indexOf('udp') >= 0;
 
 	if (hasTCP && hasUDP)
-		return 'tcp_udp';
+		return 'any';
 	if (hasTCP)
 		return 'tcp';
 	if (hasUDP)
@@ -233,14 +264,11 @@ function writePacketProto(section_id, formvalue) {
 	case 'tcp':
 		setListOption(section_id, 'proto', [ 'tcp' ]);
 		break;
-	case 'udp':
-		setListOption(section_id, 'proto', [ 'udp' ]);
-		break;
-	case 'tcp_udp':
-		setListOption(section_id, 'proto', [ 'tcp', 'udp' ]);
-		break;
-	default:
-		uci.unset('neto', section_id, 'proto');
+		case 'udp':
+			setListOption(section_id, 'proto', [ 'udp' ]);
+			break;
+		default:
+			uci.unset('neto', section_id, 'proto');
 	}
 }
 
@@ -271,9 +299,294 @@ function validatePortMatch(section_id, value) {
 	return true;
 }
 
+function validInputMode(value, fallback, modes) {
+	value = String(value || '').trim();
+	for (var i = 0; i < modes.length; i++) {
+		if (value == modes[i])
+			return value;
+	}
+	return fallback;
+}
+
+function cleanBool(value, fallback) {
+	if (value == null || value == '')
+		return fallback;
+	if (value === false)
+		return '0';
+	if (value === true)
+		return '1';
+
+	value = String(value).trim().toLowerCase();
+	if (value == '0' || value == 'false' || value == 'off' || value == 'no')
+		return '0';
+	if (value == '1' || value == 'true' || value == 'on' || value == 'yes')
+		return '1';
+	return fallback;
+}
+
+function exportRule(section_id) {
+	var rule = {
+		name: String(uci.get('neto', section_id, 'name') || section_id).trim() || section_id,
+		enabled: cleanBool(uci.get('neto', section_id, 'enabled'), '1'),
+		action: 'direct',
+		outbound: 'direct',
+		dns_mode: 'auto'
+	};
+	var domainInput = validInputMode(uci.get('neto', section_id, 'domain_input'), '', [ 'fields', 'text', 'provider', 'file' ]);
+	var ipInput = validInputMode(uci.get('neto', section_id, 'ip_input'), '', [ 'list', 'text', 'provider', 'file' ]);
+
+	if (domainInput != '')
+		rule.domain_input = domainInput;
+	if (ipInput != '')
+		rule.ip_input = ipInput;
+
+	for (var i = 0; i < ruleListOptions.length; i++) {
+		var option = ruleListOptions[i];
+		var values = optionValues(section_id, option);
+
+		if (values.length > 0)
+			rule[option] = values;
+	}
+
+	return rule;
+}
+
+function exportRulesJSON() {
+	var rules = [];
+
+	uci.sections('neto', 'rule', function(section, sid) {
+		rules.push(exportRule(sid));
+	});
+
+	return JSON.stringify({
+		version: 1,
+		rules: rules
+	}, null, '\t');
+}
+
+function parseImportedRules(text) {
+	var data, rules, out;
+
+	try {
+		data = JSON.parse(String(text || ''));
+	} catch (err) {
+		throw new Error(_('Import failed') + ': ' + err.message);
+	}
+
+	rules = Array.isArray(data) ? data : data && data.rules;
+	if (!Array.isArray(rules))
+		throw new Error(_('Import failed') + ': ' + _('rules must be an array'));
+
+	out = [];
+	for (var i = 0; i < rules.length; i++) {
+		var rule = rules[i];
+		var cleanRule;
+
+		if (rule == null || typeof rule != 'object' || Array.isArray(rule))
+			continue;
+
+		cleanRule = {
+			name: String(rule.name || ('imported_rule_' + (i + 1))).trim() || ('imported_rule_' + (i + 1)),
+			enabled: cleanBool(rule.enabled, '1'),
+			action: 'direct',
+			outbound: 'direct',
+			dns_mode: 'auto',
+			domain_input: validInputMode(rule.domain_input, '', [ 'fields', 'text', 'provider', 'file' ]),
+			ip_input: validInputMode(rule.ip_input, '', [ 'list', 'text', 'provider', 'file' ])
+		};
+
+		for (var j = 0; j < ruleListOptions.length; j++) {
+			var option = ruleListOptions[j];
+			var values = cleanValues(rule[option]);
+
+			if (values.length > 0)
+				cleanRule[option] = values;
+		}
+
+		out.push(cleanRule);
+	}
+
+	if (out.length == 0)
+		throw new Error(_('Import failed') + ': ' + _('no rules found'));
+
+	return out;
+}
+
+function addRuleSection() {
+	var before = {};
+	var added = null;
+
+	uci.sections('neto', 'rule', function(section, sid) {
+		before[sid] = true;
+	});
+
+	added = uci.add('neto', 'rule');
+	if (added)
+		return added;
+
+	uci.sections('neto', 'rule', function(section, sid) {
+		if (!before[sid] && added == null)
+			added = sid;
+	});
+
+	if (added == null)
+		throw new Error(_('Import failed'));
+
+	return added;
+}
+
+function writeImportedRule(section_id, rule) {
+	uci.set('neto', section_id, 'name', rule.name);
+	uci.set('neto', section_id, 'enabled', rule.enabled);
+	uci.set('neto', section_id, 'action', 'direct');
+	uci.set('neto', section_id, 'outbound', 'direct');
+	uci.set('neto', section_id, 'dns_mode', 'auto');
+
+	if (rule.domain_input != '')
+		uci.set('neto', section_id, 'domain_input', rule.domain_input);
+	if (rule.ip_input != '')
+		uci.set('neto', section_id, 'ip_input', rule.ip_input);
+
+	for (var i = 0; i < ruleListOptions.length; i++) {
+		var option = ruleListOptions[i];
+
+		if (rule[option])
+			setListOption(section_id, option, rule[option]);
+	}
+}
+
+function replaceRules(rules) {
+	var sections = [];
+
+	uci.sections('neto', 'rule', function(section, sid) {
+		sections.push(sid);
+	});
+
+	for (var i = 0; i < sections.length; i++)
+		uci.remove('neto', sections[i]);
+
+	for (var j = 0; j < rules.length; j++)
+		writeImportedRule(addRuleSection(), rules[j]);
+}
+
 return view.extend({
 	load: function() {
-		return uci.load('neto');
+		return uci.load('neto').then(function() {
+			netoUI.syncRulesTab();
+		});
+	},
+
+	showExportRules: function() {
+		var closeButton;
+		var textarea = E('textarea', {
+			'class': 'cbi-input-textarea',
+			'readonly': 'readonly',
+			'style': 'width:100%',
+			'rows': 16
+		}, [ exportRulesJSON() ]);
+
+		closeButton = E('button', {
+			'class': 'cbi-button cbi-button-neutral',
+			'click': ui.hideModal
+		}, _('Close'));
+
+		ui.showModal(_('Export rules'), [
+			E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' }, _('Rules JSON')),
+				E('div', { 'class': 'cbi-value-field' }, textarea)
+			]),
+			E('div', { 'class': 'right' }, closeButton)
+		]);
+
+		if (typeof window != 'undefined') {
+			window.setTimeout(function() {
+				textarea.focus();
+				textarea.select();
+			}, 0);
+		}
+	},
+
+	showImportRules: function() {
+		var importButton, cancelButton;
+		var textarea = E('textarea', {
+			'class': 'cbi-input-textarea',
+			'style': 'width:100%',
+			'rows': 16
+		});
+		var status = E('span', {
+			'style': 'display:none;margin-left:1em'
+		}, _('Importing...'));
+
+		cancelButton = E('button', {
+			'class': 'cbi-button cbi-button-neutral',
+			'click': ui.hideModal
+		}, _('Cancel'));
+		importButton = E('button', {
+			'class': 'cbi-button cbi-button-action',
+			'click': L.bind(function(ev) {
+				var value = String(textarea.value || '').trim();
+
+				ev.preventDefault();
+				if (value == '') {
+					textarea.focus();
+					return Promise.resolve();
+				}
+
+				importButton.disabled = true;
+				cancelButton.disabled = true;
+				textarea.disabled = true;
+				importButton.textContent = _('Importing...');
+				status.style.display = '';
+
+				return this.handleImportRules(value).catch(function(err) {
+					importButton.disabled = null;
+					cancelButton.disabled = null;
+					textarea.disabled = null;
+					importButton.textContent = _('Import');
+					status.style.display = 'none';
+					ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+				});
+			}, this)
+		}, _('Import'));
+
+		ui.showModal(_('Import rules'), [
+			E('div', { 'class': 'cbi-value' }, [
+				E('label', { 'class': 'cbi-value-title' }, _('Rules JSON')),
+				E('div', { 'class': 'cbi-value-field' }, textarea)
+			]),
+			E('div', { 'class': 'right' }, [
+				cancelButton,
+				' ',
+				importButton,
+				status
+			])
+		]);
+	},
+
+	handleImportRules: function(text) {
+		var rules = parseImportedRules(text);
+
+		return this.map.save(rewriteRuleState)
+			.then(function() {
+				replaceRules(rules);
+				rewriteRuleState();
+				return uci.save('neto');
+			})
+			.then(function(ok) {
+				if (ok === false)
+					throw new Error(_('Save failed'));
+
+				return fs.exec('/sbin/uci', [ 'commit', 'neto' ]);
+			})
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Commit failed'));
+
+				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
+			})
+			.then(function() {
+				window.location.reload();
+			});
 	},
 
 	handleSave: function() {
@@ -296,10 +609,13 @@ return view.extend({
 	},
 
 	render: function() {
-		var m, s, o, routingMode;
+		var m, s, o, routingMode, self;
+
+		netoUI.syncRulesTab();
 
 		m = new form.Map('neto', _('neto'));
 		this.map = m;
+		self = this;
 		routingMode = String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim();
 
 		if (routingMode != 'custom')
@@ -312,6 +628,29 @@ return view.extend({
 		s.addremove = true;
 		s.sortable = true;
 		s.modaltitle = _('Rule details');
+		s.renderSectionAdd = function() {
+			var el = form.GridSection.prototype.renderSectionAdd.apply(this, arguments);
+
+			el.appendChild(E('button', {
+				'class': 'cbi-button cbi-button-action',
+				'style': 'margin-left:.5em',
+				'click': function(ev) {
+					ev.preventDefault();
+					self.showImportRules();
+				}
+			}, _('Import')));
+
+			el.appendChild(E('button', {
+				'class': 'cbi-button cbi-button-action',
+				'style': 'margin-left:.5em',
+				'click': function(ev) {
+					ev.preventDefault();
+					self.showExportRules();
+				}
+			}, _('Export')));
+
+			return el;
+		};
 
 		o = s.option(form.Flag, 'enabled', _('Enabled'));
 		o.enabled = '1';
@@ -415,7 +754,6 @@ return view.extend({
 		o.value('any', _('Any'));
 		o.value('tcp', _('TCP'));
 		o.value('udp', _('UDP'));
-		o.value('tcp_udp', _('TCP+UDP'));
 		o.default = 'any';
 		o.rmempty = false;
 		o.modalonly = true;

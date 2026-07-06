@@ -778,9 +778,6 @@ func (c Config) Validate() error {
 			return fmt.Errorf("duplicate provider %q", name)
 		}
 		seenProviders[name] = p
-		if !p.Enabled {
-			continue
-		}
 		switch p.Type {
 		case "domain", "ip":
 		default:
@@ -945,12 +942,8 @@ func (c Config) Validate() error {
 		}
 		for _, providerName := range appendList(appendList(r.DomainProviders, r.IPProviders), r.Providers) {
 			providerName = strings.TrimSpace(providerName)
-			p, ok := seenProviders[providerName]
-			if !ok {
+			if _, ok := seenProviders[providerName]; !ok {
 				return fmt.Errorf("rule %q references unknown provider %q", r.Name, providerName)
-			}
-			if !p.Enabled {
-				return fmt.Errorf("rule %q references disabled provider %q", r.Name, providerName)
 			}
 		}
 	}
@@ -1337,9 +1330,6 @@ func parseProvider(s section) Provider {
 		LastUpdate:            strings.TrimSpace(s.options["last_update"]),
 		Files:                 cleanList(appendList(s.lists["file"], splitListOption(s.options["file"]))),
 	}
-	if v, ok := s.options["enabled"]; ok {
-		p.Enabled = parseBool(v, p.Enabled)
-	}
 	if v, ok := s.options["auto_update"]; ok {
 		p.AutoUpdate = parseBool(v, p.AutoUpdate)
 	}
@@ -1393,7 +1383,7 @@ func loadRuleDomainFiles(cfg *Config, rule *Rule) error {
 	}
 	for _, providerName := range appendList(rule.DomainProviders, rule.Providers) {
 		provider, ok := cfg.ProviderByName(providerName)
-		if !ok || !provider.Enabled || provider.Type != "domain" {
+		if !ok || provider.Type != "domain" {
 			continue
 		}
 		values, err := loadDomainFile(provider.CachePath())

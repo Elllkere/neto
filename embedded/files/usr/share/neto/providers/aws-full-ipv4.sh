@@ -18,11 +18,12 @@ GLOBAL
 "
 
 AWS_SERVICES="
-CLOUDFRONT
-S3
+AMAZON
+EC2
+GLOBALACCELERATOR
 "
 
-WORK_DIR="${TMPDIR:-/tmp}/neto-aws-cdn-ipv4.$$"
+WORK_DIR="${TMPDIR:-/tmp}/neto-aws-full-ipv4.$$"
 JSON_FILE="$WORK_DIR/ip-ranges.json"
 RESULT_FILE="$WORK_DIR/result.txt"
 
@@ -105,12 +106,13 @@ extract_aws_prefixes() {
 
 mkdir -p "$WORK_DIR"
 
-echo "neto: fetching AWS CDN IPv4 ranges" >&2
+echo "neto: fetching AWS Full IPv4 ranges (AMAZON, EC2, GLOBALACCELERATOR)" >&2
+echo "neto: warning: routing AWS Full may affect ping to games hosted on Amazon/AWS servers" >&2
 fetch_url "$AWS_IP_RANGES_URL" > "$JSON_FILE"
 extract_aws_prefixes < "$JSON_FILE" | sort -u > "$RESULT_FILE"
 
 if [ ! -s "$RESULT_FILE" ]; then
-	echo "neto: AWS CDN IPv4 provider returned an empty list" >&2
+	echo "neto: AWS Full IPv4 provider returned an empty list" >&2
 	exit 1
 fi
 

@@ -129,7 +129,8 @@ NETO_INSTALL_URL='https://your-host/install.sh' /usr/share/neto/upgrade.sh
 
 Uninstall script останавливает service, убирает neto-owned DNS/dnsmasq changes,
 удаляет `netod`, LuCI files, `/usr/libexec/neto`, `/usr/share/neto`,
-`/tmp/neto` и `/var/lib/neto`. Persistent provider cache under
+`/tmp/neto`, `/var/lib/neto` и DNS restore state under
+`/etc/neto/dnsmasq-state/`. Persistent provider cache under
 `/etc/neto/provider-cache/` is kept unless `--purge` is used.
 
 ## Quick Check
@@ -296,7 +297,12 @@ script path еще нет:
 - Cloudflare IPv4: `https://www.cloudflare.com/ips-v4/`
 - Telegram IPv4: `https://core.telegram.org/resources/cidr.txt`
 - Akamai IPv4: `/usr/share/neto/providers/akamai-ipv4.sh`
-- AWS IPv4: `/usr/share/neto/providers/aws-ipv4.sh`
+- AWS CDN IPv4 (`CLOUDFRONT`, `S3`): `/usr/share/neto/providers/aws-ipv4.sh`
+- AWS Full IPv4 (`AMAZON`, `EC2`, `GLOBALACCELERATOR`):
+  `/usr/share/neto/providers/aws-full-ipv4.sh`
+
+AWS Full can match broad AWS infrastructure and may affect ping to games hosted
+on Amazon/AWS servers if a rule routes it through proxy.
 
 Built-in providers добавляются только для удобства. Они не создают rules и
 создаются с `auto_update '0'`; включать автообновление пользователь решает сам.

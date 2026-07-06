@@ -75,6 +75,37 @@ func TestRulesLuCIHiddenOutsideCustomMode(t *testing.T) {
 	}
 }
 
+func TestRulesLuCIImportExportForcesDirectAction(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"function exportRulesJSON()",
+		"function parseImportedRules(text)",
+		"showExportRules: function()",
+		"showImportRules: function()",
+		"handleImportRules: function(text)",
+		"s.renderSectionAdd = function()",
+		"ui.showModal(_('Export rules')",
+		"ui.showModal(_('Import rules')",
+		"action: 'direct'",
+		"outbound: 'direct'",
+		"dns_mode: 'auto'",
+		"uci.set('neto', section_id, 'action', 'direct')",
+		"uci.set('neto', section_id, 'outbound', 'direct')",
+		"uci.set('neto', section_id, 'dns_mode', 'auto')",
+		"uci.remove('neto', sections[i])",
+		"return fs.exec('/sbin/uci', [ 'commit', 'neto' ])",
+		"fs.exec('/etc/init.d/neto', [ 'restart' ])",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("rules.js missing import/export safety behavior %q:\n%s", want, s)
+		}
+	}
+}
+
 func TestRulesLuCIDNSModeHiddenAndAutomatic(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
 	if err != nil {
@@ -134,7 +165,10 @@ func TestRulesLuCICompactTableFields(t *testing.T) {
 		"addDynamicList(s, 'ip_file', _('IP/CIDR file paths'), 'ip_input', 'file'",
 		"form.DummyValue, '_packet_match'",
 		"form.ListValue, '_packet_proto'",
-		"setListOption(section_id, 'proto', [ 'tcp', 'udp' ])",
+		"o.value('any', _('Any'))",
+		"o.value('tcp', _('TCP'))",
+		"o.value('udp', _('UDP'))",
+		"uci.unset('neto', section_id, 'proto')",
 		"form.DynamicList, 'src_port'",
 		"form.DynamicList, 'dst_port'",
 		"o.validate = validatePortMatch",
@@ -158,6 +192,14 @@ func TestRulesLuCICompactTableFields(t *testing.T) {
 	}
 	if strings.Contains(s, "form.GridSection, 'provider'") {
 		t.Fatalf("rules.js must not create provider sections:\n%s", s)
+	}
+	for _, forbidden := range []string{
+		"tcp_udp",
+		"TCP+UDP",
+	} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("rules.js must not expose redundant protocol option %q:\n%s", forbidden, s)
+		}
 	}
 }
 

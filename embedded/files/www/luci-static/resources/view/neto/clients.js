@@ -4,12 +4,15 @@
 'require uci';
 'require view';
 'require neto.i18n as netoI18n';
+'require neto.ui as netoUI';
 
 var _ = netoI18n.translate;
 
 return view.extend({
 	load: function() {
-		return uci.load('neto');
+		return uci.load('neto').then(function() {
+			netoUI.syncRulesTab();
+		});
 	},
 
 	handleSaveApply: function(ev) {
@@ -27,6 +30,8 @@ return view.extend({
 
 	render: function() {
 		var m, s, o;
+
+		netoUI.syncRulesTab();
 
 		m = new form.Map('neto', _('neto'));
 

@@ -5,6 +5,7 @@
 'require uci';
 'require view';
 'require neto.i18n as netoI18n';
+'require neto.ui as netoUI';
 
 var _ = netoI18n.translate;
 var communityDomainProviders = [
@@ -47,8 +48,7 @@ var communityDomainProviders = [
 
 function normalizeProviders() {
 	uci.sections('neto', 'provider', function(section, sid) {
-		if (uci.get('neto', sid, 'enabled') == null)
-			uci.set('neto', sid, 'enabled', '1');
+		uci.unset('neto', sid, 'enabled');
 
 		if (uci.get('neto', sid, 'label') == null)
 			uci.set('neto', sid, 'label', uci.get('neto', sid, 'name') || sid);
@@ -111,9 +111,6 @@ function activeProviderNames() {
 	var names = {};
 
 	uci.sections('neto', 'provider', function(section, sid) {
-		if (uci.get('neto', sid, 'enabled') == '0')
-			return;
-
 		names[sid] = true;
 
 		var name = String(uci.get('neto', sid, 'name') || '').trim();
@@ -144,7 +141,7 @@ function validateProviderReferences() {
 
 		for (var i = 0; i < refs.length; i++) {
 			if (!providers[refs[i]]) {
-				error = _('Rule "%s" references missing or disabled provider "%s". Remove the provider from the rule before deleting or disabling it.').format(ruleName, refs[i]);
+				error = _('Rule "%s" references missing provider "%s". Remove the provider from the rule before deleting it.').format(ruleName, refs[i]);
 				return;
 			}
 		}
@@ -211,7 +208,6 @@ function addCommunityDomainProvider(def) {
 
 	section = uniqueProviderSection(def.section);
 	uci.add('neto', 'provider', section);
-	uci.set('neto', section, 'enabled', '1');
 	uci.set('neto', section, 'label', def.label);
 	uci.set('neto', section, 'type', 'domain');
 	uci.set('neto', section, 'source', 'url');
@@ -227,7 +223,9 @@ function addCommunityDomainProvider(def) {
 
 return view.extend({
 	load: function() {
-		return uci.load('neto');
+		return uci.load('neto').then(function() {
+			netoUI.syncRulesTab();
+		});
 	},
 
 	handleSave: function() {
@@ -326,6 +324,8 @@ return view.extend({
 	render: function() {
 		var m, s, o, self;
 
+		netoUI.syncRulesTab();
+
 		m = new form.Map('neto', _('neto'));
 		this.map = m;
 		self = this;
@@ -352,13 +352,6 @@ return view.extend({
 
 			return el;
 		};
-
-		o = s.option(form.Flag, 'enabled', _('Enabled'));
-		o.enabled = '1';
-		o.disabled = '0';
-		o.default = '1';
-		o.rmempty = false;
-		o.editable = true;
 
 		o = s.option(form.Value, 'label', _('Name'));
 		o.cfgvalue = function(section_id) {

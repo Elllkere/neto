@@ -91,6 +91,7 @@ https://github.com/elllkere/neto/releases/latest/download/neto-openwrt-embedded.
 - `/usr/libexec/neto/sing-box`
 - `/usr/share/neto/`
 - `/etc/neto/provider-cache/`
+- `/etc/neto/dnsmasq-state/`
 - `/tmp/neto/neto.nft`
 - `/tmp/neto/sing-box.json`
 - `/var/lib/neto/`
@@ -357,7 +358,12 @@ allow-domains. This creates only reusable `provider` sections with
 - Cloudflare IPv4: `https://www.cloudflare.com/ips-v4/`
 - Telegram IPv4: `https://core.telegram.org/resources/cidr.txt`
 - Akamai IPv4: `/usr/share/neto/providers/akamai-ipv4.sh`
-- AWS IPv4: `/usr/share/neto/providers/aws-ipv4.sh`
+- AWS CDN IPv4 (`CLOUDFRONT`, `S3`): `/usr/share/neto/providers/aws-ipv4.sh`
+- AWS Full IPv4 (`AMAZON`, `EC2`, `GLOBALACCELERATOR`):
+  `/usr/share/neto/providers/aws-full-ipv4.sh`
+
+AWS Full is intentionally separate because routing broad AWS infrastructure may
+affect ping to games hosted on Amazon/AWS servers.
 
 Built-in JSON provider scripts use `jq` when it is already installed and fall
 back to POSIX tools otherwise. `jq` is not a required neto dependency.

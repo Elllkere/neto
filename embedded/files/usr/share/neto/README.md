@@ -9,3 +9,4 @@ Runtime scripts copied here:
 - `run-sing-box-log.sh`
 - `providers/akamai-ipv4.sh`
 - `providers/aws-ipv4.sh`
+- `providers/aws-full-ipv4.sh`

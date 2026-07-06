@@ -5,6 +5,7 @@
 'require uci';
 'require view';
 'require neto.i18n as netoI18n';
+'require neto.ui as netoUI';
 
 var _ = netoI18n.translate;
 
@@ -428,6 +429,8 @@ return view.extend({
 		return uci.load('neto').then(function() {
 			var singboxBin = uci.get('neto', 'main', 'singbox_bin') || '/usr/libexec/neto/sing-box';
 
+			netoUI.syncRulesTab();
+
 			return Promise.all([
 				commandResult('/etc/init.d/neto', [ 'status' ]),
 				commandResult('/etc/init.d/neto', [ 'enabled' ]),
@@ -501,6 +504,8 @@ return view.extend({
 
 	render: function(data) {
 		var m, s, o, state, serviceRunning, autostartEnabled;
+
+		netoUI.syncRulesTab();
 
 		data = data || [];
 		state = {

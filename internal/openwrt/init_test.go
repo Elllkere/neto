@@ -48,11 +48,19 @@ func TestInitScriptManagesDNSMasqUCI(t *testing.T) {
 	}
 	s := string(data)
 	for _, want := range []string{
+		`DNSMASQ_STATE_DIR="/etc/neto/dnsmasq-state"`,
+		`DNSMASQ_LEGACY_STATE_DIR="/var/lib/neto"`,
+		"DNSMASQ_SERVER_STATE",
 		"uci -q del_list dhcp.@dnsmasq[0].server=\"$server\"",
+		"uci -q del_list dhcp.@dnsmasq[0].server=\"$saved_server\"",
+		"uci -q del_list dhcp.@dnsmasq[0].server=\"127.0.0.1#5353\"",
 		"uci add_list dhcp.@dnsmasq[0].server=\"$server\"",
 		"uci set dhcp.@dnsmasq[0].noresolv='1'",
 		"uci set dhcp.@dnsmasq[0].addsubnet='32'",
 		"uci commit dhcp",
+		"neto_dnsmasq_has_non_neto_server()",
+		"current_noresolv=\"$(uci -q get dhcp.@dnsmasq[0].noresolv || true)\"",
+		"uci -q delete dhcp.@dnsmasq[0].noresolv || true",
 		"DNSMASQ_NORESOLV_STATE",
 		"DNSMASQ_ADDSUBNET_STATE",
 	} {
@@ -94,5 +102,18 @@ func TestInitScriptManagesSubscriptionCron(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q in init script:\n%s", want, s)
 		}
+	}
+
+	start := strings.Index(s, "neto_append_provider_cron()")
+	if start < 0 {
+		t.Fatalf("could not find provider cron block:\n%s", s)
+	}
+	end := strings.Index(s[start:], "config_foreach neto_append_subscription_cron subscription")
+	if end < 0 {
+		t.Fatalf("could not find provider cron block end:\n%s", s[start:])
+	}
+	providerBlock := s[start : start+end]
+	if strings.Contains(providerBlock, "config_get_bool enabled") || strings.Contains(providerBlock, "$enabled") {
+		t.Fatalf("provider cron must depend only on auto_update, not provider enabled:\n%s", providerBlock)
 	}
 }

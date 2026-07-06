@@ -3,12 +3,15 @@
 'require uci';
 'require view';
 'require neto.i18n as netoI18n';
+'require neto.ui as netoUI';
 
 var _ = netoI18n.translate;
 
 return view.extend({
 	load: function() {
 		return uci.load('neto').then(function() {
+			netoUI.syncRulesTab();
+
 			return fs.exec('/usr/bin/netod', [ 'debug' ]).catch(function(err) {
 				return {
 					code: -1,
@@ -21,6 +24,8 @@ return view.extend({
 
 	render: function(res) {
 		var text = res.stdout || res.stderr || _('No status available');
+
+		netoUI.syncRulesTab();
 
 		return E([
 			E('h2', {}, [ _('Debug') ]),

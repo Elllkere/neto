@@ -527,7 +527,6 @@ ensure_builtin_provider() {
 	section="$(unique_provider_section "$base")"
 	log "adding built-in provider $label"
 	uci set "neto.$section=provider"
-	uci set "neto.$section.enabled=1"
 	uci set "neto.$section.label=$label"
 	uci set "neto.$section.type=ip"
 	uci set "neto.$section.source=url"
@@ -553,7 +552,6 @@ ensure_builtin_script_provider() {
 	section="$(unique_provider_section "$base")"
 	log "adding built-in provider $label"
 	uci set "neto.$section=provider"
-	uci set "neto.$section.enabled=1"
 	uci set "neto.$section.label=$label"
 	uci set "neto.$section.type=ip"
 	uci set "neto.$section.source=script"
@@ -569,7 +567,8 @@ ensure_builtin_providers() {
 	ensure_builtin_provider "cloudflare_ipv4" "Cloudflare IPv4" "https://www.cloudflare.com/ips-v4/" "5"
 	ensure_builtin_provider "telegram_ipv4" "Telegram IPv4" "https://core.telegram.org/resources/cidr.txt" "10"
 	ensure_builtin_script_provider "akamai_ipv4" "Akamai IPv4" "/usr/share/neto/providers/akamai-ipv4.sh" "15"
-	ensure_builtin_script_provider "aws_ipv4" "AWS IPv4" "/usr/share/neto/providers/aws-ipv4.sh" "20"
+	ensure_builtin_script_provider "aws_ipv4" "AWS CDN IPv4" "/usr/share/neto/providers/aws-ipv4.sh" "20"
+	ensure_builtin_script_provider "aws_full_ipv4" "AWS Full IPv4 (may affect game ping)" "/usr/share/neto/providers/aws-full-ipv4.sh" "25"
 	uci commit neto
 }
 

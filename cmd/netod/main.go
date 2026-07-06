@@ -463,10 +463,6 @@ func commandProvidersUpdate(opts providerOptions) error {
 			continue
 		}
 		matched++
-		if !p.Enabled {
-			fmt.Printf("provider %s is disabled; skipped\n", p.Name)
-			continue
-		}
 		if p.Source != "script" && strings.TrimSpace(p.URL) == "" {
 			return fmt.Errorf("provider %s: url is required", p.Name)
 		}

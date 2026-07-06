@@ -5,6 +5,7 @@
 'require uci';
 'require view';
 'require neto.i18n as netoI18n';
+'require neto.ui as netoUI';
 
 var importPath = '/tmp/neto-import.txt';
 var _ = netoI18n.translate;
@@ -162,7 +163,9 @@ function normalizeAll() {
 
 return view.extend({
 	load: function() {
-		return uci.load('neto');
+		return uci.load('neto').then(function() {
+			netoUI.syncRulesTab();
+		});
 	},
 
 	handleSave: function() {
@@ -294,6 +297,8 @@ return view.extend({
 
 	render: function() {
 		var m, s, o, self, sub;
+
+		netoUI.syncRulesTab();
 
 		m = new form.Map('neto', _('neto'));
 		this.map = m;

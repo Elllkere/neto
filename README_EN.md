@@ -52,7 +52,9 @@ Full removal including config:
 ```
 
 The script stops the service, reverts neto-owned dnsmasq settings, and removes
-installed neto binaries, LuCI files, runtime files, and provider cache.
+installed neto binaries, LuCI files, runtime files, and DNS restore state under
+`/etc/neto/dnsmasq-state/`. Provider cache under `/etc/neto/provider-cache/` is
+kept unless `--purge` is used.
 
 For the public GitHub install command to work, upload
 `dist/neto-openwrt-embedded.tar.gz` as a GitHub Release asset named exactly:

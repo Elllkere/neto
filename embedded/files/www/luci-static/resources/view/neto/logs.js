@@ -1,8 +1,10 @@
 'use strict';
 'require fs';
 'require ui';
+'require uci';
 'require view';
 'require neto.i18n as netoI18n';
+'require neto.ui as netoUI';
 
 var _ = netoI18n.translate;
 
@@ -22,8 +24,12 @@ function displayLog(text) {
 
 return view.extend({
 	load: function() {
-		return netod([ 'logs', 'sing-box' ]).catch(function(err) {
-			return err.message || String(err);
+		return uci.load('neto').then(function() {
+			netoUI.syncRulesTab();
+
+			return netod([ 'logs', 'sing-box' ]).catch(function(err) {
+				return err.message || String(err);
+			});
 		});
 	},
 
@@ -56,6 +62,8 @@ return view.extend({
 
 	render: function(logText) {
 		var refreshButton, clearButton;
+
+		netoUI.syncRulesTab();
 
 		refreshButton = E('button', {
 			'class': 'cbi-button cbi-button-action',

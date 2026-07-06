@@ -14,7 +14,7 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 	s := string(data)
 	for _, want := range []string{
 		"form.GridSection, 'provider'",
-		"form.Flag, 'enabled'",
+		"uci.unset('neto', sid, 'enabled')",
 		"form.Value, 'label'",
 		"form.ListValue, 'type'",
 		"form.ListValue, 'source'",
@@ -44,7 +44,7 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"throw new Error(res.stderr || res.stdout || _('Commit failed'))",
 		"domain_provider",
 		"ip_provider",
-		"Rule \"%s\" references missing or disabled provider \"%s\"",
+		"Rule \"%s\" references missing provider \"%s\"",
 		"form.Button, '_update'",
 		"function(ev, section_id)",
 		"NETO_PROVIDER_PROXY",
@@ -66,6 +66,8 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"form.ListValue, 'outbound'",
 		"sortable = true",
 		"uci.commit(",
+		"form.Flag, 'enabled'",
+		"missing or disabled provider",
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("providers.js must not contain policy field %q:\n%s", forbidden, s)
@@ -112,6 +114,9 @@ func TestProvidersLuCIAddsCommunityDomainProviders(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("providers.js missing community provider preset %q:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "uci.set('neto', section, 'enabled'") {
+		t.Fatalf("community provider presets must not write enabled:\n%s", s)
 	}
 }
 
@@ -163,7 +168,7 @@ func TestProvidersLuCIUpdateButtonIsModalOnly(t *testing.T) {
 	}
 }
 
-func TestProvidersLuCITableEditsOnlyFlags(t *testing.T) {
+func TestProvidersLuCITableEditsOnlyAutoUpdateFlag(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/providers.js")
 	if err != nil {
 		t.Fatal(err)
@@ -200,8 +205,10 @@ func TestProvidersLuCITableEditsOnlyFlags(t *testing.T) {
 			}
 		}
 	}
+	if strings.Contains(s, "form.Flag, 'enabled'") {
+		t.Fatalf("provider enabled flag should not be exposed:\n%s", s)
+	}
 	for _, needle := range []string{
-		"form.Flag, 'enabled'",
 		"form.Flag, 'auto_update'",
 	} {
 		start := strings.Index(s, needle)
