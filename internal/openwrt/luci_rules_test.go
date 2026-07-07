@@ -57,6 +57,30 @@ func TestRulesLuCIExplicitEnabledAndPriorityRewrite(t *testing.T) {
 	}
 }
 
+func TestRulesLuCISortsRenderedRulesByPriority(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"function rulePriority(section_id, fallback)",
+		"function sortRuleSectionIDs(ids)",
+		"return pa - pb",
+		"1000 + order[a]",
+		"s.cfgsections = function()",
+		"sortRuleSectionIDs(form.GridSection.prototype.cfgsections.apply(this, arguments))",
+		"function renderedRuleSectionIDs(ids)",
+		"document.querySelectorAll('#cbi-neto-rule tr.cbi-section-table-row[data-sid]')",
+		"function orderedRuleSectionIDs()",
+		"var ids = orderedRuleSectionIDs()",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("rules.js missing priority-backed table ordering behavior %q:\n%s", want, s)
+		}
+	}
+}
+
 func TestRulesLuCIHiddenOutsideCustomMode(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/rules.js")
 	if err != nil {

@@ -29,13 +29,86 @@ var ruleListOptions = [
 	'dst_port'
 ];
 
+function ruleSectionIDs() {
+	var ids = [];
+
+	uci.sections('neto', 'rule', function(section, sid) {
+		ids.push(sid);
+	});
+
+	return ids;
+}
+
+function rulePriority(section_id, fallback) {
+	var value = String(uci.get('neto', section_id, 'priority') || '').trim();
+
+	if (/^-?[0-9]+$/.test(value))
+		return parseInt(value, 10);
+
+	return fallback;
+}
+
+function sortRuleSectionIDs(ids) {
+	var order = {};
+
+	for (var i = 0; i < ids.length; i++)
+		order[ids[i]] = i;
+
+	ids.sort(function(a, b) {
+		var pa = rulePriority(a, 1000 + order[a]);
+		var pb = rulePriority(b, 1000 + order[b]);
+
+		if (pa != pb)
+			return pa - pb;
+
+		return order[a] - order[b];
+	});
+
+	return ids;
+}
+
+function renderedRuleSectionIDs(ids) {
+	var wanted = {};
+	var seen = {};
+	var out = [];
+	var rows, sid;
+
+	if (typeof document == 'undefined')
+		return null;
+
+	for (var i = 0; i < ids.length; i++)
+		wanted[ids[i]] = true;
+
+	rows = document.querySelectorAll('#cbi-neto-rule tr.cbi-section-table-row[data-sid]');
+	for (var j = 0; j < rows.length; j++) {
+		sid = rows[j].getAttribute('data-sid');
+
+		if (!wanted[sid] || seen[sid])
+			continue;
+
+		seen[sid] = true;
+		out.push(sid);
+	}
+
+	return out.length == ids.length ? out : null;
+}
+
+function orderedRuleSectionIDs() {
+	var ids = ruleSectionIDs();
+	var rendered = renderedRuleSectionIDs(ids);
+
+	return rendered || sortRuleSectionIDs(ids);
+}
+
 function rewriteRuleState() {
 	var n = 0;
 
 	if (String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim() != 'custom')
 		return;
 
-	uci.sections('neto', 'rule', function(section, sid) {
+	var ids = orderedRuleSectionIDs();
+	for (var i = 0; i < ids.length; i++) {
+		var sid = ids[i];
 		var action = String(uci.get('neto', sid, 'action') || 'proxy').trim();
 		var outbound = uci.get('neto', sid, 'outbound');
 		var domainInput = String(uci.get('neto', sid, 'domain_input') || '').trim();
@@ -113,7 +186,7 @@ function rewriteRuleState() {
 			uci.unset('neto', sid, 'ip_file');
 			uci.unset('neto', sid, 'file');
 		}
-	});
+	}
 }
 
 function addOutboundChoices(option) {
@@ -627,6 +700,9 @@ return view.extend({
 		s.anonymous = true;
 		s.addremove = true;
 		s.sortable = true;
+		s.cfgsections = function() {
+			return sortRuleSectionIDs(form.GridSection.prototype.cfgsections.apply(this, arguments));
+		};
 		s.modaltitle = _('Rule details');
 		s.renderSectionAdd = function() {
 			var el = form.GridSection.prototype.renderSectionAdd.apply(this, arguments);
