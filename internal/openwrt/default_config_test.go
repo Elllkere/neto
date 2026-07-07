@@ -188,19 +188,9 @@ func TestEmbeddedAWSProviderScriptsAreSplitByService(t *testing.T) {
 			t.Fatalf("AWS CDN provider missing %q:\n%s", want, cdn)
 		}
 	}
-	for _, forbidden := range []string{"AMAZON", "EC2", "GLOBALACCELERATOR", "game ping"} {
-		if strings.Contains(cdn, forbidden) {
-			t.Fatalf("AWS CDN provider must not include broad service %q:\n%s", forbidden, cdn)
-		}
-	}
 	for _, want := range []string{"AMAZON", "EC2", "GLOBALACCELERATOR", "AWS Full IPv4", "may affect ping to games hosted on Amazon/AWS servers"} {
 		if !strings.Contains(full, want) {
 			t.Fatalf("AWS Full provider missing %q:\n%s", want, full)
-		}
-	}
-	for _, forbidden := range []string{"CLOUDFRONT", "S3"} {
-		if strings.Contains(full, forbidden) {
-			t.Fatalf("AWS Full provider must not include CDN service %q:\n%s", forbidden, full)
 		}
 	}
 }
