@@ -300,6 +300,7 @@ script path еще нет:
 - AWS CDN IPv4 (`CLOUDFRONT`, `S3`): `/usr/share/neto/providers/aws-ipv4.sh`
 - AWS Full IPv4 (`AMAZON`, `EC2`, `GLOBALACCELERATOR`):
   `/usr/share/neto/providers/aws-full-ipv4.sh`
+- AWS Full EU IPv4: `/usr/share/neto/providers/aws-full-eu-ipv4.sh`
 
 AWS Full can match broad AWS infrastructure and may affect ping to games hosted
 on Amazon/AWS servers if a rule routes it through proxy.

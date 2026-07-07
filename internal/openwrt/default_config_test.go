@@ -73,6 +73,7 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"ensure_builtin_script_provider \"akamai_ipv4\" \"Akamai IPv4\" \"/usr/share/neto/providers/akamai-ipv4.sh\" \"15\"",
 		"ensure_builtin_script_provider \"aws_ipv4\" \"AWS CDN IPv4\" \"/usr/share/neto/providers/aws-ipv4.sh\" \"20\"",
 		"ensure_builtin_script_provider \"aws_full_ipv4\" \"AWS Full IPv4 (may affect game ping)\" \"/usr/share/neto/providers/aws-full-ipv4.sh\" \"25\"",
+		"ensure_builtin_script_provider \"aws_full_eu_ipv4\" \"AWS Full EU IPv4\" \"/usr/share/neto/providers/aws-full-eu-ipv4.sh\" \"30\"",
 		"uci set \"neto.$section.source=script\"",
 		"uci set \"neto.$section.auto_update=0\"",
 		"chmod 0755 /usr/share/neto/run-sing-box-log.sh",
@@ -142,6 +143,7 @@ func TestEmbeddedProviderScriptsAreInstalledAssets(t *testing.T) {
 		"../../embedded/files/usr/share/neto/providers/akamai-ipv4.sh",
 		"../../embedded/files/usr/share/neto/providers/aws-ipv4.sh",
 		"../../embedded/files/usr/share/neto/providers/aws-full-ipv4.sh",
+		"../../embedded/files/usr/share/neto/providers/aws-full-eu-ipv4.sh",
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {

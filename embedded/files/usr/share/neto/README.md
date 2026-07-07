@@ -10,3 +10,4 @@ Runtime scripts copied here:
 - `providers/akamai-ipv4.sh`
 - `providers/aws-ipv4.sh`
 - `providers/aws-full-ipv4.sh`
+- `providers/aws-full-eu-ipv4.sh`

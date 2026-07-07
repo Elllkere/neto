@@ -201,10 +201,12 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
 - The installer seeds built-in IP providers for Cloudflare
   (`https://www.cloudflare.com/ips-v4/`), Telegram
   (`https://core.telegram.org/resources/cidr.txt`), Akamai
-  (`/usr/share/neto/providers/akamai-ipv4.sh`), and AWS
-  (`/usr/share/neto/providers/aws-ipv4.sh`) if no provider with the same URL or
-  script path already exists. These built-ins are convenience data sources only:
-  they must be created with `auto_update=0` and no rules.
+  (`/usr/share/neto/providers/akamai-ipv4.sh`), AWS CDN
+  (`/usr/share/neto/providers/aws-ipv4.sh`), AWS Full
+  (`/usr/share/neto/providers/aws-full-ipv4.sh`), and AWS Full EU
+  (`/usr/share/neto/providers/aws-full-eu-ipv4.sh`) if no provider with the
+  same URL or script path already exists. These built-ins are convenience data
+  sources only: they must be created with `auto_update=0` and no rules.
 - IP provider updates save only valid IPv4 CIDR/address entries; IPv6 entries
   from mixed feeds such as Telegram are ignored.
 - `auto_update=1` creates neto-owned cron entries, similar to protocol

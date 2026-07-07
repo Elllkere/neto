@@ -569,6 +569,7 @@ ensure_builtin_providers() {
 	ensure_builtin_script_provider "akamai_ipv4" "Akamai IPv4" "/usr/share/neto/providers/akamai-ipv4.sh" "15"
 	ensure_builtin_script_provider "aws_ipv4" "AWS CDN IPv4" "/usr/share/neto/providers/aws-ipv4.sh" "20"
 	ensure_builtin_script_provider "aws_full_ipv4" "AWS Full IPv4 (may affect game ping)" "/usr/share/neto/providers/aws-full-ipv4.sh" "25"
+	ensure_builtin_script_provider "aws_full_eu_ipv4" "AWS Full EU IPv4" "/usr/share/neto/providers/aws-full-eu-ipv4.sh" "30"
 	uci commit neto
 }
 
