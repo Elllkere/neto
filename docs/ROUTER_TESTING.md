@@ -103,6 +103,9 @@ config provider 'cloudflare_ipv4'
 
 Manual update:
 
+On a fresh install, import provider presets from the LuCI Providers page before
+using the built-in provider names below.
+
 ```sh
 netod providers update
 netod providers update cloudflare_ipv4
@@ -120,6 +123,9 @@ because `/var` can be linked to volatile `/tmp`.
 
 If a provider cache is missing, compile/startup should warn and continue with
 that provider reference empty. Update provider caches manually when needed:
+
+On a fresh install, import provider presets from the LuCI Providers page before
+using the built-in provider names below.
 
 ```sh
 netod providers update telegram_ipv4

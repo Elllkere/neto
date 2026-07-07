@@ -12,37 +12,102 @@ var communityDomainProviders = [
 	{
 		section: 'community_telegram_domains',
 		label: 'Telegram domains',
+		type: 'domain',
+		source: 'url',
 		url: 'https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/telegram.lst'
 	},
 	{
 		section: 'community_tiktok_domains',
 		label: 'TikTok domains',
+		type: 'domain',
+		source: 'url',
 		url: 'https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/tiktok.lst'
 	},
 	{
 		section: 'community_twitter_domains',
 		label: 'Twitter domains',
+		type: 'domain',
+		source: 'url',
 		url: 'https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/twitter.lst'
 	},
 	{
 		section: 'community_youtube_domains',
 		label: 'YouTube domains',
+		type: 'domain',
+		source: 'url',
 		url: 'https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/youtube.lst'
 	},
 	{
 		section: 'community_meta_domains',
 		label: 'Meta domains',
+		type: 'domain',
+		source: 'url',
 		url: 'https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/meta.lst'
 	},
 	{
 		section: 'community_discord_domains',
 		label: 'Discord domains',
+		type: 'domain',
+		source: 'url',
 		url: 'https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/discord.lst'
 	},
 	{
 		section: 'community_anime_domains',
 		label: 'Anime domains',
+		type: 'domain',
+		source: 'url',
 		url: 'https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Categories/anime.lst'
+	}
+];
+
+var builtinIPProviders = [
+	{
+		section: 'cloudflare_ipv4',
+		label: 'Cloudflare IPv4',
+		type: 'ip',
+		source: 'url',
+		url: 'https://www.cloudflare.com/ips-v4/',
+		update_minute: '5'
+	},
+	{
+		section: 'telegram_ipv4',
+		label: 'Telegram IPv4',
+		type: 'ip',
+		source: 'url',
+		url: 'https://core.telegram.org/resources/cidr.txt',
+		update_minute: '10'
+	},
+	{
+		section: 'akamai_ipv4',
+		label: 'Akamai IPv4',
+		type: 'ip',
+		source: 'script',
+		script_path: '/usr/share/neto/providers/akamai-ipv4.sh',
+		update_minute: '15'
+	},
+	{
+		section: 'aws_ipv4',
+		label: 'AWS CDN IPv4',
+		type: 'ip',
+		source: 'script',
+		script_path: '/usr/share/neto/providers/aws-ipv4.sh',
+		update_minute: '20'
+	},
+	{
+		section: 'aws_full_ipv4',
+		label: 'AWS Full IPv4 (may affect game ping)',
+		type: 'ip',
+		source: 'script',
+		script_path: '/usr/share/neto/providers/aws-full-ipv4.sh',
+		update_minute: '25'
+	},
+	{
+		section: 'aws_full_eu_ipv4',
+		label: 'AWS Full EU IPv4 (may affect game ping)',
+		type: 'ip',
+		source: 'script',
+		script_path: '/usr/share/neto/providers/aws-full-eu-ipv4.sh',
+		update_minute: '30'
 	}
 ];
 
@@ -188,6 +253,18 @@ function providerURLExists(url) {
 	return exists;
 }
 
+function providerScriptExists(scriptPath) {
+	var exists = false;
+
+	scriptPath = String(scriptPath || '').trim();
+	uci.sections('neto', 'provider', function(section, sid) {
+		if (String(uci.get('neto', sid, 'script_path') || '').trim() == scriptPath)
+			exists = true;
+	});
+
+	return exists;
+}
+
 function uniqueProviderSection(base) {
 	var section = base;
 	var n = 2;
@@ -200,22 +277,30 @@ function uniqueProviderSection(base) {
 	return section;
 }
 
-function addCommunityDomainProvider(def) {
+function addProviderPreset(def) {
 	var section;
+	var source = String(def.source || 'url').trim();
 
-	if (providerURLExists(def.url))
+	if (source == 'script') {
+		if (providerScriptExists(def.script_path))
+			return false;
+	} else if (providerURLExists(def.url)) {
 		return false;
+	}
 
 	section = uniqueProviderSection(def.section);
 	uci.add('neto', 'provider', section);
 	uci.set('neto', section, 'label', def.label);
-	uci.set('neto', section, 'type', 'domain');
-	uci.set('neto', section, 'source', 'url');
-	uci.set('neto', section, 'url', def.url);
+	uci.set('neto', section, 'type', def.type || 'domain');
+	uci.set('neto', section, 'source', source);
+	if (source == 'script')
+		uci.set('neto', section, 'script_path', def.script_path);
+	else
+		uci.set('neto', section, 'url', def.url);
 	uci.set('neto', section, 'auto_update', '0');
 	uci.set('neto', section, 'update_schedule', 'time');
 	uci.set('neto', section, 'update_hour', '0');
-	uci.set('neto', section, 'update_minute', '5');
+	uci.set('neto', section, 'update_minute', def.update_minute || '5');
 	uci.set('neto', section, 'update_interval_minutes', '360');
 	uci.set('neto', section, 'update_via', 'direct');
 	return true;
@@ -284,18 +369,23 @@ return view.extend({
 			});
 	},
 
-	handleAddCommunityProviders: function() {
-		return this.handleSave()
+	handleImportProviderPresets: function() {
+		return this.map.save(normalizeProviders)
 			.then(function() {
 				var added = 0;
 
 				for (var i = 0; i < communityDomainProviders.length; i++) {
-					if (addCommunityDomainProvider(communityDomainProviders[i]))
+					if (addProviderPreset(communityDomainProviders[i]))
+						added++;
+				}
+
+				for (var j = 0; j < builtinIPProviders.length; j++) {
+					if (addProviderPreset(builtinIPProviders[j]))
 						added++;
 				}
 
 				if (added == 0) {
-					ui.addNotification(null, E('p', {}, [ _('Community lists already exist') ]), 'info');
+					ui.addNotification(null, E('p', {}, [ _('Provider presets already exist') ]), 'info');
 					return Promise.resolve();
 				}
 
@@ -344,11 +434,11 @@ return view.extend({
 				'class': 'cbi-button cbi-button-action',
 				'click': function(ev) {
 					ev.preventDefault();
-					return self.handleAddCommunityProviders().catch(function(err) {
+					return self.handleImportProviderPresets().catch(function(err) {
 						ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
 					});
 				}
-			}, _('Add community lists')));
+			}, _('Import provider presets')));
 
 			return el;
 		};

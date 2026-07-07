@@ -65,17 +65,6 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"network_from_ip_prefix",
 		"normalized=\"$(network_from_ip_prefix \"$ipaddr\" \"$prefix\"",
 		"ensure_lan_subnet_config",
-		"ensure_builtin_providers",
-		"https://www.cloudflare.com/ips-v4/",
-		"https://core.telegram.org/resources/cidr.txt",
-		"provider_url_exists \"$url\"",
-		"provider_script_exists \"$script_path\"",
-		"ensure_builtin_script_provider \"akamai_ipv4\" \"Akamai IPv4\" \"/usr/share/neto/providers/akamai-ipv4.sh\" \"15\"",
-		"ensure_builtin_script_provider \"aws_ipv4\" \"AWS CDN IPv4\" \"/usr/share/neto/providers/aws-ipv4.sh\" \"20\"",
-		"ensure_builtin_script_provider \"aws_full_ipv4\" \"AWS Full IPv4 (may affect game ping)\" \"/usr/share/neto/providers/aws-full-ipv4.sh\" \"25\"",
-		"ensure_builtin_script_provider \"aws_full_eu_ipv4\" \"AWS Full EU IPv4\" \"/usr/share/neto/providers/aws-full-eu-ipv4.sh\" \"30\"",
-		"uci set \"neto.$section.source=script\"",
-		"uci set \"neto.$section.auto_update=0\"",
 		"chmod 0755 /usr/share/neto/run-sing-box-log.sh",
 		"curl_usable()",
 		"wget -O \"$tmp\" \"$url\"",
@@ -90,6 +79,18 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 	}
 	if strings.Contains(s, "neto.$section.enabled") {
 		t.Fatalf("installer must not write provider enabled fields:\n%s", s)
+	}
+	for _, forbidden := range []string{
+		"ensure_builtin_providers",
+		"ensure_builtin_provider",
+		"ensure_builtin_script_provider",
+		"provider_url_exists",
+		"provider_script_exists",
+		"uci set \"neto.$section=provider\"",
+	} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("installer must not auto-create provider sections %q:\n%s", forbidden, s)
+		}
 	}
 }
 

@@ -112,11 +112,26 @@ func TestRulesLuCIImportExportForcesDirectAction(t *testing.T) {
 		"showImportRules: function()",
 		"handleImportRules: function(text)",
 		"s.renderSectionAdd = function()",
-		"ui.showModal(_('Export rules')",
-		"ui.showModal(_('Import rules')",
+		"function downloadTextFile(filename, text)",
+		"new Blob([ text ], { type: 'application/json' })",
+		"'download': filename",
+		"downloadTextFile('neto-rules.json', exportRulesJSON())",
+		"function pickTextFile(accept)",
+		"'type': 'file'",
+		"'accept': accept",
+		"new FileReader()",
+		"reader.readAsText(file)",
+		"pickTextFile('.json,application/json')",
 		"action: 'direct'",
 		"outbound: 'direct'",
 		"dns_mode: 'auto'",
+		"function isProviderRuleOption(option)",
+		"option == 'domain_provider' || option == 'ip_provider' || option == 'provider'",
+		"if (domainInput != '' && domainInput != 'provider')",
+		"if (ipInput != '' && ipInput != 'provider')",
+		"if (isProviderRuleOption(option))",
+		"if (domainInput == 'provider')",
+		"if (ipInput == 'provider')",
 		"uci.set('neto', section_id, 'action', 'direct')",
 		"uci.set('neto', section_id, 'outbound', 'direct')",
 		"uci.set('neto', section_id, 'dns_mode', 'auto')",
@@ -126,6 +141,17 @@ func TestRulesLuCIImportExportForcesDirectAction(t *testing.T) {
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("rules.js missing import/export safety behavior %q:\n%s", want, s)
+		}
+	}
+	for _, forbidden := range []string{
+		"ui.showModal(_('Export rules')",
+		"ui.showModal(_('Import rules')",
+		"'class': 'cbi-input-textarea'",
+		"textarea.focus()",
+		"textarea.select()",
+	} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("rules.js must use file import/export, not textbox modal %q:\n%s", forbidden, s)
 		}
 	}
 }

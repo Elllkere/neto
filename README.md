@@ -291,8 +291,8 @@ list domain_provider 'youtube_domains'
 list ip_provider 'cloudflare_ipv4'
 ```
 
-Installer добавляет built-in IP providers, если providers с таким URL или
-script path еще нет:
+LuCI Providers page кнопкой import добавляет provider presets, если provider с
+таким URL или script path еще нет:
 
 - Cloudflare IPv4: `https://www.cloudflare.com/ips-v4/`
 - Telegram IPv4: `https://core.telegram.org/resources/cidr.txt`
@@ -305,7 +305,7 @@ script path еще нет:
 AWS Full can match broad AWS infrastructure and may affect ping to games hosted
 on Amazon/AWS servers if a rule routes it through proxy.
 
-Built-in providers добавляются только для удобства. Они не создают rules и
+Provider presets добавляются только для удобства. Они не создают rules и
 создаются с `auto_update '0'`; включать автообновление пользователь решает сам.
 Built-in JSON scripts используют `jq`, если он уже установлен, но не требуют
 его: без `jq` работает POSIX fallback.
@@ -350,15 +350,17 @@ config provider 'json_ips'
 
 Manual update:
 
+On a fresh install, built-in provider names exist after importing provider
+presets from the LuCI Providers page.
+
 ```sh
 netod providers update
 netod providers update telegram_ipv4
 ```
 
-LuCI Providers page has an `Add community lists` action that adds reusable
-domain provider sources for Telegram, TikTok, Twitter, YouTube, Meta, Discord,
-and Anime from `itdoginfo/allow-domains`. It only creates providers, with
-`auto_update '0'`; rules are still configured separately.
+LuCI Providers page has an `Import provider presets` action that adds reusable
+community domain sources and built-in IP URL/script sources. It only creates
+providers, with `auto_update '0'`; rules are still configured separately.
 
 Provider caches are written to `/etc/neto/provider-cache/` so rules can compile
 after an OpenWrt reboot even when `/var` is linked to volatile `/tmp`.

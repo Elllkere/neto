@@ -49,8 +49,8 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"function(ev, section_id)",
 		"NETO_PROVIDER_PROXY",
 		"fs.exec('/usr/bin/netod', [ 'providers', 'update', section_id ])",
-		"handleAddCommunityProviders: function()",
-		"Add community lists",
+		"handleImportProviderPresets: function()",
+		"Import provider presets",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("providers.js missing %q:\n%s", want, s)
@@ -75,7 +75,7 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 	}
 }
 
-func TestProvidersLuCIAddsCommunityDomainProviders(t *testing.T) {
+func TestProvidersLuCIImportsProviderPresets(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/providers.js")
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +90,19 @@ func TestProvidersLuCIAddsCommunityDomainProviders(t *testing.T) {
 		"community_meta_domains",
 		"community_discord_domains",
 		"community_anime_domains",
+		"var builtinIPProviders = [",
+		"cloudflare_ipv4",
+		"telegram_ipv4",
+		"akamai_ipv4",
+		"aws_ipv4",
+		"aws_full_ipv4",
+		"aws_full_eu_ipv4",
+		"Cloudflare IPv4",
+		"Telegram IPv4",
+		"Akamai IPv4",
+		"AWS CDN IPv4",
+		"AWS Full IPv4 (may affect game ping)",
+		"AWS Full EU IPv4",
 		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/telegram.lst",
 		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/tiktok.lst",
 		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/twitter.lst",
@@ -97,19 +110,30 @@ func TestProvidersLuCIAddsCommunityDomainProviders(t *testing.T) {
 		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/meta.lst",
 		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Services/discord.lst",
 		"https://raw.githubusercontent.com/itdoginfo/allow-domains/refs/heads/main/Categories/anime.lst",
+		"https://www.cloudflare.com/ips-v4/",
+		"https://core.telegram.org/resources/cidr.txt",
+		"/usr/share/neto/providers/akamai-ipv4.sh",
+		"/usr/share/neto/providers/aws-ipv4.sh",
+		"/usr/share/neto/providers/aws-full-ipv4.sh",
+		"/usr/share/neto/providers/aws-full-eu-ipv4.sh",
 		"providerURLExists(def.url)",
+		"providerScriptExists(def.script_path)",
 		"uniqueProviderSection(def.section)",
+		"function addProviderPreset(def)",
 		"uci.add('neto', 'provider', section)",
-		"uci.set('neto', section, 'type', 'domain')",
-		"uci.set('neto', section, 'source', 'url')",
+		"uci.set('neto', section, 'type', def.type || 'domain')",
+		"uci.set('neto', section, 'source', source)",
+		"uci.set('neto', section, 'script_path', def.script_path)",
 		"uci.set('neto', section, 'auto_update', '0')",
-		"return this.handleSave()",
+		"uci.set('neto', section, 'update_minute', def.update_minute || '5')",
+		"return this.map.save(normalizeProviders)",
+		"for (var j = 0; j < builtinIPProviders.length; j++)",
 		"return uci.save('neto')",
 		"throw new Error(_('Save failed'))",
 		"return fs.exec('/sbin/uci', [ 'commit', 'neto' ])",
-		"return self.handleAddCommunityProviders().catch(function(err) {",
+		"return self.handleImportProviderPresets().catch(function(err) {",
 		"fs.exec('/etc/init.d/neto', [ 'restart' ])",
-		"Community lists already exist",
+		"Provider presets already exist",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("providers.js missing community provider preset %q:\n%s", want, s)

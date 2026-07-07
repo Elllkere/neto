@@ -397,6 +397,10 @@ function cleanBool(value, fallback) {
 	return fallback;
 }
 
+function isProviderRuleOption(option) {
+	return option == 'domain_provider' || option == 'ip_provider' || option == 'provider';
+}
+
 function exportRule(section_id) {
 	var rule = {
 		name: String(uci.get('neto', section_id, 'name') || section_id).trim() || section_id,
@@ -408,14 +412,17 @@ function exportRule(section_id) {
 	var domainInput = validInputMode(uci.get('neto', section_id, 'domain_input'), '', [ 'fields', 'text', 'provider', 'file' ]);
 	var ipInput = validInputMode(uci.get('neto', section_id, 'ip_input'), '', [ 'list', 'text', 'provider', 'file' ]);
 
-	if (domainInput != '')
+	if (domainInput != '' && domainInput != 'provider')
 		rule.domain_input = domainInput;
-	if (ipInput != '')
+	if (ipInput != '' && ipInput != 'provider')
 		rule.ip_input = ipInput;
 
 	for (var i = 0; i < ruleListOptions.length; i++) {
 		var option = ruleListOptions[i];
 		var values = optionValues(section_id, option);
+
+		if (isProviderRuleOption(option))
+			continue;
 
 		if (values.length > 0)
 			rule[option] = values;
@@ -454,9 +461,18 @@ function parseImportedRules(text) {
 	for (var i = 0; i < rules.length; i++) {
 		var rule = rules[i];
 		var cleanRule;
+		var domainInput;
+		var ipInput;
 
 		if (rule == null || typeof rule != 'object' || Array.isArray(rule))
 			continue;
+
+		domainInput = validInputMode(rule.domain_input, '', [ 'fields', 'text', 'provider', 'file' ]);
+		ipInput = validInputMode(rule.ip_input, '', [ 'list', 'text', 'provider', 'file' ]);
+		if (domainInput == 'provider')
+			domainInput = '';
+		if (ipInput == 'provider')
+			ipInput = '';
 
 		cleanRule = {
 			name: String(rule.name || ('imported_rule_' + (i + 1))).trim() || ('imported_rule_' + (i + 1)),
@@ -464,13 +480,16 @@ function parseImportedRules(text) {
 			action: 'direct',
 			outbound: 'direct',
 			dns_mode: 'auto',
-			domain_input: validInputMode(rule.domain_input, '', [ 'fields', 'text', 'provider', 'file' ]),
-			ip_input: validInputMode(rule.ip_input, '', [ 'list', 'text', 'provider', 'file' ])
+			domain_input: domainInput,
+			ip_input: ipInput
 		};
 
 		for (var j = 0; j < ruleListOptions.length; j++) {
 			var option = ruleListOptions[j];
 			var values = cleanValues(rule[option]);
+
+			if (isProviderRuleOption(option))
+				continue;
 
 			if (values.length > 0)
 				cleanRule[option] = values;
@@ -523,6 +542,9 @@ function writeImportedRule(section_id, rule) {
 	for (var i = 0; i < ruleListOptions.length; i++) {
 		var option = ruleListOptions[i];
 
+		if (isProviderRuleOption(option))
+			continue;
+
 		if (rule[option])
 			setListOption(section_id, option, rule[option]);
 	}
@@ -542,6 +564,85 @@ function replaceRules(rules) {
 		writeImportedRule(addRuleSection(), rules[j]);
 }
 
+function removeNode(node) {
+	if (node && node.parentNode)
+		node.parentNode.removeChild(node);
+}
+
+function downloadTextFile(filename, text) {
+	var urlAPI = window.URL || window.webkitURL;
+	var blob, url, link;
+
+	if (typeof Blob == 'undefined' || !urlAPI)
+		throw new Error(_('File download is not supported by this browser'));
+
+	blob = new Blob([ text ], { type: 'application/json' });
+	url = urlAPI.createObjectURL(blob);
+	link = E('a', {
+		'href': url,
+		'download': filename,
+		'style': 'display:none'
+	});
+
+	document.body.appendChild(link);
+	link.click();
+
+	window.setTimeout(function() {
+		removeNode(link);
+		urlAPI.revokeObjectURL(url);
+	}, 0);
+}
+
+function pickTextFile(accept) {
+	return new Promise(function(resolve, reject) {
+		var input;
+		var done = false;
+
+		if (typeof FileReader == 'undefined') {
+			reject(new Error(_('File import is not supported by this browser')));
+			return;
+		}
+
+		input = E('input', {
+			'type': 'file',
+			'accept': accept,
+			'style': 'display:none',
+			'change': function(ev) {
+				var file = ev.target.files && ev.target.files[0];
+				var reader;
+
+				if (!file) {
+					done = true;
+					removeNode(input);
+					resolve(null);
+					return;
+				}
+
+				reader = new FileReader();
+				reader.onload = function() {
+					done = true;
+					removeNode(input);
+					resolve(String(reader.result || ''));
+				};
+				reader.onerror = function() {
+					done = true;
+					removeNode(input);
+					reject(new Error(_('Import failed')));
+				};
+				reader.readAsText(file);
+			}
+		});
+
+		document.body.appendChild(input);
+		input.click();
+
+		window.setTimeout(function() {
+			if (!done)
+				removeNode(input);
+		}, 60000);
+	});
+}
+
 return view.extend({
 	load: function() {
 		return uci.load('neto').then(function() {
@@ -550,90 +651,25 @@ return view.extend({
 	},
 
 	showExportRules: function() {
-		var closeButton;
-		var textarea = E('textarea', {
-			'class': 'cbi-input-textarea',
-			'readonly': 'readonly',
-			'style': 'width:100%',
-			'rows': 16
-		}, [ exportRulesJSON() ]);
-
-		closeButton = E('button', {
-			'class': 'cbi-button cbi-button-neutral',
-			'click': ui.hideModal
-		}, _('Close'));
-
-		ui.showModal(_('Export rules'), [
-			E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title' }, _('Rules JSON')),
-				E('div', { 'class': 'cbi-value-field' }, textarea)
-			]),
-			E('div', { 'class': 'right' }, closeButton)
-		]);
-
-		if (typeof window != 'undefined') {
-			window.setTimeout(function() {
-				textarea.focus();
-				textarea.select();
-			}, 0);
+		try {
+			downloadTextFile('neto-rules.json', exportRulesJSON());
+		} catch (err) {
+			ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
 		}
 	},
 
 	showImportRules: function() {
-		var importButton, cancelButton;
-		var textarea = E('textarea', {
-			'class': 'cbi-input-textarea',
-			'style': 'width:100%',
-			'rows': 16
-		});
-		var status = E('span', {
-			'style': 'display:none;margin-left:1em'
-		}, _('Importing...'));
-
-		cancelButton = E('button', {
-			'class': 'cbi-button cbi-button-neutral',
-			'click': ui.hideModal
-		}, _('Cancel'));
-		importButton = E('button', {
-			'class': 'cbi-button cbi-button-action',
-			'click': L.bind(function(ev) {
-				var value = String(textarea.value || '').trim();
-
-				ev.preventDefault();
-				if (value == '') {
-					textarea.focus();
+		return pickTextFile('.json,application/json')
+			.then(L.bind(function(text) {
+				text = String(text || '').trim();
+				if (text == '')
 					return Promise.resolve();
-				}
 
-				importButton.disabled = true;
-				cancelButton.disabled = true;
-				textarea.disabled = true;
-				importButton.textContent = _('Importing...');
-				status.style.display = '';
-
-				return this.handleImportRules(value).catch(function(err) {
-					importButton.disabled = null;
-					cancelButton.disabled = null;
-					textarea.disabled = null;
-					importButton.textContent = _('Import');
-					status.style.display = 'none';
-					ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
-				});
-			}, this)
-		}, _('Import'));
-
-		ui.showModal(_('Import rules'), [
-			E('div', { 'class': 'cbi-value' }, [
-				E('label', { 'class': 'cbi-value-title' }, _('Rules JSON')),
-				E('div', { 'class': 'cbi-value-field' }, textarea)
-			]),
-			E('div', { 'class': 'right' }, [
-				cancelButton,
-				' ',
-				importButton,
-				status
-			])
-		]);
+				return this.handleImportRules(text);
+			}, this))
+			.catch(function(err) {
+				ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+			});
 	},
 
 	handleImportRules: function(text) {

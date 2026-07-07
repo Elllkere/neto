@@ -32,10 +32,11 @@ can use interval mode with `option update_schedule 'interval'` and
 `option update_interval_minutes '360'`. Supported intervals are `15`, `30`,
 `60`, `120`, `180`, `360`, `720`, and `1440` minutes.
 
-The LuCI Providers page can add community domain provider sources for Telegram,
-TikTok, Twitter, YouTube, Meta, Discord, and Anime from
-`itdoginfo/allow-domains`. This only creates provider sections with
-`auto_update '0'`; rules are configured separately.
+The LuCI Providers page can import provider presets. It includes community
+domain provider sources for Telegram, TikTok, Twitter, YouTube, Meta, Discord,
+and Anime from `itdoginfo/allow-domains`, plus built-in IP presets such as
+Cloudflare, Telegram, Akamai, and AWS scripts. This only creates provider
+sections with `auto_update '0'`; rules are configured separately.
 
 ## Uninstall
 

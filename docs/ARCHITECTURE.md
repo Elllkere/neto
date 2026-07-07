@@ -328,6 +328,9 @@ can run with the remaining valid policy.
 
 Manual update:
 
+On a fresh install, built-in provider names exist after importing provider
+presets from the LuCI Providers page.
+
 ```sh
 netod providers update
 netod providers update telegram_ipv4
@@ -347,9 +350,10 @@ Providers and subscriptions may instead use `update_schedule=interval` with
 `update_interval_minutes` set to `15`, `30`, `60`, `120`, `180`, `360`, `720`,
 or `1440`.
 
-Installer seeds built-in IP providers if URL or script path is not already
-present. Seeded built-ins are convenience data sources only and must be created
-with `auto_update=0`; users opt into scheduled updates themselves.
+LuCI Providers can import provider presets if URL or script path is not already
+present. Presets are convenience data sources only and must be created with
+`auto_update=0`; users opt into scheduled updates themselves. The installer must
+not create built-in provider sections automatically.
 
 LuCI Providers can add community domain provider sources from itdoginfo
 allow-domains. This creates only reusable `provider` sections with

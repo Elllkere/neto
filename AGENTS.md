@@ -198,15 +198,15 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
   succeeds.
 - `netod providers update [name]` updates URL providers using `curl` and script
   providers by executing `script_path`.
-- The installer seeds built-in IP providers for Cloudflare
+- LuCI Providers page can import built-in IP provider presets for Cloudflare
   (`https://www.cloudflare.com/ips-v4/`), Telegram
   (`https://core.telegram.org/resources/cidr.txt`), Akamai
   (`/usr/share/neto/providers/akamai-ipv4.sh`), AWS CDN
   (`/usr/share/neto/providers/aws-ipv4.sh`), AWS Full
   (`/usr/share/neto/providers/aws-full-ipv4.sh`), and AWS Full EU
-  (`/usr/share/neto/providers/aws-full-eu-ipv4.sh`) if no provider with the
-  same URL or script path already exists. These built-ins are convenience data
-  sources only: they must be created with `auto_update=0` and no rules.
+  (`/usr/share/neto/providers/aws-full-eu-ipv4.sh`). Installer must not create
+  these provider sections automatically. Presets are convenience data sources
+  only: they must be created with `auto_update=0` and no rules.
 - IP provider updates save only valid IPv4 CIDR/address entries; IPv6 entries
   from mixed feeds such as Telegram are ignored.
 - `auto_update=1` creates neto-owned cron entries, similar to protocol
@@ -220,9 +220,9 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
   route router-self traffic through nftables.
 - Rules reference providers with `domain_provider` or `ip_provider`.
 - Creating or updating a provider must not create rules.
-- LuCI Providers page may offer convenience buttons for community domain
-  provider sources. These must only create provider sections, with
-  `auto_update=0`, and must not create rules.
+- LuCI Providers page may offer an import preset button for community domain
+  sources and built-in IP URL/script sources. It must only create provider
+  sections, with `auto_update=0`, and must not create rules.
 
 ## Current Outbound Model
 

@@ -154,6 +154,9 @@ table does not exist. That means missing state, not fatal command failure.
 
 ## Provider Checks
 
+First use the LuCI Providers page `Import provider presets` action when checking
+built-in provider names on a fresh install.
+
 ```sh
 netod providers update
 netod providers update cloudflare_ipv4
