@@ -736,6 +736,17 @@ return view.extend({
 		s.anonymous = true;
 		s.addremove = true;
 		s.sortable = true;
+		s.renderHeaderRows = function() {
+			var sortable = this.sortable;
+
+			try {
+				// Keep row drag ordering, but do not let header clicks reorder rules by column values.
+				this.sortable = false;
+				return form.GridSection.prototype.renderHeaderRows.apply(this, arguments);
+			} finally {
+				this.sortable = sortable;
+			}
+		};
 		s.cfgsections = function() {
 			return sortRuleSectionIDs(form.GridSection.prototype.cfgsections.apply(this, arguments));
 		};
