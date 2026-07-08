@@ -89,7 +89,11 @@ func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[in
 			}
 		case "direct", "block":
 			for _, match := range matches {
-				b.WriteString(fmt.Sprintf("\t\t%s%s return\n", match, counter(cfg)))
+				verdict := "return"
+				if rule.Action == "block" {
+					verdict = "drop"
+				}
+				b.WriteString(fmt.Sprintf("\t\t%s%s %s\n", match, counter(cfg), verdict))
 			}
 		}
 	}

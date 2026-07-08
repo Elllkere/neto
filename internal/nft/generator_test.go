@@ -93,6 +93,77 @@ func TestGenerateInlineIPCIDRRule(t *testing.T) {
 	}
 }
 
+func TestGenerateBlockIPCIDRRuleDropsPacket(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Rules = []config.Rule{{
+		Name:    "blocked_ip",
+		Enabled: true,
+		Action:  "block",
+		DNSMode: "real_ip",
+		IPCIDRs: []string{
+			"8.8.8.8",
+		},
+	}}
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("8.8.8.8")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "8.8.8.8/32") || !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } drop") {
+		t.Fatalf("inline IP/CIDR block rule was not emitted as drop:\n%s", out)
+	}
+	if strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } return") {
+		t.Fatalf("IP/CIDR block rule must not return like direct:\n%s", out)
+	}
+}
+
+func TestGenerateIPCIDRRuleStopsDroppingWhenActionChangesFromBlock(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Rules = []config.Rule{{
+		Name:    "changed_ip",
+		Enabled: true,
+		Action:  "block",
+		DNSMode: "real_ip",
+		IPCIDRs: []string{
+			"8.8.8.8",
+		},
+	}}
+	ruleCIDRs := map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("8.8.8.8")}
+
+	blocked, err := Generate(Input{Config: cfg, RuleCIDRs: ruleCIDRs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(blocked, "ip daddr @rule4_0000 meta l4proto { tcp, udp } drop") {
+		t.Fatalf("initial block rule did not drop:\n%s", blocked)
+	}
+
+	cfg.Rules[0].Action = "direct"
+	direct, err := Generate(Input{Config: cfg, RuleCIDRs: ruleCIDRs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(direct, "ip daddr @rule4_0000 meta l4proto { tcp, udp } drop") {
+		t.Fatalf("direct rule must remove previous block drop:\n%s", direct)
+	}
+	if !strings.Contains(direct, "ip daddr @rule4_0000 meta l4proto { tcp, udp } return") {
+		t.Fatalf("direct rule must return after block is removed:\n%s", direct)
+	}
+
+	cfg.Rules[0].Action = "proxy"
+	proxy, err := Generate(Input{Config: cfg, RuleCIDRs: ruleCIDRs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(proxy, "ip daddr @rule4_0000 meta l4proto { tcp, udp } drop") {
+		t.Fatalf("proxy rule must remove previous block drop:\n%s", proxy)
+	}
+	if !strings.Contains(proxy, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") {
+		t.Fatalf("proxy rule must jump after block is removed:\n%s", proxy)
+	}
+}
+
 func TestGenerateMixedDomainAndProviderIPRule(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Main.NFTCounters = false

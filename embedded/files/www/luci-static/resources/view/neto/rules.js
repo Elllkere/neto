@@ -67,6 +67,29 @@ function sortRuleSectionIDs(ids) {
 	return ids;
 }
 
+function nextRulePriority() {
+	var ids = ruleSectionIDs();
+	var max = 0;
+
+	for (var i = 0; i < ids.length; i++) {
+		var priority = rulePriority(ids[i], 1000 + i);
+
+		if (priority > max)
+			max = priority;
+	}
+
+	return max + 100;
+}
+
+function initializeNewRuleSection(section_id, priority) {
+	uci.set('neto', section_id, 'enabled', '1');
+	uci.set('neto', section_id, 'action', 'proxy');
+	uci.set('neto', section_id, 'dns_mode', 'auto');
+	uci.set('neto', section_id, 'priority', String(priority));
+	uci.set('neto', section_id, 'domain_input', 'fields');
+	uci.set('neto', section_id, 'ip_input', 'list');
+}
+
 function renderedRuleSectionIDs(ids) {
 	var wanted = {};
 	var seen = {};
@@ -749,6 +772,14 @@ return view.extend({
 		};
 		s.cfgsections = function() {
 			return sortRuleSectionIDs(form.GridSection.prototype.cfgsections.apply(this, arguments));
+		};
+		s.handleAdd = function(ev, name) {
+			var configName = this.uciconfig || this.map.config;
+			var priority = nextRulePriority();
+			var sid = this.map.data.add(configName, this.sectiontype, name);
+
+			initializeNewRuleSection(sid, priority);
+			return this.map.save(null, true);
 		};
 		s.modaltitle = _('Rule details');
 		s.renderSectionAdd = function() {

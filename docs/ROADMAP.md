@@ -45,7 +45,6 @@ aarch64 with `apk`.
 
 - More complete provider management.
 - More complete subscription/import diagnostics.
-- Better packet-phase `block` behavior.
 - Better generated config diff/debug output.
 - More exhaustive sing-box config validation examples.
 - Optional advanced DNS settings after current simple DNS model stabilizes.

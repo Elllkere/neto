@@ -191,7 +191,8 @@ Rule action:
 
 - `proxy`: отправить matching traffic в выбранный outbound;
 - `direct`: вернуть traffic в обычный routing;
-- `block`: block behavior для DNS phase и packet phase через return/block semantics.
+- `block`: для domain rules вернуть локальный DNS block response; для
+  IP/CIDR/provider packet rules сгенерировать nft `drop`.
 
 ## DNS/FakeIP Semantics
 

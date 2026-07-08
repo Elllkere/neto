@@ -74,6 +74,15 @@ func TestRulesLuCISortsRenderedRulesByPriority(t *testing.T) {
 		"document.querySelectorAll('#cbi-neto-rule tr.cbi-section-table-row[data-sid]')",
 		"function orderedRuleSectionIDs()",
 		"var ids = orderedRuleSectionIDs()",
+		"function nextRulePriority()",
+		"var priority = rulePriority(ids[i], 1000 + i)",
+		"return max + 100",
+		"function initializeNewRuleSection(section_id, priority)",
+		"s.handleAdd = function(ev, name)",
+		"var priority = nextRulePriority()",
+		"var sid = this.map.data.add(configName, this.sectiontype, name)",
+		"initializeNewRuleSection(sid, priority)",
+		"return this.map.save(null, true)",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("rules.js missing priority-backed table ordering behavior %q:\n%s", want, s)

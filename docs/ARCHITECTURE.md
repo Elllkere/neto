@@ -163,8 +163,8 @@ Rule action:
 
 - `proxy`: route matching packet to selected outbound.
 - `direct`: return before proxy.
-- `block`: DNS phase returns local block response; packet phase returns/blocks
-  according to generated rule behavior.
+- `block`: DNS phase returns local block response; packet phase drops matching
+  IP/CIDR/provider traffic with nft `drop`.
 
 ## DNS/FakeIP
 
