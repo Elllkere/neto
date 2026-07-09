@@ -71,6 +71,12 @@ func Generate(cfg config.Config) ([]byte, error) {
 		})
 	}
 
+	routeRules := []any{
+		map[string]any{"action": "sniff"},
+		map[string]any{"protocol": "dns", "action": "hijack-dns"},
+	}
+	routeRules = append(routeRules, clientOutboundRouteRules(cfg)...)
+
 	doc := Config{
 		Log: map[string]any{
 			"level":     "warn",
@@ -127,10 +133,7 @@ func Generate(cfg config.Config) ([]byte, error) {
 		},
 		Outbounds: nil,
 		Route: Route{
-			Rules: []any{
-				map[string]any{"action": "sniff"},
-				map[string]any{"protocol": "dns", "action": "hijack-dns"},
-			},
+			Rules:                 routeRules,
 			Final:                 SelectedProxyOutbound(cfg),
 			DefaultDomainResolver: "real-direct",
 		},
@@ -315,6 +318,44 @@ func DNSProxyOutbound(cfg config.Config) string {
 		}
 	}
 	return SelectedProxyOutbound(cfg)
+}
+
+func clientOutboundRouteRules(cfg config.Config) []any {
+	allowed := cfg.AllowedOutboundTags()
+	seen := map[string]struct{}{}
+	var out []any
+
+	for _, client := range cfg.Clients {
+		if client.Policy != "proxy" {
+			continue
+		}
+		ip := strings.TrimSpace(client.IP)
+		tag := strings.TrimSpace(client.Outbound)
+		if ip == "" || tag == "" {
+			continue
+		}
+		if tag == config.BuiltinDirectOutbound || tag == config.BuiltinBlockedOutbound || tag == "block" || tag == "proxy_default" {
+			continue
+		}
+		if _, ok := allowed[tag]; !ok {
+			continue
+		}
+
+		key := ip + "\x00" + tag
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		out = append(out, map[string]any{
+			"inbound":        []string{"tproxy-in"},
+			"source_ip_cidr": []string{ip + "/32"},
+			"action":         "route",
+			"outbound":       tag,
+		})
+	}
+
+	return out
 }
 
 func hasProxyClient(cfg config.Config) bool {

@@ -237,12 +237,13 @@ Expected order:
 
 1. LAN source guard in `prerouting`.
 2. non-LAN return.
-3. `direct_clients4` return.
-4. `reserved4` return.
-5. `proxy_clients4`.
-6. FakeIP rule in `custom` mode.
-7. ordered provider/CIDR/IP rules.
-8. default return.
+3. `ct status dnat` return.
+4. `direct_clients4` return.
+5. `reserved4` return.
+6. `proxy_clients4`.
+7. FakeIP rule in `custom` mode.
+8. ordered provider/CIDR/IP rules.
+9. default return.
 
 Check packet port rules:
 

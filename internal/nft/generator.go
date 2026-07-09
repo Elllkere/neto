@@ -37,6 +37,7 @@ func Generate(in Input) (string, error) {
 	b.WriteString("\t\treturn\n")
 	b.WriteString("\t}\n")
 	b.WriteString("\tchain from_lan {\n")
+	b.WriteString(fmt.Sprintf("\t\tct status dnat%s return\n", counter(cfg)))
 	b.WriteString(fmt.Sprintf("\t\tip saddr @direct_clients4%s return\n", counter(cfg)))
 	b.WriteString(fmt.Sprintf("\t\tip daddr @reserved4%s return\n", counter(cfg)))
 	b.WriteString(fmt.Sprintf("\t\tip saddr @proxy_clients4 meta l4proto { tcp, udp }%s jump to_proxy_default\n", counter(cfg)))

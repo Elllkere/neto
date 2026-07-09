@@ -83,9 +83,10 @@ type Main struct {
 }
 
 type Client struct {
-	Name   string
-	IP     string
-	Policy string
+	Name     string
+	IP       string
+	Policy   string
+	Outbound string
 }
 
 type Rule struct {
@@ -565,9 +566,10 @@ func Parse(data string) (Config, error) {
 				cfg.Warnings = append(cfg.Warnings, warning)
 			}
 			cfg.Clients = append(cfg.Clients, Client{
-				Name:   firstNonEmpty(s.options["name"], s.name),
-				IP:     s.options["ip"],
-				Policy: policy,
+				Name:     firstNonEmpty(s.options["name"], s.name),
+				IP:       s.options["ip"],
+				Policy:   policy,
+				Outbound: normalizeClientOutbound(s.options["outbound"]),
 			})
 		case "rule":
 			rule, warnings := parseRule(s, len(cfg.Rules))
@@ -750,6 +752,21 @@ func (c Config) Validate() error {
 			}
 		default:
 			return fmt.Errorf("outbound %q has unsupported type %q", outbound.Tag, outbound.Type)
+		}
+	}
+	for _, cl := range c.Clients {
+		clientOutbound := strings.TrimSpace(cl.Outbound)
+		if cl.Policy != "proxy" || clientOutbound == "" {
+			continue
+		}
+		if clientOutbound == "proxy_default" {
+			return fmt.Errorf("client %q outbound 'proxy_default' is deprecated; choose a custom outbound", cl.Name)
+		}
+		if reservedCustomOutboundTag(clientOutbound) {
+			return fmt.Errorf("client %q outbound %q must be a custom outbound", cl.Name, clientOutbound)
+		}
+		if _, ok := seenOutboundTags[clientOutbound]; !ok {
+			return fmt.Errorf("client %q has unsupported outbound %q", cl.Name, clientOutbound)
 		}
 	}
 	if c.Main.RealDNSMode == "proxy" {
@@ -1889,6 +1906,14 @@ func normalizeClientPolicy(policy string) (string, string) {
 	default:
 		return policy, ""
 	}
+}
+
+func normalizeClientOutbound(outbound string) string {
+	outbound = strings.TrimSpace(outbound)
+	if outbound == "proxy_default" {
+		return ""
+	}
+	return outbound
 }
 
 func parseSections(data string) ([]section, error) {

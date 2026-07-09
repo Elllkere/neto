@@ -81,6 +81,9 @@ LAN traffic -> nft decides before sing-box
 
 Direct/bypass traffic must not enter sing-box.
 
+Client `proxy` policy forces non-reserved TCP/UDP from that LAN client through
+neto and can optionally select a custom sing-box outbound for that client.
+
 ## Status
 
 Supported:

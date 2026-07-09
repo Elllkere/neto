@@ -167,12 +167,13 @@ ip -4 route show table 101
 Порядок в generated `nft`:
 
 1. LAN guard.
-2. `direct_clients4` -> `return`.
-3. reserved/local destinations -> `return`.
-4. `proxy_clients4` -> proxy.
-5. `FakeIP` range -> proxy в `custom` mode.
-6. Ordered IP/provider/CIDR rules.
-7. default `return`.
+2. DNAT-associated connections, including port-forward replies, -> `return`.
+3. `direct_clients4` -> `return`.
+4. reserved/local destinations -> `return`.
+5. `proxy_clients4` -> proxy.
+6. `FakeIP` range -> proxy в `custom` mode.
+7. Ordered IP/provider/CIDR rules.
+8. default `return`.
 
 `routing_mode`:
 
@@ -184,7 +185,8 @@ ip -4 route show table 101
 Client policy:
 
 - `default`: следует `routing_mode`;
-- `proxy`: весь non-reserved TCP/UDP этого client идет в proxy;
+- `proxy`: весь non-reserved TCP/UDP этого client идет в proxy; опциональный
+  `outbound` выбирает custom sing-box outbound для этого client;
 - `direct`: hard bypass, real DNS only, no FakeIP.
 
 Rule action:

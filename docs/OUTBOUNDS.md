@@ -1,7 +1,7 @@
 # Outbounds
 
 `outbound` - это sing-box proxy profile, который выбирается в `rule` с
-`action=proxy`.
+`action=proxy` или в client policy с `policy=proxy`.
 
 Термины `direct`, `blocked`, `proxy`, `outbound`, `import`, `subscription`
 оставлены как config/UI names.
@@ -50,6 +50,20 @@ config rule
 
 `direct` и `blocked` относятся к action/built-in behavior, а не к proxy outbound
 selection в Rules UI.
+
+## Client Selection
+
+Client with `policy=proxy` may select a custom outbound:
+
+```uci
+config client
+	option ip '192.168.8.100'
+	option policy 'proxy'
+	option outbound 'my_vless'
+```
+
+If `outbound` is unset, the generated sing-box route falls back to the normal
+selected proxy outbound.
 
 ## Imports
 

@@ -130,11 +130,12 @@ Expected order:
 
 1. LAN source guard in `prerouting`.
 2. non-LAN return.
-3. `direct_clients4` return.
-4. `reserved4` return.
-5. `proxy_clients4`.
-6. FakeIP/provider/rule proxy rules.
-7. default return.
+3. `ct status dnat` return.
+4. `direct_clients4` return.
+5. `reserved4` return.
+6. `proxy_clients4`.
+7. FakeIP/provider/rule proxy rules.
+8. default return.
 
 Check TProxy route:
 

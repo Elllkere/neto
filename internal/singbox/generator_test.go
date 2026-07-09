@@ -303,6 +303,53 @@ func TestGenerateGlobalModeUsesFirstCustomOutbound(t *testing.T) {
 	}
 }
 
+func TestGenerateRoutesProxyClientToSelectedOutbound(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Outbounds = []config.Outbound{
+		{
+			Enabled: true,
+			Tag:     "first",
+			Type:    "vless",
+			Server:  "first.example.com",
+			Port:    443,
+			UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
+			TLS:     true,
+		},
+		{
+			Enabled:  true,
+			Tag:      "desktop_proxy",
+			Type:     "trojan",
+			Server:   "desktop.example.com",
+			Port:     443,
+			Password: "secret",
+			TLS:      true,
+		},
+	}
+	cfg.Clients = []config.Client{{
+		Name:     "desktop",
+		IP:       "192.168.8.100",
+		Policy:   "proxy",
+		Outbound: "desktop_proxy",
+	}}
+	route := generatedRoute(t, cfg)
+	rules := route["rules"].([]any)
+	if len(rules) < 3 {
+		t.Fatalf("expected client route rule, got %+v", route)
+	}
+	rule := rules[2].(map[string]any)
+	if rule["outbound"] != "desktop_proxy" || rule["action"] != "route" {
+		t.Fatalf("unexpected client outbound route rule: %+v", rule)
+	}
+	inbounds := rule["inbound"].([]any)
+	if len(inbounds) != 1 || inbounds[0] != "tproxy-in" {
+		t.Fatalf("client outbound route must be scoped to tproxy inbound: %+v", rule)
+	}
+	sourceCIDRs := rule["source_ip_cidr"].([]any)
+	if len(sourceCIDRs) != 1 || sourceCIDRs[0] != "192.168.8.100/32" {
+		t.Fatalf("client outbound route must match client source IP: %+v", rule)
+	}
+}
+
 func TestGenerateVLESSOutbound(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Outbounds = []config.Outbound{{

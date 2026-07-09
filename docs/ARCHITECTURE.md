@@ -127,12 +127,13 @@ table inet neto
 
 Order in `from_lan` chain:
 
-1. `direct_clients4` -> `return`.
-2. `reserved4` -> `return`.
-3. `proxy_clients4` -> `jump to_proxy_default`.
-4. `FakeIP` range rule in `custom` mode.
-5. ordered IP/provider/CIDR rules.
-6. default `return`.
+1. DNAT-associated connections, including port-forward replies, -> `return`.
+2. `direct_clients4` -> `return`.
+3. `reserved4` -> `return`.
+4. `proxy_clients4` -> `jump to_proxy_default`.
+5. `FakeIP` range rule in `custom` mode.
+6. ordered IP/provider/CIDR rules.
+7. default `return`.
 
 `TProxy` policy routing:
 
@@ -149,7 +150,8 @@ prerouting traffic должны вернуться до proxy/TProxy rules.
 Client policy:
 
 - absent/default: follows `routing_mode`;
-- `proxy`: force non-reserved TCP/UDP traffic from client through neto;
+- `proxy`: force non-reserved TCP/UDP traffic from client through neto; optional
+  `outbound` selects a custom sing-box outbound for that client;
 - `direct`: hard bypass, real DNS only, no FakeIP.
 
 `routing_mode`:

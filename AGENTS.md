@@ -64,6 +64,8 @@ top-level `neto/` directory.
 - netod must not proxy transparent TCP/UDP traffic.
 - neto must only route LAN client traffic.
 - WAN, inbound, router self, and non-LAN prerouting traffic must return.
+- DNAT-associated connections, including port-forward replies from LAN servers,
+  must return before client proxy policy.
 - IPv6 routing is not implemented in v1.
 - AAAA for FakeIP-matched domains must not leak real IPv6 while IPv6 routing is
   absent.
@@ -80,6 +82,7 @@ Client policies:
 
 - absent/default: follow general `routing_mode`.
 - `proxy`: force non-reserved TCP/UDP from this client through neto.
+  `option outbound` may select a custom sing-box outbound for this client.
 - `direct`: hard bypass. Real DNS only, no FakeIP, nft return before proxy rules.
 
 Routing modes:

@@ -21,3 +21,25 @@ func TestClientsLuCIPolicyHelpIsSectionDescription(t *testing.T) {
 		t.Fatalf("clients policy help must not render inside the table option:\n%s", s)
 	}
 }
+
+func TestClientsLuCIProxyPolicyCanSelectOutbound(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/clients.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"function addOutboundChoices(option)",
+		"uci.sections('neto', 'outbound'",
+		"tag == 'direct' || tag == 'blocked' || tag == 'block' || tag == 'proxy_default'",
+		"form.ListValue, 'outbound', _('Outbound')",
+		"o.depends('policy', 'proxy')",
+		"function rewriteClientState()",
+		"this.map.save(rewriteClientState)",
+		"uci.unset('neto', sid, 'outbound')",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("clients.js missing proxy outbound UI behavior %q:\n%s", want, s)
+		}
+	}
+}

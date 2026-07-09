@@ -221,6 +221,54 @@ config client
 	}
 }
 
+func TestParseClientProxyOutbound(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'my_vless'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+
+config client
+	option name 'desktop'
+	option ip '192.168.8.100'
+	option policy 'proxy'
+	option outbound 'my_vless'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Clients) != 1 || cfg.Clients[0].Outbound != "my_vless" {
+		t.Fatalf("unexpected client outbound: %+v", cfg.Clients)
+	}
+}
+
+func TestParseRejectsUnknownClientProxyOutbound(t *testing.T) {
+	_, err := Parse(`
+config client
+	option name 'desktop'
+	option ip '192.168.8.100'
+	option policy 'proxy'
+	option outbound 'missing_proxy'
+`)
+	if err == nil || !strings.Contains(err.Error(), "unsupported outbound") {
+		t.Fatalf("got error %v, want unsupported outbound", err)
+	}
+}
+
+func TestParseRejectsBuiltinClientProxyOutbound(t *testing.T) {
+	_, err := Parse(`
+config client
+	option name 'desktop'
+	option ip '192.168.8.100'
+	option policy 'proxy'
+	option outbound 'direct'
+`)
+	if err == nil || !strings.Contains(err.Error(), "must be a custom outbound") {
+		t.Fatalf("got error %v, want custom outbound requirement", err)
+	}
+}
+
 func TestRoutingModeOptions(t *testing.T) {
 	cfg, err := Parse(`
 config main 'main'

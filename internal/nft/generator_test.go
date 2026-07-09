@@ -27,6 +27,7 @@ func TestGenerateOrder(t *testing.T) {
 
 	guard := strings.Index(out, "ip saddr @lan_subnets4 jump from_lan")
 	fromLAN := strings.Index(out, "\tchain from_lan")
+	dnat := strings.Index(out, "ct status dnat return")
 	direct := strings.Index(out, "ip saddr @direct_clients4 return")
 	reserved := strings.Index(out, "ip daddr @reserved4 return")
 	forced := strings.Index(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_default")
@@ -34,11 +35,29 @@ func TestGenerateOrder(t *testing.T) {
 	subnet := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default")
 	def := strings.Index(out, "\t\treturn\n\t}\n\tchain to_proxy_default")
 
-	if !(guard >= 0 && guard < fromLAN && fromLAN < direct && direct < reserved && reserved < forced && forced < fakeip && fakeip < subnet && subnet < def) {
+	if !(guard >= 0 && guard < fromLAN && fromLAN < dnat && dnat < direct && direct < reserved && reserved < forced && forced < fakeip && fakeip < subnet && subnet < def) {
 		t.Fatalf("unexpected rule order:\n%s", out)
 	}
 	if strings.Count(out, "1.1.1.0/24") != 1 {
 		t.Fatalf("provider CIDR was not emitted once:\n%s", out)
+	}
+}
+
+func TestGenerateReturnsDNATConnectionsBeforeProxyClientPolicy(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.NFTCounters = false
+	cfg.Clients = []config.Client{
+		{Name: "rdp_host", IP: "192.168.8.100", Policy: "proxy"},
+	}
+	out, err := Generate(Input{Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dnat := strings.Index(out, "ct status dnat return")
+	forced := strings.Index(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_default")
+	if dnat < 0 || forced < 0 || dnat > forced {
+		t.Fatalf("DNAT-associated port-forward replies must return before proxy client policy:\n%s", out)
 	}
 }
 
