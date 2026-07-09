@@ -222,15 +222,15 @@ func TestWriteCacheMirrorsDefaultProviderCache(t *testing.T) {
 }
 
 func TestNormalizeDownloadedProviderLists(t *testing.T) {
-	domains, err := NormalizeDownloadedList(config.Provider{Name: "domains", Type: "domain"}, []byte("Example.COM.\nexample.org # comment\n\n"))
+	domains, err := NormalizeDownloadedList(config.Provider{Name: "domains", Type: "domain"}, []byte("Example.COM. example.net\n*.cdn.example.org .assets.example.org # comment\n\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(domains, []string{"example.com", "example.org"}) {
+	if !reflect.DeepEqual(domains, []string{"example.com", "example.net", "cdn.example.org", "assets.example.org"}) {
 		t.Fatalf("unexpected domains: %v", domains)
 	}
 
-	cidrs, err := NormalizeDownloadedList(config.Provider{Name: "ips", Type: "ip"}, []byte("1.1.1.1\n8.8.8.0/24\n2001:db8::/32\n"))
+	cidrs, err := NormalizeDownloadedList(config.Provider{Name: "ips", Type: "ip"}, []byte("1.1.1.1 8.8.8.0/24\n2001:db8::/32\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

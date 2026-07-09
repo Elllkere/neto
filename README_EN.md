@@ -38,6 +38,10 @@ and Anime from `itdoginfo/allow-domains`, plus built-in IP presets such as
 Cloudflare, Telegram, Akamai, and AWS scripts. This only creates provider
 sections with `auto_update '0'`; rules are configured separately.
 
+Domain provider cache accepts one or more whitespace-separated domains per
+line. Each domain entry is matched as the root domain and its subdomains, so
+`x.com` matches both `x.com` and `api.x.com`.
+
 ## Uninstall
 
 Normal uninstall keeps `/etc/config/neto` and `/etc/neto` for later reinstall:

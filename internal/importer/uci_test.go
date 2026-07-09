@@ -149,7 +149,9 @@ config outbound 'old'
 	if !strings.Contains(text, "manual.example.com") || !strings.Contains(text, "new.example.com") {
 		t.Fatalf("expected manual and new node:\n%s", text)
 	}
-	if !strings.Contains(text, "option node_count \"1\"") || !strings.Contains(text, "option subscription \"sub1\"") {
+	if !strings.Contains(text, "option node_count \"1\"") ||
+		!strings.Contains(text, "option last_update \"") ||
+		!strings.Contains(text, "option subscription \"sub1\"") {
 		t.Fatalf("subscription metadata missing:\n%s", text)
 	}
 	cfg, err := config.LoadFile(path)

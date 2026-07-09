@@ -339,11 +339,13 @@ netod providers update telegram_ipv4
 ```
 
 Provider source defaults to `url`. URL providers use `curl` to download raw
-text. Providers may also set `source=script` and an absolute `script_path`;
-the script returns one domain/IP/CIDR per line on stdout or writes the final
-result to `NETO_PROVIDER_OUTPUT`, then `netod` normalizes and writes the
-standard provider cache. Script providers keep `type=domain|ip`, because `type`
-describes the output data consumed by rules.
+text. Domain provider text may contain one or more whitespace-separated domains
+per line. A domain provider entry matches the root domain and subdomains.
+Providers may also set `source=script` and an absolute `script_path`; the script
+returns domains/IP/CIDRs on stdout or writes the final result to
+`NETO_PROVIDER_OUTPUT`, then `netod` normalizes and writes the standard provider
+cache. Script providers keep `type=domain|ip`, because `type` describes the
+output data consumed by rules.
 
 Auto-update cron defaults to fixed time scheduling with `update_schedule=time`.
 Provider fixed-time cron supports `update_hour` and `update_minute`. Missing

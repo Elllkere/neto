@@ -693,10 +693,14 @@ return view.extend({
 
 			return new Date(timestamp * 1000).toLocaleString();
 		};
-		o.modalonly = true;
 
 		o = sub.option(form.Button, '_update', _('Update'));
 		o.inputstyle = 'action';
+		o.inputtitle = _('Update');
+		o.cfgvalue = function() {
+			return true;
+		};
+		o.modalonly = true;
 		o.onclick = L.bind(function(ev, section_id) {
 			return this.handleSubscriptionUpdate(section_id).catch(function(err) {
 				ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');

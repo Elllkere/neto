@@ -95,7 +95,7 @@ func normalizeDomainList(data []byte) []string {
 	out := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
 	for _, value := range values {
-		value = strings.TrimRight(strings.ToLower(value), ".")
+		value = normalizeDomainValue(value)
 		if value == "" {
 			continue
 		}
@@ -129,11 +129,20 @@ func cleanLines(data []byte) []string {
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(stripLineComment(scanner.Text()))
-		if line != "" {
-			out = append(out, line)
+		for _, value := range strings.Fields(line) {
+			if value != "" {
+				out = append(out, value)
+			}
 		}
 	}
 	return out
+}
+
+func normalizeDomainValue(value string) string {
+	value = strings.TrimRight(strings.ToLower(strings.TrimSpace(value)), ".")
+	value = strings.TrimPrefix(value, "*.")
+	value = strings.TrimPrefix(value, ".")
+	return value
 }
 
 func stripLineComment(line string) string {

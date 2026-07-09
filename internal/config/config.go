@@ -1390,13 +1390,14 @@ func LoadRuleDomainFiles(cfg *Config) error {
 }
 
 func loadRuleDomainFiles(cfg *Config, rule *Rule) error {
-	var domains []string
+	var fileDomains []string
+	var providerDomains []string
 	for _, path := range rule.DomainFiles {
 		values, err := loadDomainFile(path)
 		if err != nil {
 			return err
 		}
-		domains = append(domains, values...)
+		fileDomains = append(fileDomains, values...)
 	}
 	for _, providerName := range appendList(rule.DomainProviders, rule.Providers) {
 		provider, ok := cfg.ProviderByName(providerName)
@@ -1424,10 +1425,11 @@ func loadRuleDomainFiles(cfg *Config, rule *Rule) error {
 			return fmt.Errorf("provider %q: %w", provider.Name, err)
 		}
 		_ = provider.MirrorDefaultCache()
-		domains = append(domains, values...)
+		providerDomains = append(providerDomains, values...)
 	}
-	if len(domains) > 0 {
-		rule.DomainEquals = cleanDomainList(appendList(rule.DomainEquals, domains))
+	if len(fileDomains)+len(providerDomains) > 0 {
+		rule.DomainEquals = cleanDomainList(appendList(rule.DomainEquals, appendList(fileDomains, providerDomains)))
+		rule.DomainEndsWith = cleanDomainList(appendList(rule.DomainEndsWith, domainProviderSuffixes(providerDomains)))
 	}
 	return nil
 }
@@ -1445,19 +1447,37 @@ func loadDomainFile(path string) ([]string, error) {
 	for scanner.Scan() {
 		lineNo++
 		line := strings.TrimSpace(stripComment(scanner.Text()))
-		if line == "" {
-			continue
+		for _, value := range strings.Fields(line) {
+			value = normalizeDomainFileValue(value)
+			if value == "" {
+				continue
+			}
+			out = append(out, value)
 		}
-		line = strings.TrimRight(strings.ToLower(line), ".")
-		if line == "" {
-			continue
-		}
-		out = append(out, line)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("%s:%d: %w", path, lineNo, err)
 	}
 	return cleanDomainList(out), nil
+}
+
+func normalizeDomainFileValue(value string) string {
+	value = strings.TrimRight(strings.ToLower(strings.TrimSpace(value)), ".")
+	value = strings.TrimPrefix(value, "*.")
+	value = strings.TrimPrefix(value, ".")
+	return value
+}
+
+func domainProviderSuffixes(domains []string) []string {
+	out := make([]string, 0, len(domains))
+	for _, domain := range domains {
+		domain = normalizeDomainFileValue(domain)
+		if domain == "" {
+			continue
+		}
+		out = append(out, "."+domain)
+	}
+	return cleanDomainList(out)
 }
 
 func parseOutbound(s section) (Outbound, []string) {

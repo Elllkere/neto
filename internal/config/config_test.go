@@ -116,6 +116,9 @@ func TestLoadRuleDomainFilesRestoresDefaultProviderCacheMirror(t *testing.T) {
 	if !reflect.DeepEqual(cfg.Rules[0].DomainEquals, []string{"example.com"}) {
 		t.Fatalf("unexpected restored domains: %+v", cfg.Rules[0].DomainEquals)
 	}
+	if !reflect.DeepEqual(cfg.Rules[0].DomainEndsWith, []string{".example.com"}) {
+		t.Fatalf("unexpected restored domain suffixes: %+v", cfg.Rules[0].DomainEndsWith)
+	}
 	if _, err := os.Stat(provider.CachePath()); err != nil {
 		t.Fatalf("runtime cache was not restored: %v", err)
 	}
@@ -525,12 +528,12 @@ config rule
 	}
 }
 
-func TestLoadFileExpandsDomainProviderCacheAsEquals(t *testing.T) {
+func TestLoadFileExpandsDomainProviderCacheAsRootAndSubdomains(t *testing.T) {
 	dir := t.TempDir()
 	cache := filepath.Join(dir, "provider.txt")
 	cfgPath := filepath.Join(dir, "neto")
 
-	if err := os.WriteFile(cache, []byte("YouTube.COM.\nwww.youtube.com\n"), 0644); err != nil {
+	if err := os.WriteFile(cache, []byte("YouTube.COM. www.youtube.com\nx.com twimg.com # comment\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(cfgPath, []byte(`
@@ -552,8 +555,12 @@ config rule
 		t.Fatal(err)
 	}
 	got := strings.Join(cfg.Rules[0].DomainEquals, ",")
-	if got != "youtube.com,www.youtube.com" {
+	if got != "youtube.com,www.youtube.com,x.com,twimg.com" {
 		t.Fatalf("unexpected provider domain expansion: %q", got)
+	}
+	gotSuffixes := strings.Join(cfg.Rules[0].DomainEndsWith, ",")
+	if gotSuffixes != ".youtube.com,.www.youtube.com,.x.com,.twimg.com" {
+		t.Fatalf("unexpected provider domain suffix expansion: %q", gotSuffixes)
 	}
 }
 

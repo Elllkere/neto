@@ -79,6 +79,54 @@ func TestOutboundsLuCIContainsImportAndSubscriptions(t *testing.T) {
 	}
 }
 
+func TestOutboundsLuCIShowsSubscriptionUpdatedInTable(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/outbounds.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	needle := "sub.option(form.DummyValue, 'last_update'"
+	start := strings.Index(s, needle)
+	if start < 0 {
+		t.Fatalf("outbounds.js missing subscription updated field %q:\n%s", needle, s)
+	}
+	end := strings.Index(s[start+len(needle):], "\n\t\to = sub.option(")
+	block := s[start:]
+	if end >= 0 {
+		block = s[start : start+len(needle)+end]
+	}
+	if strings.Contains(block, "o.modalonly = true") {
+		t.Fatalf("subscription updated field should remain visible in table:\n%s", block)
+	}
+}
+
+func TestOutboundsLuCISubscriptionUpdateButtonIsModalOnly(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/outbounds.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	needle := "sub.option(form.Button, '_update'"
+	start := strings.Index(s, needle)
+	if start < 0 {
+		t.Fatalf("outbounds.js missing subscription update button %q:\n%s", needle, s)
+	}
+	end := strings.Index(s[start+len(needle):], "\n\t\to = sub.option(")
+	block := s[start:]
+	if end >= 0 {
+		block = s[start : start+len(needle)+end]
+	}
+	for _, want := range []string{
+		"o.inputtitle = _('Update')",
+		"return true;",
+		"o.modalonly = true",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("subscription update button missing %q:\n%s", want, block)
+		}
+	}
+}
+
 func TestNoSeparateImportsLuCIMenu(t *testing.T) {
 	menu, err := os.ReadFile("../../embedded/files/usr/share/luci/menu.d/luci-app-neto.json")
 	if err != nil {

@@ -294,6 +294,10 @@ list domain_provider 'youtube_domains'
 list ip_provider 'cloudflare_ipv4'
 ```
 
+Domain provider cache accepts one or more whitespace-separated domains per
+line. Each domain entry is matched as the root domain and its subdomains, so
+`x.com` matches both `x.com` and `api.x.com`.
+
 LuCI Providers page кнопкой import добавляет provider presets, если provider с
 таким URL или script path еще нет:
 
