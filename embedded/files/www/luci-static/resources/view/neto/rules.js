@@ -774,12 +774,22 @@ return view.extend({
 			return sortRuleSectionIDs(form.GridSection.prototype.cfgsections.apply(this, arguments));
 		};
 		s.handleAdd = function(ev, name) {
-			var configName = this.uciconfig || this.map.config;
+			var data = this.map.data;
+			var add = data.add;
 			var priority = nextRulePriority();
-			var sid = this.map.data.add(configName, this.sectiontype, name);
 
-			initializeNewRuleSection(sid, priority);
-			return this.map.save(null, true);
+			data.add = function(configName, sectionType, sectionName) {
+				var sid = add.apply(this, arguments);
+
+				initializeNewRuleSection(sid, priority);
+				return sid;
+			};
+
+			try {
+				return form.GridSection.prototype.handleAdd.apply(this, arguments);
+			} finally {
+				data.add = add;
+			}
 		};
 		s.modaltitle = _('Rule details');
 		s.renderSectionAdd = function() {

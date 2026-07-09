@@ -80,13 +80,27 @@ func TestRulesLuCISortsRenderedRulesByPriority(t *testing.T) {
 		"function initializeNewRuleSection(section_id, priority)",
 		"s.handleAdd = function(ev, name)",
 		"var priority = nextRulePriority()",
-		"var sid = this.map.data.add(configName, this.sectiontype, name)",
+		"data.add = function(configName, sectionType, sectionName)",
+		"var sid = add.apply(this, arguments)",
 		"initializeNewRuleSection(sid, priority)",
-		"return this.map.save(null, true)",
+		"return form.GridSection.prototype.handleAdd.apply(this, arguments)",
+		"data.add = add",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("rules.js missing priority-backed table ordering behavior %q:\n%s", want, s)
 		}
+	}
+	handleAddStart := strings.Index(s, "s.handleAdd = function(ev, name)")
+	if handleAddStart < 0 {
+		t.Fatalf("could not find add handler block:\n%s", s)
+	}
+	handleAddEnd := strings.Index(s[handleAddStart:], "s.modaltitle = _('Rule details')")
+	if handleAddEnd < 0 {
+		t.Fatalf("could not find add handler block:\n%s", s)
+	}
+	handleAddBlock := s[handleAddStart : handleAddStart+handleAddEnd]
+	if strings.Contains(handleAddBlock, "this.map.save(null, true)") {
+		t.Fatalf("rule add handler must preserve GridSection modal flow, not save immediately:\n%s", handleAddBlock)
 	}
 }
 
