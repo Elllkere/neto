@@ -34,7 +34,7 @@ const (
 )
 
 var version = "dev"
-var singBoxLogPath = "/var/log/neto/sing-box.log"
+var singBoxLogPath = "/tmp/neto/sing-box.log"
 
 type options struct {
 	configPath        string

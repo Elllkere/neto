@@ -94,6 +94,7 @@ https://github.com/elllkere/neto/releases/latest/download/neto-openwrt-embedded.
 - `/etc/neto/dnsmasq-state/`
 - `/tmp/neto/neto.nft`
 - `/tmp/neto/sing-box.json`
+- `/tmp/neto/sing-box.log`
 - `/var/lib/neto/`
 
 ## Lifecycle
@@ -210,7 +211,9 @@ Local sing-box DNS listeners:
 
 sing-box process logs are not forwarded to OpenWrt `logread`. `/etc/init.d/neto`
 starts sing-box through `/usr/share/neto/run-sing-box-log.sh`, which writes
-`/var/log/neto/sing-box.log`; LuCI exposes that file through the `Logs` page.
+volatile logs to `/tmp/neto/sing-box.log`; LuCI exposes that file through the
+`Logs` page. The default path is under `/tmp` to avoid persistent flash/overlay
+writes.
 
 Real DNS config:
 

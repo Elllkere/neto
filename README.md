@@ -226,8 +226,9 @@ Local DNS listeners:
 - real-proxy: `127.0.0.1:15355`
 
 sing-box logs are kept out of OpenWrt `logread` / LuCI System Log. neto starts
-sing-box through a small wrapper that writes `/var/log/neto/sing-box.log`; LuCI
-shows it in the `Logs` page.
+sing-box through a small wrapper that writes volatile logs to
+`/tmp/neto/sing-box.log`; LuCI shows it in the `Logs` page. The default path is
+under `/tmp` to avoid persistent flash/overlay writes.
 
 Semantics:
 

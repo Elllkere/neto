@@ -2,7 +2,7 @@
 
 bin="${1:-/usr/libexec/neto/sing-box}"
 config="${2:-/tmp/neto/sing-box.json}"
-log_file="${NETO_SINGBOX_LOG:-/var/log/neto/sing-box.log}"
+log_file="${NETO_SINGBOX_LOG:-/tmp/neto/sing-box.log}"
 log_max_bytes="${NETO_SINGBOX_LOG_MAX_BYTES:-524288}"
 log_keep_bytes="${NETO_SINGBOX_LOG_KEEP_BYTES:-262144}"
 log_dir="${log_file%/*}"

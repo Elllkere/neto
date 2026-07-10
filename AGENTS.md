@@ -49,7 +49,7 @@ top-level `neto/` directory.
 - `/etc/neto/provider-cache/`
 - `/tmp/neto/neto.nft`
 - `/tmp/neto/sing-box.json`
-- `/var/log/neto/sing-box.log`
+- `/tmp/neto/sing-box.log`
 - `/var/lib/neto/`
 
 ## Critical Invariants
@@ -60,7 +60,8 @@ top-level `neto/` directory.
 - sing-box owns FakeIP and the FakeIP domain mapping.
 - sing-box stdout/stderr must not be forwarded to OpenWrt system log. The init
   script runs sing-box through `/usr/share/neto/run-sing-box-log.sh`, which
-  writes `/var/log/neto/sing-box.log` for the LuCI Logs page.
+  writes volatile `/tmp/neto/sing-box.log` for the LuCI Logs page to avoid
+  persistent flash/overlay writes.
 - netod must not proxy transparent TCP/UDP traffic.
 - neto must only route LAN client traffic.
 - WAN, inbound, router self, and non-LAN prerouting traffic must return.

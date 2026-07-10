@@ -143,8 +143,9 @@ Installed neto without `sing-box` takes about 5 MB of flash.
 ## Logs
 
 sing-box stdout/stderr is not forwarded to OpenWrt `logread` / LuCI System Log.
-neto writes sing-box process logs to `/var/log/neto/sing-box.log` and exposes
-them on the LuCI `Logs` page.
+neto writes sing-box process logs to volatile `/tmp/neto/sing-box.log` and
+exposes them on the LuCI `Logs` page. The default path is under `/tmp` to avoid
+persistent flash/overlay writes.
 
 ## Docs
 

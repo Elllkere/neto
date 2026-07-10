@@ -129,7 +129,7 @@ func TestEmbeddedSingBoxLogWrapperIsInstalledAsset(t *testing.T) {
 	s := string(data)
 	for _, want := range []string{
 		"#!/bin/sh",
-		"/var/log/neto/sing-box.log",
+		"/tmp/neto/sing-box.log",
 		"tail -c \"$log_keep_bytes\"",
 		"exec \"$bin\" run -c \"$config\" >> \"$log_file\" 2>&1",
 	} {
