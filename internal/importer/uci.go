@@ -34,9 +34,11 @@ func ApplyNodes(nodes []Node, opts ApplyOptions) (int, error) {
 	}
 	chunks := parseChunks(string(data))
 	used := collectOutboundTags(chunks)
+	var matchedSubscriptionTags map[string][]string
 
 	if opts.Replace && strings.TrimSpace(opts.Source) != "" {
 		source := strings.TrimSpace(opts.Source)
+		matchedSubscriptionTags = collectSubscriptionTags(chunks, source)
 		filtered := chunks[:0]
 		for _, chunk := range chunks {
 			if chunk.Type == "outbound" && chunk.Options["subscription"] == source {
@@ -51,7 +53,12 @@ func ApplyNodes(nodes []Node, opts ApplyOptions) (int, error) {
 	var appended []string
 	for i, node := range nodes {
 		outbound := node.Outbound
-		if strings.TrimSpace(outbound.Tag) == "" {
+		if tag := takeSubscriptionTag(matchedSubscriptionTags, subscriptionNodeKey(outbound)); tag != "" {
+			// A subscription refresh is allowed to change node parameters, but a
+			// rule may already refer to this node's UCI tag. Keep the tag when the
+			// protocol endpoint and credentials identify the same node.
+			outbound.Tag = tag
+		} else if strings.TrimSpace(outbound.Tag) == "" {
 			outbound.Tag = uniqueTag(tagBase(node, opts, i), used)
 		} else {
 			outbound.Tag = uniqueTag(outbound.Tag, used)
@@ -164,6 +171,78 @@ func collectOutboundTags(chunks []chunk) map[string]struct{} {
 		}
 	}
 	return used
+}
+
+// collectSubscriptionTags returns existing tags grouped by the stable
+// subscription-node identity. A slice is used because a subscription can
+// legitimately contain duplicate nodes.
+func collectSubscriptionTags(chunks []chunk, source string) map[string][]string {
+	tags := make(map[string][]string)
+	for _, chunk := range chunks {
+		if chunk.Type != "outbound" || chunk.Options["subscription"] != source {
+			continue
+		}
+		key := subscriptionNodeKey(config.Outbound{
+			Type:     chunk.Options["type"],
+			Server:   firstNonEmpty(chunk.Options["server"], chunk.Options["address"]),
+			Port:     optionPort(chunk.Options["port"]),
+			UUID:     chunk.Options["uuid"],
+			Password: chunk.Options["password"],
+			Method:   firstNonEmpty(chunk.Options["method"], chunk.Options["shadowsocks_encrypt_method"]),
+		})
+		tag := strings.TrimSpace(firstNonEmpty(chunk.Options["tag"], chunk.Name))
+		if key != "" && tag != "" {
+			tags[key] = append(tags[key], tag)
+		}
+	}
+	return tags
+}
+
+func takeSubscriptionTag(tags map[string][]string, key string) string {
+	if len(tags) == 0 || key == "" {
+		return ""
+	}
+	matched := tags[key]
+	if len(matched) == 0 {
+		return ""
+	}
+	tag := matched[0]
+	tags[key] = matched[1:]
+	return tag
+}
+
+// subscriptionNodeKey intentionally excludes mutable transport and display
+// fields. Providers commonly change those during a refresh, while the
+// protocol endpoint plus its credential identifies the same logical node.
+func subscriptionNodeKey(outbound config.Outbound) string {
+	typ := strings.ToLower(strings.TrimSpace(outbound.Type))
+	server := strings.ToLower(strings.TrimSpace(outbound.Server))
+	if typ == "" || server == "" || outbound.Port <= 0 {
+		return ""
+	}
+	credential := ""
+	switch typ {
+	case "vless":
+		credential = strings.TrimSpace(outbound.UUID)
+	case "hysteria2", "trojan":
+		credential = strings.TrimSpace(outbound.Password)
+	case "shadowsocks":
+		credential = strings.TrimSpace(outbound.Method) + "\x00" + strings.TrimSpace(outbound.Password)
+	default:
+		return ""
+	}
+	if credential == "" {
+		return ""
+	}
+	return typ + "\x00" + server + "\x00" + strconv.Itoa(outbound.Port) + "\x00" + credential
+}
+
+func optionPort(value string) int {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 func tagBase(node Node, opts ApplyOptions, index int) string {

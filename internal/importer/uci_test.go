@@ -205,3 +205,54 @@ config subscription 'sub1'
 		t.Fatalf("expected repeated subscription update to replace with stable tag %q, got %+v", firstTag, second.Outbounds)
 	}
 }
+
+func TestApplySubscriptionNodesPreservesTagUsedByRule(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "neto")
+	if err := os.WriteFile(path, []byte(`
+config subscription 'sub1'
+	option url 'https://example.com/sub'
+
+config rule 'cf'
+	option action 'proxy'
+	option dns_mode 'auto'
+	list domain_equals 'example.com'
+	option outbound 'sub1_existing'
+
+config outbound 'sub1_existing'
+	option tag 'sub1_existing'
+	option type 'vless'
+	option server 'node.example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+	option subscription 'sub1'
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []Node{{
+		// The changed link label and TLS setting must update the node without
+		// invalidating the rule that selects it by its stable tag.
+		Raw: "vless://a3482e88-686a-4a58-8126-99c9df64b060@node.example.com:443?security=tls#Updated",
+		Outbound: config.Outbound{
+			Enabled: true,
+			Type:    "vless",
+			Label:   "Updated",
+			Server:  "node.example.com",
+			Port:    443,
+			UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
+			TLS:     true,
+		},
+	}}
+	if _, err := ApplyNodes(nodes, ApplyOptions{ConfigPath: path, Source: "sub1", Subscription: true, Replace: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Outbounds) != 1 || cfg.Outbounds[0].Tag != "sub1_existing" || !cfg.Outbounds[0].TLS {
+		t.Fatalf("subscription node was not updated in place: %+v", cfg.Outbounds)
+	}
+	if len(cfg.Rules) != 1 || cfg.Rules[0].Outbound != "sub1_existing" {
+		t.Fatalf("rule reference was not preserved: %+v", cfg.Rules)
+	}
+}
