@@ -4,14 +4,6 @@ set -eu
 
 AWS_IP_RANGES_URL="https://ip-ranges.amazonaws.com/ip-ranges.json"
 
-AWS_REGIONS="
-eu-central-1
-eu-central-2
-eu-west-1
-eu-west-2
-eu-west-3
-"
-
 AWS_SERVICES="
 CLOUDFRONT
 S3
@@ -41,12 +33,11 @@ fetch_url() {
 
 extract_aws_prefixes() {
 	if command -v jq >/dev/null 2>&1; then
-		jq -r --arg regions "$AWS_REGIONS" --arg services "$AWS_SERVICES" '
-			($regions | split("\n") | map(select(length > 0))) as $allowed_regions |
+		jq -r --arg services "$AWS_SERVICES" '
 			($services | split("\n") | map(select(length > 0))) as $allowed_services |
 			.prefixes[] |
 			select(
-				(.region as $r | $allowed_regions | index($r)) and
+				(.region | startswith("eu-")) and
 				(.service as $s | $allowed_services | index($s))
 			) |
 			.ip_prefix
@@ -54,13 +45,8 @@ extract_aws_prefixes() {
 		return
 	fi
 
-	awk -v regions="$AWS_REGIONS" -v services="$AWS_SERVICES" '
+	awk -v services="$AWS_SERVICES" '
 	BEGIN {
-		split(regions, regionList)
-		for (i in regionList) {
-			if (regionList[i] != "")
-				allowedRegion[regionList[i]] = 1
-		}
 		split(services, serviceList)
 		for (i in serviceList) {
 			if (serviceList[i] != "")
@@ -79,7 +65,7 @@ extract_aws_prefixes() {
 		service = ""
 	}
 	function emit_entry() {
-		if (ip != "" && allowedRegion[region] && allowedService[service])
+		if (ip != "" && region ~ /^eu-/ && allowedService[service])
 			print ip
 	}
 	/^[[:space:]]*\{/ {
