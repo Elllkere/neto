@@ -108,6 +108,14 @@ var builtinIPProviders = [
 		source: 'script',
 		script_path: '/usr/share/neto/providers/aws-full-eu-ipv4.sh',
 		update_minute: '30'
+	},
+	{
+		section: 'google_cloud_eu_ipv4',
+		label: 'Google Cloud Europe IPv4',
+		type: 'ip',
+		source: 'script',
+		script_path: '/usr/share/neto/providers/google-cloud-eu-ipv4.sh',
+		update_minute: '35'
 	}
 ];
 
@@ -343,13 +351,7 @@ return view.extend({
 	handleSaveApply: function(ev) {
 		return this.handleSave(ev)
 			.then(function() {
-				return uci.apply();
-			})
-			.then(function() {
-				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
-			})
-			.then(function() {
-				window.location.reload();
+				return netoUI.applyAndRestart();
 			});
 	},
 

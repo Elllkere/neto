@@ -51,5 +51,9 @@ done
 	echo "missing upgrade.sh" >&2
 	exit 1
 }
+[ -x "$TMP/files/usr/share/neto/check-version.sh" ] || {
+	echo "missing check-version.sh" >&2
+	exit 1
+}
 
 echo "archive ok"

@@ -66,6 +66,7 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"normalized=\"$(network_from_ip_prefix \"$ipaddr\" \"$prefix\"",
 		"ensure_lan_subnet_config",
 		"chmod 0755 /usr/share/neto/run-sing-box-log.sh",
+		"chmod 0755 /usr/share/neto/check-version.sh",
 		"curl_usable()",
 		"wget -O \"$tmp\" \"$url\"",
 		"curl -fsSL \"$url\" -o \"$tmp\"",
@@ -94,6 +95,24 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 	}
 }
 
+func TestVersionCheckWrapperCannotTriggerUpgrade(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/usr/share/neto/check-version.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat("../../embedded/files/usr/share/neto/check-version.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0111 == 0 {
+		t.Fatal("check-version.sh is not executable")
+	}
+	s := string(data)
+	if !strings.Contains(s, "exec /usr/share/neto/upgrade.sh --check") {
+		t.Fatalf("version wrapper must force check-only mode:\n%s", s)
+	}
+}
+
 func TestUpgradeScriptFallsBackAroundBrokenCurl(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/upgrade.sh")
 	if err != nil {
@@ -102,6 +121,14 @@ func TestUpgradeScriptFallsBackAroundBrokenCurl(t *testing.T) {
 	s := string(data)
 	for _, want := range []string{
 		"curl_usable()",
+		"--check) MODE=\"check\"",
+		"--luci) MODE=\"luci\"",
+		"latest_version()",
+		"neto-version.txt",
+		"RELEASE_API_URL",
+		"status=\"available\"",
+		"printf 'current=%s\\nlatest=%s\\nstatus=%s\\n'",
+		"sh \"$TMP\" --no-ui-restart",
 		"wget -O \"$tmp\" \"$url\"",
 		"curl -fsSL \"$url\" -o \"$tmp\"",
 		"attempts=\"$attempts broken-curl\"",
@@ -109,6 +136,23 @@ func TestUpgradeScriptFallsBackAroundBrokenCurl(t *testing.T) {
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("upgrade script missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestInstallerCanKeepLuCIConnectionAliveDuringUpdate(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"--no-ui-restart)",
+		"RESTART_UI=0",
+		"if [ \"$RESTART_UI\" -eq 1 ]; then",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("installer missing %q:\n%s", want, s)
 		}
 	}
 }
@@ -145,6 +189,7 @@ func TestEmbeddedProviderScriptsAreInstalledAssets(t *testing.T) {
 		"../../embedded/files/usr/share/neto/providers/aws-ipv4.sh",
 		"../../embedded/files/usr/share/neto/providers/aws-full-ipv4.sh",
 		"../../embedded/files/usr/share/neto/providers/aws-full-eu-ipv4.sh",
+		"../../embedded/files/usr/share/neto/providers/google-cloud-eu-ipv4.sh",
 	} {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -170,6 +215,25 @@ func TestEmbeddedProviderScriptsAreInstalledAssets(t *testing.T) {
 		}
 		if strings.Contains(s, "select(test(") {
 			t.Fatalf("%s must not use jq regex functions; OpenWrt jq may be built without ONIGURUMA:\n%s", path, s)
+		}
+	}
+}
+
+func TestEmbeddedGoogleCloudProviderScriptFiltersEuropeanIPv4Ranges(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/usr/share/neto/providers/google-cloud-eu-ipv4.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"https://www.gstatic.com/ipranges/cloud.json",
+		"startswith(\"europe-\")",
+		"/^europe-/",
+		".ipv4Prefix // empty",
+		"Google Cloud IPv4 ranges for Europe",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("Google Cloud Europe provider missing %q:\n%s", want, s)
 		}
 	}
 }

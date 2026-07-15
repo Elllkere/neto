@@ -35,7 +35,7 @@ can use interval mode with `option update_schedule 'interval'` and
 The LuCI Providers page can import provider presets. It includes community
 domain provider sources for Telegram, TikTok, Twitter, YouTube, Meta, Discord,
 and Anime from `itdoginfo/allow-domains`, plus built-in IP presets such as
-Cloudflare, Telegram, Akamai, and AWS scripts. This only creates provider
+Cloudflare, Telegram, Akamai, AWS, and Google Cloud scripts. This only creates provider
 sections with `auto_update '0'`; rules are configured separately.
 
 Domain provider cache accepts one or more whitespace-separated domains per

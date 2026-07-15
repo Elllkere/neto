@@ -208,7 +208,8 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
   (`/usr/share/neto/providers/akamai-ipv4.sh`), AWS CDN
   (`/usr/share/neto/providers/aws-ipv4.sh`), AWS Full
   (`/usr/share/neto/providers/aws-full-ipv4.sh`), and AWS Full EU
-  (`/usr/share/neto/providers/aws-full-eu-ipv4.sh`). Installer must not create
+  (`/usr/share/neto/providers/aws-full-eu-ipv4.sh`), and Google Cloud Europe
+  (`/usr/share/neto/providers/google-cloud-eu-ipv4.sh`). Installer must not create
   these provider sections automatically. Presets are convenience data sources
   only: they must be created with `auto_update=0` and no rules.
 - IP provider updates save only valid IPv4 CIDR/address entries; IPv6 entries

@@ -11,10 +11,11 @@ LOCAL_ARCHIVE=""
 DRY_RUN=0
 VERBOSE=0
 LANGUAGE_CHOICE=""
+RESTART_UI=1
 
 usage() {
 	cat >&2 <<'EOF'
-usage: install.sh [--local ./dist/neto-openwrt-embedded.tar.gz] [--dry-run] [--verbose] [--language en|ru]
+usage: install.sh [--local ./dist/neto-openwrt-embedded.tar.gz] [--dry-run] [--verbose] [--language en|ru] [--no-ui-restart]
 EOF
 }
 
@@ -51,6 +52,10 @@ while [ "$#" -gt 0 ]; do
 					;;
 			esac
 			shift 2
+			;;
+		--no-ui-restart)
+			RESTART_UI=0
+			shift
 			;;
 		-h|--help)
 			usage
@@ -493,6 +498,7 @@ install_files() {
 	cp -R "$WORK_DIR/files/." /
 	chmod 0755 /etc/init.d/neto
 	[ -f /usr/share/neto/run-sing-box-log.sh ] && chmod 0755 /usr/share/neto/run-sing-box-log.sh
+	[ -f /usr/share/neto/check-version.sh ] && chmod 0755 /usr/share/neto/check-version.sh
 	if [ -d /usr/share/neto/providers ]; then
 		for script in /usr/share/neto/providers/*.sh; do
 			[ -f "$script" ] && chmod 0755 "$script"
@@ -601,11 +607,13 @@ install_files "$arch"
 /etc/init.d/neto enable
 /etc/init.d/neto restart
 
-if [ -x /etc/init.d/rpcd ]; then
-	/etc/init.d/rpcd restart || true
-fi
-if [ -x /etc/init.d/uhttpd ]; then
-	/etc/init.d/uhttpd restart || true
+if [ "$RESTART_UI" -eq 1 ]; then
+	if [ -x /etc/init.d/rpcd ]; then
+		/etc/init.d/rpcd restart || true
+	fi
+	if [ -x /etc/init.d/uhttpd ]; then
+		/etc/init.d/uhttpd restart || true
+	fi
 fi
 
 log "installed"

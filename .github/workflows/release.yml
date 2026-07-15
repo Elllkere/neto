@@ -51,6 +51,7 @@ jobs:
           ./embedded/pack.sh
           ./scripts/test-archive.sh
           sha256sum dist/neto-openwrt-embedded.tar.gz > dist/neto-openwrt-embedded.tar.gz.sha256
+          printf '%s\n' "${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}" > dist/neto-version.txt
 
       - name: Create or update release
         env:
@@ -61,11 +62,13 @@ jobs:
             gh release upload "$TAG" \
               dist/neto-openwrt-embedded.tar.gz \
               dist/neto-openwrt-embedded.tar.gz.sha256 \
+              dist/neto-version.txt \
               --clobber
           else
             gh release create "$TAG" \
               dist/neto-openwrt-embedded.tar.gz \
               dist/neto-openwrt-embedded.tar.gz.sha256 \
+              dist/neto-version.txt \
               --title "$TAG" \
               --generate-notes \
               --verify-tag

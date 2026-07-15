@@ -95,7 +95,7 @@ NETO_BASE_URL='https://your-host/path' sh -c "$(wget -O- https://raw.githubuserc
 Для локального archive:
 
 ```sh
-./embedded/install.sh --local ./dist/neto-openwrt-embedded.tar.gz --verbose
+./embedded/install.sh --local ./dist/neto-openwrt-embedded.tar.gz
 ```
 
 ## Upgrade
@@ -309,6 +309,7 @@ LuCI Providers page кнопкой import добавляет provider presets, �
 - AWS Full IPv4 (`AMAZON`, `EC2`, `GLOBALACCELERATOR`):
   `/usr/share/neto/providers/aws-full-ipv4.sh`
 - AWS Full EU IPv4: `/usr/share/neto/providers/aws-full-eu-ipv4.sh`
+- Google Cloud Europe IPv4: `/usr/share/neto/providers/google-cloud-eu-ipv4.sh`
 
 AWS Full can match broad AWS infrastructure and may affect ping to games hosted
 on Amazon/AWS servers if a rule routes it through proxy.

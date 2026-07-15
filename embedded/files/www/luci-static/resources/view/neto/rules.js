@@ -730,13 +730,7 @@ return view.extend({
 	handleSaveApply: function(ev) {
 		return this.handleSave(ev)
 			.then(function() {
-				return uci.apply();
-			})
-			.then(function() {
-				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
-			})
-			.then(function() {
-				window.location.reload();
+				return netoUI.applyAndRestart();
 			});
 	},
 

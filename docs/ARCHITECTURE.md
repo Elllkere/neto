@@ -373,6 +373,7 @@ allow-domains. This creates only reusable `provider` sections with
 - AWS Full IPv4 (`AMAZON`, `EC2`, `GLOBALACCELERATOR`):
   `/usr/share/neto/providers/aws-full-ipv4.sh`
 - AWS Full EU IPv4: `/usr/share/neto/providers/aws-full-eu-ipv4.sh`
+- Google Cloud Europe IPv4: `/usr/share/neto/providers/google-cloud-eu-ipv4.sh`
 
 AWS Full is intentionally separate because routing broad AWS infrastructure may
 affect ping to games hosted on Amazon/AWS servers.

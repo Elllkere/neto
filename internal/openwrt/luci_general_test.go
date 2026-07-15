@@ -20,10 +20,21 @@ func TestGeneralLuCIShowsStatusControlsAndOnlyCoreSettings(t *testing.T) {
 		"commandResult('/bin/pidof', [ 'sing-box' ])",
 		"commandResult('/usr/bin/netod', [ 'version' ])",
 		"commandResult(singboxBin, [ 'version' ])",
+		"commandResult('/usr/share/neto/check-version.sh', [])",
+		"refreshUpdateState: function()",
+		"status: 'checking'",
+		"this.updateState.status = update.status",
+		"window.setTimeout(L.bind(this.refreshUpdateState, this), 0)",
+		"latestOutput.textContent = update.latest || '-'",
+		"updateButton.disabled = !available",
 		"form.DummyValue, '_neto_status'",
 		"form.DummyValue, '_singbox_status'",
 		"form.DummyValue, '_netod_version'",
 		"form.DummyValue, '_singbox_version'",
+		"form.DummyValue, '_latest_version'",
+		"form.DummyValue, '_update_status'",
+		"form.Button, '_neto_update'",
+		"fs.exec('/usr/share/neto/upgrade.sh', [ '--luci' ])",
 		"form.Button, '_service'",
 		"form.Button, '_autostart'",
 		"fs.exec('/etc/init.d/neto', [ action ])",
@@ -76,6 +87,19 @@ func TestGeneralLuCIShowsStatusControlsAndOnlyCoreSettings(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("general.js missing %q:\n%s", want, s)
 		}
+	}
+
+	loadStart := strings.Index(s, "load: function()")
+	if loadStart < 0 {
+		t.Fatalf("general.js load block not found:\n%s", s)
+	}
+	loadEnd := strings.Index(s[loadStart:], "handleSave: function()")
+	if loadEnd < 0 {
+		t.Fatalf("general.js load block end not found:\n%s", s)
+	}
+	loadBlock := s[loadStart : loadStart+loadEnd]
+	if strings.Contains(loadBlock, "check-version.sh") {
+		t.Fatalf("version check must not block the LuCI load path:\n%s", loadBlock)
 	}
 	for _, forbidden := range []string{
 		"form.Flag, 'enabled'",

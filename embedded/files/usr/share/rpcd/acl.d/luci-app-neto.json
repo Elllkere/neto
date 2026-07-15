@@ -7,6 +7,7 @@
         "/bin/pidof": [ "exec" ],
         "/etc/init.d/neto": [ "exec" ],
         "/usr/bin/netod": [ "exec" ],
+        "/usr/share/neto/check-version.sh": [ "exec" ],
         "/usr/bin/sing-box": [ "exec" ],
         "/usr/libexec/neto/sing-box": [ "exec" ],
         "/etc/config/neto": [ "read" ],
@@ -20,6 +21,7 @@
         "/tmp/neto-import.txt": [ "read", "write" ],
         "/sbin/uci": [ "exec" ],
         "/usr/bin/netod": [ "exec" ],
+        "/usr/share/neto/upgrade.sh": [ "exec" ],
         "/etc/init.d/neto": [ "exec" ]
       }
     }

@@ -23,6 +23,45 @@ function outputLine(res) {
 	return String((res && (res.stdout || res.stderr)) || '').trim().split('\n')[0] || '-';
 }
 
+function parseUpdateState(res) {
+	var state = {
+		current: '',
+		latest: '',
+		status: 'unavailable'
+	};
+	var lines = String((res && res.stdout) || '').trim().split('\n');
+
+	if (!res || res.code != 0)
+		return state;
+
+	for (var i = 0; i < lines.length; i++) {
+		var pos = lines[i].indexOf('=');
+		var key = pos > 0 ? lines[i].substring(0, pos) : '';
+		var value = pos > 0 ? lines[i].substring(pos + 1).trim() : '';
+
+		if (key == 'current' || key == 'latest' || key == 'status')
+			state[key] = value;
+	}
+
+	if (state.status != 'available' && state.status != 'current')
+		state.status = 'unavailable';
+
+	return state;
+}
+
+function updateStatusText(update) {
+	switch (update.status) {
+	case 'checking':
+		return _('Checking for updates...');
+	case 'available':
+		return _('Update available');
+	case 'current':
+		return _('Up to date');
+	default:
+		return _('Version check failed');
+	}
+}
+
 function processStatus(res) {
 	return res && res.code == 0 ? _('Running') : _('Stopped');
 }
@@ -451,13 +490,7 @@ return view.extend({
 	handleSaveApply: function(ev) {
 		return this.handleSave(ev)
 			.then(function() {
-				return uci.apply();
-			})
-			.then(function() {
-				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
-			})
-			.then(function() {
-				window.location.reload();
+				return netoUI.applyAndRestart();
 			});
 	},
 
@@ -502,22 +535,106 @@ return view.extend({
 			});
 	},
 
+	handleUpgrade: function() {
+		ui.showModal(_('neto update'), [
+			E('p', { 'class': 'spinning' }, [ _('Downloading and installing the latest release...') ])
+		]);
+
+		return fs.exec('/usr/share/neto/upgrade.sh', [ '--luci' ])
+			.then(function(res) {
+				if (!res || res.code)
+					throw new Error((res && (res.stderr || res.stdout)) || _('Update failed'));
+
+				ui.showModal(_('neto update'), [
+					E('p', {}, [ _('Update installed. Reloading the page...') ])
+				]);
+				window.setTimeout(function() {
+					window.location.reload();
+				}, 1500);
+			})
+			.catch(function(err) {
+				ui.showModal(_('neto update'), [
+					E('p', { 'class': 'alert-message danger' }, [ err.message || err ]),
+					E('div', { 'class': 'right' }, [
+						E('button', {
+							'class': 'btn cbi-button',
+							'click': ui.hideModal
+						}, [ _('Close') ])
+					])
+				]);
+			});
+	},
+
+	showUpgradeConfirmation: function() {
+		ui.showModal(_('neto update'), [
+			E('p', {}, [ _('Install the latest neto release now? The neto service will restart.') ]),
+			E('div', { 'class': 'right' }, [
+				E('button', {
+					'class': 'btn cbi-button',
+					'click': ui.hideModal
+				}, [ _('Cancel') ]), ' ',
+				E('button', {
+					'class': 'btn cbi-button cbi-button-positive important',
+					'click': L.bind(function() {
+						return this.handleUpgrade();
+					}, this)
+				}, [ _('Update') ])
+			])
+		]);
+	},
+
+	refreshUpdateState: function() {
+		return commandResult('/usr/share/neto/check-version.sh', [])
+			.then(L.bind(function(res) {
+				var update = parseUpdateState(res);
+				var latestField = document.getElementById('cbi-neto-main-_latest_version');
+				var statusField = document.getElementById('cbi-neto-main-_update_status');
+				var updateField = document.getElementById('cbi-neto-main-_neto_update');
+				var latestOutput = latestField ? latestField.querySelector('output') : null;
+				var statusOutput = statusField ? statusField.querySelector('output') : null;
+				var updateButton = updateField ? updateField.querySelector('button') : null;
+				var available = update.status == 'available';
+
+				this.updateState.current = update.current;
+				this.updateState.latest = update.latest;
+				this.updateState.status = update.status;
+
+				if (latestOutput)
+					latestOutput.textContent = update.latest || '-';
+				if (statusOutput)
+					statusOutput.textContent = updateStatusText(update);
+				if (updateButton) {
+					updateButton.disabled = !available;
+					updateButton.textContent = available ? _('Update') : updateStatusText(update);
+					updateButton.classList.toggle('cbi-button-apply', available);
+					updateButton.classList.toggle('cbi-button-button', !available);
+				}
+			}, this));
+	},
+
 	render: function(data) {
-		var m, s, o, state, serviceRunning, autostartEnabled;
+		var m, s, o, state, serviceRunning, autostartEnabled, updateAvailable;
 
 		netoUI.syncRulesTab();
 
 		data = data || [];
+		this.updateState = this.updateState || {
+			current: '',
+			latest: '',
+			status: 'checking'
+		};
 		state = {
 			service: data[0],
 			autostart: data[1],
 			netod: data[2],
 			singbox: data[3],
 			netodVersion: data[4],
-			singboxVersion: data[5]
+			singboxVersion: data[5],
+			update: this.updateState
 		};
 		serviceRunning = state.service && state.service.code == 0;
 		autostartEnabled = state.autostart && state.autostart.code == 0;
+		updateAvailable = state.update.status == 'available';
 
 		m = new form.Map('neto', _('neto'));
 		this.map = m;
@@ -548,6 +665,24 @@ return view.extend({
 		o.cfgvalue = function() {
 			return outputLine(state.singboxVersion);
 		};
+
+		o = s.option(form.DummyValue, '_latest_version', _('Latest neto release'));
+		o.cfgvalue = function() {
+			return state.update.latest || '-';
+		};
+
+		o = s.option(form.DummyValue, '_update_status', _('Update status'));
+		o.cfgvalue = function() {
+			return updateStatusText(state.update);
+		};
+
+		o = s.option(form.Button, '_neto_update', _('neto update'));
+		o.inputtitle = updateAvailable ? _('Update') : updateStatusText(state.update);
+		o.inputstyle = updateAvailable ? 'apply' : 'button';
+		o.readonly = !updateAvailable;
+		o.onclick = L.bind(function() {
+			this.showUpgradeConfirmation();
+		}, this);
 
 		o = s.option(form.Button, '_service', _('Service'));
 		o.inputtitle = serviceRunning ? _('Stop') : _('Start');
@@ -712,6 +847,9 @@ return view.extend({
 		o.value('direct', 'direct');
 		o.default = 'direct';
 
-		return m.render();
+		return m.render().then(L.bind(function(node) {
+			window.setTimeout(L.bind(this.refreshUpdateState, this), 0);
+			return node;
+		}, this));
 	}
 });
