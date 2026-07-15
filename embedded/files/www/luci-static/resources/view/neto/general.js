@@ -566,7 +566,7 @@ return view.extend({
 			})
 			.catch(function() {
 				ui.showModal(_('neto update'), [
-					E('p', { 'class': 'spinning' }, [ _('Update installed. Reconnecting to LuCI...') ])
+					E('p', { 'class': 'spinning' }, [ _('Connection interrupted. Reconnecting to verify the installed version...') ])
 				]);
 				window.setTimeout(function() {
 					window.location.reload();

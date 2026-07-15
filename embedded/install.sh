@@ -11,6 +11,7 @@ LOCAL_ARCHIVE=""
 DRY_RUN=0
 VERBOSE=0
 LANGUAGE_CHOICE=""
+EXISTING_INSTALL=0
 
 usage() {
 	cat >&2 <<'EOF'
@@ -87,6 +88,27 @@ log() {
 dry_log() {
 	if [ "$DRY_RUN" -eq 1 ]; then
 		log "dry-run: $*"
+	fi
+}
+
+atomic_install() {
+	local src="$1"
+	local dest="$2"
+	local mode="${3:-0755}"
+	local tmp="${dest}.neto-new.$$"
+
+	rm -f "$tmp"
+	if ! cp "$src" "$tmp"; then
+		rm -f "$tmp"
+		die "failed to stage $dest"
+	fi
+	if ! chmod "$mode" "$tmp"; then
+		rm -f "$tmp"
+		die "failed to set permissions on $dest"
+	fi
+	if ! mv -f "$tmp" "$dest"; then
+		rm -f "$tmp"
+		die "failed to replace $dest"
 	fi
 }
 
@@ -450,6 +472,7 @@ choose_language() {
 
 configure_language() {
 	command -v uci >/dev/null 2>&1 || return 0
+	[ "$EXISTING_INSTALL" -eq 0 ] || return 0
 	case "$LANGUAGE_CHOICE" in
 		ru)
 			log "enabling Russian LuCI localization"
@@ -486,8 +509,7 @@ install_files() {
 	[ -x "$WORK_DIR/bin/$arch/netod" ] || die "archive does not contain netod for $arch"
 
 	mkdir -p /usr/bin /usr/share/neto /usr/libexec/neto /etc/config
-	cp "$WORK_DIR/bin/$arch/netod" /usr/bin/netod
-	chmod 0755 /usr/bin/netod
+	atomic_install "$WORK_DIR/bin/$arch/netod" /usr/bin/netod
 
 	if [ -f /etc/config/neto ]; then
 		rm -f "$WORK_DIR/files/etc/config/neto"
@@ -505,10 +527,9 @@ install_files() {
 		done
 	fi
 
-	cp "$WORK_DIR/install.sh" /usr/share/neto/install.sh
-	cp "$WORK_DIR/uninstall.sh" /usr/share/neto/uninstall.sh
-	cp "$WORK_DIR/upgrade.sh" /usr/share/neto/upgrade.sh
-	chmod 0755 /usr/share/neto/install.sh /usr/share/neto/uninstall.sh /usr/share/neto/upgrade.sh
+	atomic_install "$WORK_DIR/install.sh" /usr/share/neto/install.sh
+	atomic_install "$WORK_DIR/uninstall.sh" /usr/share/neto/uninstall.sh
+	atomic_install "$WORK_DIR/upgrade.sh" /usr/share/neto/upgrade.sh
 
 	if singbox_compatible /usr/bin/sing-box; then
 		log "using compatible system sing-box"
@@ -517,8 +538,7 @@ install_files() {
 		fi
 	elif [ -x "$WORK_DIR/bin/$arch/sing-box" ]; then
 		log "installing managed sing-box to $MANAGED_SINGBOX"
-		cp "$WORK_DIR/bin/$arch/sing-box" "$MANAGED_SINGBOX"
-		chmod 0755 "$MANAGED_SINGBOX"
+		atomic_install "$WORK_DIR/bin/$arch/sing-box" "$MANAGED_SINGBOX"
 		if ! singbox_compatible "$MANAGED_SINGBOX"; then
 			die "managed sing-box exists but is not compatible"
 		fi
@@ -533,9 +553,41 @@ install_files() {
 	configure_language
 }
 
+verify_installed_version() {
+	local expected="${NETO_EXPECT_VERSION:-}"
+	local archive_expected=""
+	local actual=""
+
+	if [ -f "$WORK_DIR/neto-version.txt" ]; then
+		archive_expected="$(sed -n '1{s/[[:space:]]//g;p;}' "$WORK_DIR/neto-version.txt")"
+	fi
+	if [ -n "$expected" ] && [ -n "$archive_expected" ] && [ "$expected" != "$archive_expected" ]; then
+		die "downloaded archive version $archive_expected does not match requested $expected"
+	fi
+	[ -n "$expected" ] || expected="$archive_expected"
+	actual="$(/usr/bin/netod version 2>/dev/null | awk '{ print $2; exit }')"
+	[ -n "$actual" ] || die "installed netod cannot report its version"
+	if [ -n "$expected" ] && [ "$actual" != "$expected" ]; then
+		die "installed netod version $actual does not match expected $expected"
+	fi
+	log "verified netod $actual"
+}
+
 clear_luci_cache() {
 	rm -f /tmp/luci-indexcache /var/run/luci-indexcache
 	rm -rf /tmp/luci-modulecache
+}
+
+restart_luci_deferred() {
+	(
+		sleep 2
+		if [ -x /etc/init.d/rpcd ]; then
+			/etc/init.d/rpcd restart || true
+		fi
+		if [ -x /etc/init.d/uhttpd ]; then
+			/etc/init.d/uhttpd restart || true
+		fi
+	) >/dev/null 2>&1 &
 }
 
 if [ "$DRY_RUN" -eq 1 ] && [ ! -r /etc/openwrt_release ]; then
@@ -560,6 +612,10 @@ pm="$(detect_pkg_manager)"
 arch="$(detect_arch)"
 log "detected $(distro_id) $ver, package manager $pm, arch $arch"
 
+if [ -x /usr/bin/netod ] && [ -x /etc/init.d/neto ] && [ -f /etc/config/neto ]; then
+	EXISTING_INSTALL=1
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
 	dry_log "would install required dependencies with $pm"
 	if [ -n "$LOCAL_ARCHIVE" ]; then
@@ -577,16 +633,19 @@ if [ "$DRY_RUN" -eq 1 ]; then
 	exit 0
 fi
 
-choose_language
+if [ "$EXISTING_INSTALL" -eq 0 ]; then
+	choose_language
+	pkg_update "$pm"
+	pkg_install "$pm" \
+		luci-base rpcd rpcd-mod-file rpcd-mod-rpcsys ucode \
+		nftables-json ip-full ca-bundle curl bind-dig tcpdump \
+		kmod-nft-tproxy kmod-nft-socket kmod-nft-nat || die "failed to install required dependencies"
 
-pkg_update "$pm"
-pkg_install "$pm" \
-	luci-base rpcd rpcd-mod-file rpcd-mod-rpcsys ucode \
-	nftables-json ip-full ca-bundle curl bind-dig tcpdump \
-	kmod-nft-tproxy kmod-nft-socket kmod-nft-nat || die "failed to install required dependencies"
-
-if ! pkg_install "$pm" sing-box; then
-	log "system sing-box package was not installed; managed sing-box will be used if present"
+	if ! pkg_install "$pm" sing-box; then
+		log "system sing-box package was not installed; managed sing-box will be used if present"
+	fi
+else
+	log "existing installation detected; preserving config and skipping package installation"
 fi
 check_runtime_curl
 
@@ -608,16 +667,11 @@ command -v nft >/dev/null 2>&1 || die "nftables is required"
 command -v ip >/dev/null 2>&1 || die "ip-full is required"
 
 install_files "$arch"
+verify_installed_version
 
 /etc/init.d/neto enable
 /etc/init.d/neto restart
 
 clear_luci_cache
-if [ -x /etc/init.d/rpcd ]; then
-	/etc/init.d/rpcd restart || true
-fi
-if [ -x /etc/init.d/uhttpd ]; then
-	/etc/init.d/uhttpd restart || true
-fi
-
 log "installed"
+restart_luci_deferred

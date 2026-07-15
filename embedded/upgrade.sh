@@ -7,6 +7,7 @@ VERSION_URL="${NETO_VERSION_URL:-https://github.com/elllkere/neto/releases/lates
 RELEASE_API_URL="${NETO_RELEASE_API_URL:-https://api.github.com/repos/elllkere/neto/releases/latest}"
 NETOD_BIN="${NETO_NETOD_BIN:-/usr/bin/netod}"
 TMP="${TMPDIR:-/tmp}/neto-upgrade.$$"
+UPGRADE_LOG="${NETO_UPGRADE_LOG:-/tmp/neto/upgrade.log}"
 MODE="upgrade"
 
 usage() {
@@ -152,4 +153,35 @@ fi
 
 download "$INSTALL_URL" "$TMP"
 
-sh "$TMP"
+run_upgrade() {
+	local expected=""
+	local actual=""
+
+	expected="$(latest_version)" || {
+		echo "neto upgrade: failed to query the release version before installation" >&2
+		return 1
+	}
+	if ! NETO_EXPECT_VERSION="$expected" sh "$TMP"; then
+		echo "neto upgrade: installer failed; netod was not updated" >&2
+		return 1
+	fi
+	actual="$("$NETOD_BIN" version 2>/dev/null | awk '{ print $2; exit }')"
+	if [ "$actual" != "$expected" ]; then
+		echo "neto upgrade: installed version $actual does not match expected $expected" >&2
+		return 1
+	fi
+	echo "neto upgrade: verified installed version $actual"
+}
+
+if [ "$MODE" = "luci" ]; then
+	mkdir -p "$(dirname "$UPGRADE_LOG")"
+	if run_upgrade >"$UPGRADE_LOG" 2>&1; then
+		cat "$UPGRADE_LOG"
+	else
+		code="$?"
+		cat "$UPGRADE_LOG" >&2
+		exit "$code"
+	fi
+else
+	run_upgrade
+fi

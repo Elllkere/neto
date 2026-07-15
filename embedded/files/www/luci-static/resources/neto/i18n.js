@@ -38,6 +38,7 @@ var ru = {
 	'Version check failed': 'Не удалось проверить версию',
 	'Downloading and installing the latest release...': 'Загрузка и установка последнего релиза...',
 	'Update installed. Reconnecting to LuCI...': 'Обновление установлено. Переподключение к LuCI...',
+	'Connection interrupted. Reconnecting to verify the installed version...': 'Соединение прервано. Переподключение для проверки установленной версии...',
 	'Install the latest neto release now? The neto service will restart.': 'Установить последний релиз neto сейчас? Сервис neto будет перезапущен.',
 	'Language': 'Язык',
 	'English': 'Английский',

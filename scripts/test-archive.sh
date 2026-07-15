@@ -51,6 +51,16 @@ done
 	echo "missing upgrade.sh" >&2
 	exit 1
 }
+[ -s "$TMP/neto-version.txt" ] || {
+	echo "missing neto-version.txt" >&2
+	exit 1
+}
+expected_version="$(sed -n '1{s/[[:space:]]//g;p;}' "$TMP/neto-version.txt")"
+actual_version="$("$TMP/bin/linux-amd64/netod" version | awk '{ print $2; exit }')"
+[ "$actual_version" = "$expected_version" ] || {
+	echo "archive version mismatch: manifest=$expected_version netod=$actual_version" >&2
+	exit 1
+}
 [ -x "$TMP/files/usr/share/neto/check-version.sh" ] || {
 	echo "missing check-version.sh" >&2
 	exit 1

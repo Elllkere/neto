@@ -52,6 +52,7 @@ cp -R "$ROOT_DIR/embedded/files" "$ARCHIVE_ROOT/files"
 cp "$ROOT_DIR/embedded/install.sh" "$ARCHIVE_ROOT/install.sh"
 cp "$ROOT_DIR/embedded/uninstall.sh" "$ARCHIVE_ROOT/uninstall.sh"
 cp "$ROOT_DIR/embedded/upgrade.sh" "$ARCHIVE_ROOT/upgrade.sh"
+printf '%s\n' "$VERSION" > "$ARCHIVE_ROOT/neto-version.txt"
 chmod 0755 "$ARCHIVE_ROOT/install.sh" "$ARCHIVE_ROOT/uninstall.sh" "$ARCHIVE_ROOT/upgrade.sh"
 
 build_netod "linux-amd64" "amd64" "" ""

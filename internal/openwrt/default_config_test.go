@@ -73,6 +73,12 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"attempts=\"$attempts broken-curl\"",
 		"check_runtime_curl",
 		"warning: /usr/bin/curl is installed but cannot start",
+		"atomic_install()",
+		"mv -f \"$tmp\" \"$dest\"",
+		"atomic_install \"$WORK_DIR/bin/$arch/netod\" /usr/bin/netod",
+		"existing installation detected; preserving config and skipping package installation",
+		"verify_installed_version",
+		"restart_luci_deferred",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("installer missing %q:\n%s", want, s)
@@ -133,6 +139,9 @@ func TestUpgradeScriptFallsBackAroundBrokenCurl(t *testing.T) {
 		"curl -fsSL \"$url\" -o \"$tmp\"",
 		"attempts=\"$attempts broken-curl\"",
 		"download \"$INSTALL_URL\" \"$TMP\"",
+		"NETO_EXPECT_VERSION=\"$expected\" sh \"$TMP\"",
+		"neto upgrade: verified installed version $actual",
+		"UPGRADE_LOG=\"${NETO_UPGRADE_LOG:-/tmp/neto/upgrade.log}\"",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("upgrade script missing %q:\n%s", want, s)
@@ -153,6 +162,7 @@ func TestInstallerRefreshesLuCIAfterUpdate(t *testing.T) {
 		"rm -rf /tmp/luci-modulecache",
 		"/etc/init.d/rpcd restart",
 		"/etc/init.d/uhttpd restart",
+		"sleep 2",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("installer missing %q:\n%s", want, s)
