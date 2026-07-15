@@ -542,26 +542,35 @@ return view.extend({
 
 		return fs.exec('/usr/share/neto/upgrade.sh', [ '--luci' ])
 			.then(function(res) {
-				if (!res || res.code)
-					throw new Error((res && (res.stderr || res.stdout)) || _('Update failed'));
+				if (!res || res.code) {
+					ui.showModal(_('neto update'), [
+						E('p', { 'class': 'alert-message danger' }, [
+							(res && (res.stderr || res.stdout)) || _('Update failed')
+						]),
+						E('div', { 'class': 'right' }, [
+							E('button', {
+								'class': 'btn cbi-button',
+								'click': ui.hideModal
+							}, [ _('Close') ])
+						])
+					]);
+					return;
+				}
 
 				ui.showModal(_('neto update'), [
-					E('p', {}, [ _('Update installed. Reloading the page...') ])
+					E('p', { 'class': 'spinning' }, [ _('Update installed. Reconnecting to LuCI...') ])
 				]);
 				window.setTimeout(function() {
 					window.location.reload();
-				}, 1500);
+				}, 5000);
 			})
-			.catch(function(err) {
+			.catch(function() {
 				ui.showModal(_('neto update'), [
-					E('p', { 'class': 'alert-message danger' }, [ err.message || err ]),
-					E('div', { 'class': 'right' }, [
-						E('button', {
-							'class': 'btn cbi-button',
-							'click': ui.hideModal
-						}, [ _('Close') ])
-					])
+					E('p', { 'class': 'spinning' }, [ _('Update installed. Reconnecting to LuCI...') ])
 				]);
+				window.setTimeout(function() {
+					window.location.reload();
+				}, 5000);
 			});
 	},
 

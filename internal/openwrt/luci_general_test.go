@@ -35,6 +35,8 @@ func TestGeneralLuCIShowsStatusControlsAndOnlyCoreSettings(t *testing.T) {
 		"form.DummyValue, '_update_status'",
 		"form.Button, '_neto_update'",
 		"fs.exec('/usr/share/neto/upgrade.sh', [ '--luci' ])",
+		"Update installed. Reconnecting to LuCI...",
+		"window.setTimeout(function()",
 		"form.Button, '_service'",
 		"form.Button, '_autostart'",
 		"fs.exec('/etc/init.d/neto', [ action ])",

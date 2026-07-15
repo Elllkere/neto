@@ -152,8 +152,4 @@ fi
 
 download "$INSTALL_URL" "$TMP"
 
-if [ "$MODE" = "luci" ]; then
-	sh "$TMP" --no-ui-restart
-else
-	sh "$TMP"
-fi
+sh "$TMP"

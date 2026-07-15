@@ -11,11 +11,10 @@ LOCAL_ARCHIVE=""
 DRY_RUN=0
 VERBOSE=0
 LANGUAGE_CHOICE=""
-RESTART_UI=1
 
 usage() {
 	cat >&2 <<'EOF'
-usage: install.sh [--local ./dist/neto-openwrt-embedded.tar.gz] [--dry-run] [--verbose] [--language en|ru] [--no-ui-restart]
+usage: install.sh [--local ./dist/neto-openwrt-embedded.tar.gz] [--dry-run] [--verbose] [--language en|ru]
 EOF
 }
 
@@ -54,7 +53,8 @@ while [ "$#" -gt 0 ]; do
 			shift 2
 			;;
 		--no-ui-restart)
-			RESTART_UI=0
+			# Accepted for compatibility with the v1.4.9 LuCI updater. LuCI
+			# resources and ACLs now always require a cache clear and UI restart.
 			shift
 			;;
 		-h|--help)
@@ -533,6 +533,11 @@ install_files() {
 	configure_language
 }
 
+clear_luci_cache() {
+	rm -f /tmp/luci-indexcache /var/run/luci-indexcache
+	rm -rf /tmp/luci-modulecache
+}
+
 if [ "$DRY_RUN" -eq 1 ] && [ ! -r /etc/openwrt_release ]; then
 	if [ -n "$LOCAL_ARCHIVE" ] && [ ! -f "$LOCAL_ARCHIVE" ]; then
 		die "local archive not found: $LOCAL_ARCHIVE"
@@ -607,13 +612,12 @@ install_files "$arch"
 /etc/init.d/neto enable
 /etc/init.d/neto restart
 
-if [ "$RESTART_UI" -eq 1 ]; then
-	if [ -x /etc/init.d/rpcd ]; then
-		/etc/init.d/rpcd restart || true
-	fi
-	if [ -x /etc/init.d/uhttpd ]; then
-		/etc/init.d/uhttpd restart || true
-	fi
+clear_luci_cache
+if [ -x /etc/init.d/rpcd ]; then
+	/etc/init.d/rpcd restart || true
+fi
+if [ -x /etc/init.d/uhttpd ]; then
+	/etc/init.d/uhttpd restart || true
 fi
 
 log "installed"

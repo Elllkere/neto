@@ -128,7 +128,7 @@ func TestUpgradeScriptFallsBackAroundBrokenCurl(t *testing.T) {
 		"RELEASE_API_URL",
 		"status=\"available\"",
 		"printf 'current=%s\\nlatest=%s\\nstatus=%s\\n'",
-		"sh \"$TMP\" --no-ui-restart",
+		"sh \"$TMP\"",
 		"wget -O \"$tmp\" \"$url\"",
 		"curl -fsSL \"$url\" -o \"$tmp\"",
 		"attempts=\"$attempts broken-curl\"",
@@ -140,7 +140,7 @@ func TestUpgradeScriptFallsBackAroundBrokenCurl(t *testing.T) {
 	}
 }
 
-func TestInstallerCanKeepLuCIConnectionAliveDuringUpdate(t *testing.T) {
+func TestInstallerRefreshesLuCIAfterUpdate(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/install.sh")
 	if err != nil {
 		t.Fatal(err)
@@ -148,12 +148,18 @@ func TestInstallerCanKeepLuCIConnectionAliveDuringUpdate(t *testing.T) {
 	s := string(data)
 	for _, want := range []string{
 		"--no-ui-restart)",
-		"RESTART_UI=0",
-		"if [ \"$RESTART_UI\" -eq 1 ]; then",
+		"clear_luci_cache()",
+		"rm -f /tmp/luci-indexcache /var/run/luci-indexcache",
+		"rm -rf /tmp/luci-modulecache",
+		"/etc/init.d/rpcd restart",
+		"/etc/init.d/uhttpd restart",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("installer missing %q:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "RESTART_UI=0") {
+		t.Fatalf("installer must not skip LuCI restart after replacing views and ACLs:\n%s", s)
 	}
 }
 
