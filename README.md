@@ -112,6 +112,11 @@ NETO_BASE_URL='https://your-host/path' sh -c "$(wget -O- https://raw.githubuserc
 NETO_INSTALL_URL='https://your-host/install.sh' /usr/share/neto/upgrade.sh
 ```
 
+Способ проверки и загрузки релиза настраивается на странице General:
+`update_via=direct|proxy`. Для `proxy` выбирается `update_outbound`; updater
+поднимает временный локальный mixed proxy через выбранный sing-box outbound.
+Трафик самого роутера при этом не добавляется в nft/TProxy policy.
+
 ## Uninstall
 
 Обычное удаление оставляет `/etc/config/neto` и `/etc/neto`, чтобы можно было

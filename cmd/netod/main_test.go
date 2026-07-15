@@ -32,6 +32,64 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestCommandDownloadDirect(t *testing.T) {
+	dir := t.TempDir()
+	responsePath := filepath.Join(dir, "release.tar.gz")
+	if err := os.WriteFile(responsePath, []byte("release-data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	argsPath := installFakeCurl(t, responsePath)
+	cfgPath := filepath.Join(dir, "neto")
+	if err := os.WriteFile(cfgPath, []byte(`
+config main 'main'
+	option update_via 'direct'
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(dir, "downloaded.tar.gz")
+	if err := commandDownload(downloadOptions{
+		configPath: cfgPath,
+		rawURL:     "https://example.com/release.tar.gz",
+		outputPath: outputPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "release-data" {
+		t.Fatalf("unexpected download: %q", got)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "--noproxy\n*\n") || !strings.Contains(string(args), "--max-time\n300\n") {
+		t.Fatalf("direct update download did not bypass proxy env or set timeout:\n%s", args)
+	}
+}
+
+func TestCommandDownloadProxyRequiresSingBox(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "neto")
+	if err := os.WriteFile(cfgPath, []byte(`
+config main 'main'
+	option singbox_bin '/missing/sing-box'
+	option update_via 'proxy'
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := commandDownload(downloadOptions{
+		configPath: cfgPath,
+		rawURL:     "https://example.com/release.tar.gz",
+		outputPath: filepath.Join(dir, "downloaded.tar.gz"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "sing-box binary is missing") {
+		t.Fatalf("got %v, want missing sing-box error", err)
+	}
+}
+
 func TestDisabledConfigDoesNotRequireOutbound(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "neto")
 	if err := os.WriteFile(path, []byte(`

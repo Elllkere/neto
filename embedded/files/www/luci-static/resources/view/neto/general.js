@@ -685,6 +685,17 @@ return view.extend({
 			return updateStatusText(state.update);
 		};
 
+		o = s.option(form.ListValue, 'update_via', _('Update via'), _('Choose how neto release checks and downloads are performed. Save & Apply before updating.'));
+		o.value('direct', 'direct');
+		o.value('proxy', 'proxy');
+		o.default = 'direct';
+		o.rmempty = false;
+
+		o = s.option(form.ListValue, 'update_outbound', _('Update outbound'));
+		addProxyOutboundChoices(o);
+		o.depends('update_via', 'proxy');
+		o.rmempty = false;
+
 		o = s.option(form.Button, '_neto_update', _('neto update'));
 		o.inputtitle = updateAvailable ? _('Update') : updateStatusText(state.update);
 		o.inputstyle = updateAvailable ? 'apply' : 'button';

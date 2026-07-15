@@ -117,6 +117,10 @@ Routing modes:
 - FakeIP DNS decisions forward DNS wire queries to sing-box FakeIP DNS.
   Direct/real DNS decisions forward DNS wire queries to the selected sing-box
   real DNS listener.
+- DNS queries originating from loopback, a router-owned address, or any
+  non-LAN source must always use real DNS and must not receive FakeIP. Router
+  self traffic is excluded from nft/TProxy policy, so returning FakeIP to the
+  router would make matched destinations unreachable.
 - dnsmasq `addsubnet=32` is used only as local metadata so netod can recover
   the original LAN client IP. netod must strip EDNS Client Subnet before
   forwarding DNS queries to sing-box/public resolvers.
@@ -277,6 +281,10 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
 - `update_via=direct` uses direct curl fetching. `update_via=proxy` uses a
   temporary sing-box mixed inbound and a selected custom outbound; it must not
   route router-self traffic through nftables.
+- The neto self-updater uses `config main` options `update_via=direct|proxy`
+  and `update_outbound`. Proxy mode downloads the version marker, installer,
+  and release archive through the same temporary sing-box mixed-proxy model;
+  it must not add router-self nft/TProxy rules.
 - Subscription update intervals are stored in UCI for scheduling/UX; manual
   update is currently the explicit LuCI action.
 

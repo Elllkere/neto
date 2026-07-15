@@ -105,6 +105,26 @@ func TestDNSPolicyCustomDefaultFakeIP(t *testing.T) {
 	}
 }
 
+func TestRouterSelfNeverReceivesFakeIP(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Main.RoutingMode = "custom"
+	cfg.Rules = []config.Rule{fakeRule("youtube.com")}
+	p := New(cfg)
+	p.LocalIPs["192.168.8.1"] = struct{}{}
+
+	for _, clientIP := range []string{"127.0.0.1", "192.168.8.1", "", "203.0.113.10"} {
+		if got := p.upstreamFor(testQuery(qTypeA), clientIP); got != p.RealDirectUpstream {
+			t.Fatalf("router/non-LAN IP %q got %s, want real DNS", clientIP, got)
+		}
+		if _, ok := p.localResponse(testQuery(qTypeAAAA), clientIP); ok {
+			t.Fatalf("router/non-LAN IP %q must not receive FakeIP AAAA filtering", clientIP)
+		}
+	}
+	if got := p.upstreamFor(testQuery(qTypeA), "192.168.8.10"); got != p.FakeUpstream {
+		t.Fatalf("LAN client got %s, want FakeIP upstream", got)
+	}
+}
+
 func TestDNSPolicySimpleUsesSimpleRule(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Main.RoutingMode = "simple"

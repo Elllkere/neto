@@ -233,6 +233,7 @@ var ru = {
 	'Update time': 'Время обновления',
 	'Update via': 'Обновлять через',
 	'Update outbound': 'Исходящий для обновления',
+	'Choose how neto release checks and downloads are performed. Save & Apply before updating.': 'Выберите способ проверки и загрузки обновлений neto. Перед обновлением нажмите «Сохранить и применить».',
 	'Nodes': 'Ноды',
 	'Updated': 'Обновлено',
 	'Update': 'Обновить',

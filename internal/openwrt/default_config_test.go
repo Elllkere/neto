@@ -2,6 +2,8 @@ package openwrt
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -41,6 +43,7 @@ func TestEmbeddedDefaultConfigHasNoSampleClientsOrRules(t *testing.T) {
 		"option dns_upstream_path '/dns-query'",
 		"option language 'en'",
 		"option language_ru_installed '0'",
+		"option update_via 'direct'",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("default config missing %q:\n%s", want, s)
@@ -142,10 +145,120 @@ func TestUpgradeScriptFallsBackAroundBrokenCurl(t *testing.T) {
 		"NETO_EXPECT_VERSION=\"$expected\" sh \"$TMP\"",
 		"neto upgrade: verified installed version $actual",
 		"UPGRADE_LOG=\"${NETO_UPGRADE_LOG:-/tmp/neto/upgrade.log}\"",
+		"UPDATE_VIA=\"${NETO_UPDATE_VIA:-}\"",
+		"UPDATE_OUTBOUND=\"${NETO_UPDATE_OUTBOUND:-}\"",
+		"\"$NETOD_BIN\" download -url \"$url\" -output \"$dest\" -via proxy",
+		"download \"$ARCHIVE_URL\" \"$ARCHIVE_TMP\"",
+		"sh \"$TMP\" --local \"$ARCHIVE_TMP\"",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("upgrade script missing %q:\n%s", want, s)
 		}
+	}
+}
+
+func TestUpgradeScriptProxyDownloadsInstallerAndArchive(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "version-state")
+	versionSource := filepath.Join(dir, "latest-version")
+	installerSource := filepath.Join(dir, "installer.sh")
+	archiveSource := filepath.Join(dir, "archive.tar.gz")
+	netodPath := filepath.Join(dir, "netod")
+	downloadArgsPath := filepath.Join(dir, "download.args")
+	installerArgsPath := filepath.Join(dir, "installer.args")
+	upgradeLogPath := filepath.Join(dir, "upgrade.log")
+
+	for path, data := range map[string]string{
+		statePath:     "v1.0.0\n",
+		versionSource: "v1.0.1\n",
+		archiveSource: "fake archive\n",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	installer := `#!/bin/sh
+printf '%s\n' "$@" > "$NETO_FAKE_INSTALLER_ARGS"
+[ "$1" = "--local" ] || exit 20
+[ -s "$2" ] || exit 21
+printf 'v1.0.1\n' > "$NETO_FAKE_VERSION_STATE"
+`
+	if err := os.WriteFile(installerSource, []byte(installer), 0755); err != nil {
+		t.Fatal(err)
+	}
+	fakeNetod := `#!/bin/sh
+case "$1" in
+version)
+	printf 'netod %s\n' "$(cat "$NETO_FAKE_VERSION_STATE")"
+	;;
+download)
+	shift
+	printf '%s\n' "$@" >> "$NETO_FAKE_DOWNLOAD_ARGS"
+	url=''
+	output=''
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		-url) url="$2"; shift 2 ;;
+		-output) output="$2"; shift 2 ;;
+		*) shift ;;
+		esac
+	done
+	case "$url" in
+	*neto-version.txt) cp "$NETO_FAKE_VERSION_SOURCE" "$output" ;;
+	*install.sh) cp "$NETO_FAKE_INSTALLER_SOURCE" "$output" ;;
+	*archive.tar.gz) cp "$NETO_FAKE_ARCHIVE_SOURCE" "$output" ;;
+	*) exit 22 ;;
+	esac
+	;;
+*) exit 23 ;;
+esac
+`
+	if err := os.WriteFile(netodPath, []byte(fakeNetod), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("sh", "../../embedded/upgrade.sh")
+	cmd.Env = append(os.Environ(),
+		"TMPDIR="+dir,
+		"NETO_NETOD_BIN="+netodPath,
+		"NETO_INSTALL_URL=https://example.test/install.sh",
+		"NETO_VERSION_URL=https://example.test/neto-version.txt",
+		"NETO_RELEASE_API_URL=https://example.test/release-api",
+		"NETO_ARCHIVE_URL=https://example.test/archive.tar.gz",
+		"NETO_UPDATE_VIA=proxy",
+		"NETO_UPDATE_OUTBOUND=proxy1",
+		"NETO_UPGRADE_LOG="+upgradeLogPath,
+		"NETO_FAKE_VERSION_STATE="+statePath,
+		"NETO_FAKE_VERSION_SOURCE="+versionSource,
+		"NETO_FAKE_INSTALLER_SOURCE="+installerSource,
+		"NETO_FAKE_ARCHIVE_SOURCE="+archiveSource,
+		"NETO_FAKE_DOWNLOAD_ARGS="+downloadArgsPath,
+		"NETO_FAKE_INSTALLER_ARGS="+installerArgsPath,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("proxy upgrade failed: %v\n%s", err, out)
+	}
+	downloadArgs, err := os.ReadFile(downloadArgsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := string(downloadArgs)
+	if strings.Count(args, "-via\nproxy\n") != 3 || strings.Count(args, "-outbound\nproxy1\n") != 3 {
+		t.Fatalf("version, installer, and archive must use selected proxy outbound:\n%s", args)
+	}
+	installerArgs, err := os.ReadFile(installerArgsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(installerArgs), "--local\n") {
+		t.Fatalf("proxy upgrade must pass the predownloaded archive to installer:\n%s", installerArgs)
+	}
+	state, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(state)) != "v1.0.1" {
+		t.Fatalf("unexpected installed version state: %s", state)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -56,6 +57,14 @@ type subscriptionOptions struct {
 type providerOptions struct {
 	configPath string
 	name       string
+}
+
+type downloadOptions struct {
+	configPath string
+	rawURL     string
+	outputPath string
+	via        string
+	outbound   string
 }
 
 func main() {
@@ -130,12 +139,43 @@ func run(args []string) error {
 			return err
 		}
 		return commandProvidersUpdate(opts)
+	case "download":
+		opts, err := parseDownloadOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		return commandDownload(opts)
 	case "logs":
 		return commandLogs(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func parseDownloadOptions(args []string) (downloadOptions, error) {
+	fs := flag.NewFlagSet("netod download", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	opts := downloadOptions{configPath: config.DefaultPath}
+	fs.StringVar(&opts.configPath, "config", opts.configPath, "path to UCI config")
+	fs.StringVar(&opts.rawURL, "url", opts.rawURL, "HTTP(S) URL to download")
+	fs.StringVar(&opts.outputPath, "output", opts.outputPath, "absolute output path")
+	fs.StringVar(&opts.via, "via", opts.via, "download via direct or proxy")
+	fs.StringVar(&opts.outbound, "outbound", opts.outbound, "custom outbound tag for proxy mode")
+	if err := fs.Parse(args); err != nil {
+		return downloadOptions{}, err
+	}
+	if fs.NArg() != 0 {
+		return downloadOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	parsedURL, err := url.Parse(opts.rawURL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
+		return downloadOptions{}, fmt.Errorf("download requires a valid HTTP(S) -url")
+	}
+	if !filepath.IsAbs(opts.outputPath) {
+		return downloadOptions{}, fmt.Errorf("download requires an absolute -output path")
+	}
+	return opts, nil
 }
 
 func parseOptions(command string, args []string, checkFlags bool) (options, error) {
@@ -219,7 +259,7 @@ func parseProviderOptions(args []string) (providerOptions, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions|providers|logs> [options]")
+	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions|providers|download|logs> [options]")
 }
 
 func commandCheck(opts options) error {
@@ -508,6 +548,11 @@ func commandDebug(opts options) error {
 	printWarnings(cfg)
 	fmt.Println("=== DNS summary ===")
 	printDNSSummary(cfg)
+	fmt.Println("=== update transport ===")
+	fmt.Printf("update_via: %s\n", cfg.Main.UpdateVia)
+	if cfg.Main.UpdateOutbound != "" {
+		fmt.Printf("update_outbound: %s\n", cfg.Main.UpdateOutbound)
+	}
 	fmt.Println("=== generated files ===")
 	printPath("nft", nftPath(opts))
 	printPath("sing-box", singBoxPath(opts))
@@ -599,6 +644,31 @@ func fetchURLViaProxy(cfg config.Config, rawURL string, updateOutbound string) (
 	})
 }
 
+func commandDownload(opts downloadOptions) error {
+	cfg, err := loadConfigForManagement(opts.configPath)
+	if err != nil {
+		return err
+	}
+	via := strings.TrimSpace(opts.via)
+	if via == "" {
+		via = cfg.Main.UpdateVia
+	}
+	outbound := strings.TrimSpace(opts.outbound)
+	if outbound == "" {
+		outbound = cfg.Main.UpdateOutbound
+	}
+	switch via {
+	case "", "direct":
+		return downloadURLToFile(opts.rawURL, opts.outputPath, "")
+	case "proxy":
+		return withTemporaryProxyDo(cfg, outbound, func(proxy string) error {
+			return downloadURLToFile(opts.rawURL, opts.outputPath, proxy)
+		})
+	default:
+		return fmt.Errorf("unsupported update_via %q", via)
+	}
+}
+
 func fetchProviderWithScript(cfg config.Config, p config.Provider) ([]byte, error) {
 	switch p.UpdateVia {
 	case "", "direct":
@@ -613,42 +683,52 @@ func fetchProviderWithScript(cfg config.Config, p config.Provider) ([]byte, erro
 }
 
 func withTemporaryProxy(cfg config.Config, updateOutbound string, fn func(proxy string) ([]byte, error)) ([]byte, error) {
+	var result []byte
+	err := withTemporaryProxyDo(cfg, updateOutbound, func(proxy string) error {
+		var err error
+		result, err = fn(proxy)
+		return err
+	})
+	return result, err
+}
+
+func withTemporaryProxyDo(cfg config.Config, updateOutbound string, fn func(proxy string) error) error {
 	if !singbox.BinaryExists(cfg.Main.SingBoxBin) {
-		return nil, fmt.Errorf("sing-box binary is missing or not executable: %s", cfg.Main.SingBoxBin)
+		return fmt.Errorf("sing-box binary is missing or not executable: %s", cfg.Main.SingBoxBin)
 	}
 	port, err := freeLocalPort()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	proxyJSON, err := singbox.GenerateProxyClient(cfg, updateOutbound, port)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	dir, err := os.MkdirTemp("", "neto-subscription-*")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer os.RemoveAll(dir)
 	path := filepath.Join(dir, "sing-box.json")
 	if err := os.WriteFile(path, append(proxyJSON, '\n'), 0600); err != nil {
-		return nil, err
+		return err
 	}
 	if err := singbox.CheckBinary(cfg.Main.SingBoxBin, path); err != nil {
-		return nil, err
+		return err
 	}
 
 	var stderr bytes.Buffer
 	cmd := exec.Command(cfg.Main.SingBoxBin, "run", "-c", path)
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return err
 	}
 	defer func() {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
 	if err := waitForPort(port, 5*time.Second); err != nil {
-		return nil, fmt.Errorf("temporary sing-box did not start: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("temporary sing-box did not start: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
 	return fn(fmt.Sprintf("http://127.0.0.1:%d", port))
@@ -815,6 +895,53 @@ func fetchURLWithCurl(rawURL string, proxy string) ([]byte, error) {
 		return nil, fmt.Errorf("subscription response is too large")
 	}
 	return os.ReadFile(outPath)
+}
+
+func downloadURLToFile(rawURL string, outputPath string, proxy string) error {
+	if err := requireCommand("curl"); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return err
+	}
+	tmp := outputPath + ".tmp"
+	_ = os.Remove(tmp)
+	defer os.Remove(tmp)
+
+	const maxBody = 64 << 20
+	args := []string{
+		"-fsSL",
+		"--connect-timeout", "15",
+		"--max-time", "300",
+		"--max-filesize", strconv.Itoa(maxBody),
+		"--user-agent", "neto/1",
+		"--output", tmp,
+	}
+	if proxy != "" {
+		args = append(args, "--proxy", proxy)
+	} else {
+		args = append(args, "--noproxy", "*")
+	}
+	args = append(args, rawURL)
+
+	out, err := command("curl", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("curl failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	st, err := os.Stat(tmp)
+	if err != nil {
+		return err
+	}
+	if st.Size() == 0 {
+		return fmt.Errorf("downloaded file is empty")
+	}
+	if st.Size() > maxBody {
+		return fmt.Errorf("downloaded file is too large")
+	}
+	if err := os.Chmod(tmp, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, outputPath)
 }
 
 func freeLocalPort() (int, error) {

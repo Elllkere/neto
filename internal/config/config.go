@@ -77,6 +77,8 @@ type Main struct {
 	DefaultAction         string
 	RoutingMode           string
 	DefaultOutbound       string
+	UpdateVia             string
+	UpdateOutbound        string
 	SimpleRule            Rule
 	LANSubnets            []string
 	LANIfaces             []string
@@ -352,6 +354,7 @@ func Defaults() Config {
 			DefaultAction:         "direct",
 			RoutingMode:           "custom",
 			DefaultOutbound:       "direct",
+			UpdateVia:             "direct",
 			SimpleRule: Rule{
 				Name:     "simple",
 				Enabled:  true,
@@ -784,6 +787,19 @@ func (c Config) Validate() error {
 			return fmt.Errorf("real_dns_outbound %q not found", realDNSOutbound)
 		}
 	}
+	switch c.Main.UpdateVia {
+	case "direct", "proxy":
+	default:
+		return fmt.Errorf("main has unsupported update_via %q", c.Main.UpdateVia)
+	}
+	if c.Main.UpdateVia == "proxy" && strings.TrimSpace(c.Main.UpdateOutbound) != "" {
+		if reservedCustomOutboundTag(c.Main.UpdateOutbound) {
+			return fmt.Errorf("main update_outbound %q must be a custom outbound", c.Main.UpdateOutbound)
+		}
+		if _, ok := seenOutboundTags[c.Main.UpdateOutbound]; !ok {
+			return fmt.Errorf("main has unsupported update_outbound %q", c.Main.UpdateOutbound)
+		}
+	}
 	seenSubscriptions := map[string]struct{}{}
 	seenProviders := map[string]Provider{}
 	for _, p := range c.Providers {
@@ -1187,6 +1203,12 @@ func applyMain(m *Main, s section) {
 	}
 	if v := s.options["default_action"]; v != "" {
 		m.DefaultAction = v
+	}
+	if v := s.options["update_via"]; v != "" {
+		m.UpdateVia = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v, ok := s.options["update_outbound"]; ok {
+		m.UpdateOutbound = strings.TrimSpace(v)
 	}
 	applySimpleRule(m, s)
 	if values, ok := s.lists["lan_subnet"]; ok {

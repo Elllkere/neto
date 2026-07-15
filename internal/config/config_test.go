@@ -56,6 +56,9 @@ config rule
 	if cfg.Main.RoutingMode != "custom" || cfg.Main.DefaultOutbound != "direct" {
 		t.Fatalf("unexpected routing defaults: %+v", cfg.Main)
 	}
+	if cfg.Main.UpdateVia != "direct" || cfg.Main.UpdateOutbound != "" {
+		t.Fatalf("unexpected update defaults: %+v", cfg.Main)
+	}
 	if len(cfg.Main.LANSubnets) != 1 || cfg.Main.LANSubnets[0] != "192.168.8.0/24" {
 		t.Fatalf("unexpected LAN defaults: %+v", cfg.Main.LANSubnets)
 	}
@@ -73,6 +76,38 @@ config rule
 	}
 	if len(cfg.Outbounds) != 0 {
 		t.Fatalf("unexpected outbound: %+v", cfg.Outbounds)
+	}
+}
+
+func TestParseMainProxyUpdateTransport(t *testing.T) {
+	cfg, err := Parse(`
+config main 'main'
+	option update_via 'proxy'
+	option update_outbound 'updater'
+
+config outbound 'updater'
+	option type 'trojan'
+	option server 'example.com'
+	option port '443'
+	option password 'secret'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Main.UpdateVia != "proxy" || cfg.Main.UpdateOutbound != "updater" {
+		t.Fatalf("unexpected main update transport: %+v", cfg.Main)
+	}
+}
+
+func TestParseRejectsInvalidMainUpdateTransport(t *testing.T) {
+	for _, raw := range []string{
+		"config main 'main'\n option update_via 'vpn'\n",
+		"config main 'main'\n option update_via 'proxy'\n option update_outbound 'direct'\n",
+		"config main 'main'\n option update_via 'proxy'\n option update_outbound 'missing'\n",
+	} {
+		if _, err := Parse(raw); err == nil {
+			t.Fatalf("expected invalid main update transport to fail:\n%s", raw)
+		}
 	}
 }
 

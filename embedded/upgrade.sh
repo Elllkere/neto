@@ -5,10 +5,15 @@ set -eu
 INSTALL_URL="${NETO_INSTALL_URL:-https://raw.githubusercontent.com/elllkere/neto/main/embedded/install.sh}"
 VERSION_URL="${NETO_VERSION_URL:-https://github.com/elllkere/neto/releases/latest/download/neto-version.txt}"
 RELEASE_API_URL="${NETO_RELEASE_API_URL:-https://api.github.com/repos/elllkere/neto/releases/latest}"
+ARCHIVE_URL="${NETO_ARCHIVE_URL:-https://github.com/elllkere/neto/releases/latest/download/neto-openwrt-embedded.tar.gz}"
 NETOD_BIN="${NETO_NETOD_BIN:-/usr/bin/netod}"
 TMP="${TMPDIR:-/tmp}/neto-upgrade.$$"
+ARCHIVE_TMP="${TMPDIR:-/tmp}/neto-upgrade-archive.$$"
+TEXT_TMP="${TMPDIR:-/tmp}/neto-upgrade-text.$$"
 UPGRADE_LOG="${NETO_UPGRADE_LOG:-/tmp/neto/upgrade.log}"
 MODE="upgrade"
+UPDATE_VIA="${NETO_UPDATE_VIA:-}"
+UPDATE_OUTBOUND="${NETO_UPDATE_OUTBOUND:-}"
 
 usage() {
 	echo "usage: upgrade.sh [--check|--luci]" >&2
@@ -29,9 +34,24 @@ case "${1:-}" in
 esac
 
 cleanup() {
-	rm -f "$TMP" "$TMP.tmp"
+	rm -f "$TMP" "$TMP.tmp" "$ARCHIVE_TMP" "$ARCHIVE_TMP.tmp" "$TEXT_TMP" "$TEXT_TMP.tmp"
 }
 trap cleanup EXIT INT TERM
+
+if [ -z "$UPDATE_VIA" ] && command -v uci >/dev/null 2>&1; then
+	UPDATE_VIA="$(uci -q get neto.main.update_via 2>/dev/null || true)"
+fi
+[ -n "$UPDATE_VIA" ] || UPDATE_VIA="direct"
+if [ -z "$UPDATE_OUTBOUND" ] && command -v uci >/dev/null 2>&1; then
+	UPDATE_OUTBOUND="$(uci -q get neto.main.update_outbound 2>/dev/null || true)"
+fi
+case "$UPDATE_VIA" in
+	direct|proxy) ;;
+	*)
+		echo "neto upgrade: unsupported update_via $UPDATE_VIA" >&2
+		exit 1
+		;;
+esac
 
 curl_usable() {
 	command -v curl >/dev/null 2>&1 || return 1
@@ -40,6 +60,17 @@ curl_usable() {
 
 download_text() {
 	local url="$1"
+	if [ "$UPDATE_VIA" = "proxy" ]; then
+		rm -f "$TEXT_TMP" "$TEXT_TMP.tmp"
+		if [ -n "$UPDATE_OUTBOUND" ]; then
+			"$NETOD_BIN" download -url "$url" -output "$TEXT_TMP" -via proxy -outbound "$UPDATE_OUTBOUND" >/dev/null 2>&1 || return 1
+		else
+			"$NETOD_BIN" download -url "$url" -output "$TEXT_TMP" -via proxy >/dev/null 2>&1 || return 1
+		fi
+		cat "$TEXT_TMP"
+		rm -f "$TEXT_TMP"
+		return 0
+	fi
 
 	if curl_usable; then
 		curl -fsSL --connect-timeout 5 --max-time 12 "$url" 2>/dev/null && return 0
@@ -123,6 +154,15 @@ download() {
 	local attempts=""
 
 	rm -f "$tmp"
+	if [ "$UPDATE_VIA" = "proxy" ]; then
+		if [ -n "$UPDATE_OUTBOUND" ]; then
+			"$NETOD_BIN" download -url "$url" -output "$dest" -via proxy -outbound "$UPDATE_OUTBOUND" && return 0
+		else
+			"$NETOD_BIN" download -url "$url" -output "$dest" -via proxy && return 0
+		fi
+		echo "neto upgrade: failed to download $url through outbound ${UPDATE_OUTBOUND:-auto}" >&2
+		exit 1
+	fi
 	if curl_usable; then
 		attempts="$attempts curl"
 		if curl -fsSL --connect-timeout 10 --max-time 300 "$url" -o "$tmp"; then
@@ -151,8 +191,6 @@ if [ "$MODE" = "check" ]; then
 	exit 0
 fi
 
-download "$INSTALL_URL" "$TMP"
-
 run_upgrade() {
 	local expected=""
 	local actual=""
@@ -161,7 +199,14 @@ run_upgrade() {
 		echo "neto upgrade: failed to query the release version before installation" >&2
 		return 1
 	}
-	if ! NETO_EXPECT_VERSION="$expected" sh "$TMP"; then
+	download "$INSTALL_URL" "$TMP"
+	if [ "$UPDATE_VIA" = "proxy" ]; then
+		download "$ARCHIVE_URL" "$ARCHIVE_TMP"
+		if ! NETO_EXPECT_VERSION="$expected" sh "$TMP" --local "$ARCHIVE_TMP"; then
+			echo "neto upgrade: installer failed; netod was not updated" >&2
+			return 1
+		fi
+	elif ! NETO_EXPECT_VERSION="$expected" sh "$TMP"; then
 		echo "neto upgrade: installer failed; netod was not updated" >&2
 		return 1
 	fi

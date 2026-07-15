@@ -21,6 +21,8 @@ type Proxy struct {
 	RealDNSMode         string
 	RoutingMode         string
 	ClientPolicies      map[string]string
+	LANSubnets          []*net.IPNet
+	LocalIPs            map[string]struct{}
 	Rules               []config.Rule
 	FilterAAAAForFakeIP bool
 	Timeout             time.Duration
@@ -44,6 +46,13 @@ func New(cfg config.Config) Proxy {
 	for _, client := range cfg.Clients {
 		clientPolicies[client.IP] = client.Policy
 	}
+	lanSubnets := make([]*net.IPNet, 0, len(cfg.Main.LANSubnets))
+	for _, raw := range cfg.Main.LANSubnets {
+		_, subnet, err := net.ParseCIDR(raw)
+		if err == nil && subnet != nil {
+			lanSubnets = append(lanSubnets, subnet)
+		}
+	}
 	return Proxy{
 		Listen:              cfg.Main.DNSListen,
 		FakeUpstream:        cfg.Main.SingBoxDNSFakeIPAddr(),
@@ -52,6 +61,8 @@ func New(cfg config.Config) Proxy {
 		RealDNSMode:         cfg.Main.RealDNSMode,
 		RoutingMode:         cfg.Main.RoutingMode,
 		ClientPolicies:      clientPolicies,
+		LANSubnets:          lanSubnets,
+		LocalIPs:            localInterfaceIPs(),
 		Rules:               append([]config.Rule(nil), cfg.EffectiveRules()...),
 		FilterAAAAForFakeIP: cfg.Main.FilterAAAAForFakeIP,
 		Timeout:             5 * time.Second,
@@ -243,6 +254,9 @@ func (p Proxy) localResponse(msg []byte, clientIP string) ([]byte, bool) {
 }
 
 func (p Proxy) domainDecision(name string, clientIP string) ruleengine.Decision {
+	if !p.isLANClient(clientIP) {
+		return ruleengine.Decision{Action: "direct", DNSMode: "real_ip"}
+	}
 	policy := p.clientPolicy(clientIP)
 	if policy == "direct" {
 		return ruleengine.Decision{Action: "direct", DNSMode: "real_ip"}
@@ -251,6 +265,45 @@ func (p Proxy) domainDecision(name string, clientIP string) ruleengine.Decision 
 		return ruleengine.Decision{Action: "direct", DNSMode: "real_ip"}
 	}
 	return ruleengine.DomainDecision(p.Rules, name)
+}
+
+func (p Proxy) isLANClient(clientIP string) bool {
+	if len(p.LANSubnets) == 0 {
+		return true
+	}
+	ip := net.ParseIP(strings.TrimSpace(clientIP))
+	if ip == nil || ip.To4() == nil || ip.IsLoopback() {
+		return false
+	}
+	canonical := ip.String()
+	if _, ok := p.LocalIPs[canonical]; ok {
+		return false
+	}
+	for _, subnet := range p.LANSubnets {
+		if subnet != nil && subnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func localInterfaceIPs() map[string]struct{} {
+	result := map[string]struct{}{}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return result
+	}
+	for _, addr := range addrs {
+		raw := addr.String()
+		if host, _, err := net.ParseCIDR(raw); err == nil && host != nil {
+			result[host.String()] = struct{}{}
+			continue
+		}
+		if host := net.ParseIP(raw); host != nil {
+			result[host.String()] = struct{}{}
+		}
+	}
+	return result
 }
 
 func (p Proxy) clientPolicy(clientIP string) string {
