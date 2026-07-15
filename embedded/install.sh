@@ -487,6 +487,25 @@ configure_language() {
 	uci commit neto
 }
 
+fix_luci_permissions() {
+	local path
+
+	for path in \
+		/www/luci-static/resources/neto \
+		/www/luci-static/resources/view/neto
+	do
+		[ -d "$path" ] && chmod 0755 "$path"
+	done
+	for path in \
+		/www/luci-static/resources/neto/*.js \
+		/www/luci-static/resources/view/neto/*.js \
+		/usr/share/luci/menu.d/luci-app-neto.json \
+		/usr/share/rpcd/acl.d/luci-app-neto.json
+	do
+		[ -f "$path" ] && chmod 0644 "$path"
+	done
+}
+
 ensure_lan_subnet_config() {
 	local subnet
 
@@ -518,6 +537,7 @@ install_files() {
 	fi
 
 	cp -R "$WORK_DIR/files/." /
+	fix_luci_permissions
 	chmod 0755 /etc/init.d/neto
 	[ -f /usr/share/neto/run-sing-box-log.sh ] && chmod 0755 /usr/share/neto/run-sing-box-log.sh
 	[ -f /usr/share/neto/check-version.sh ] && chmod 0755 /usr/share/neto/check-version.sh
@@ -581,11 +601,13 @@ clear_luci_cache() {
 restart_luci_deferred() {
 	(
 		sleep 2
-		if [ -x /etc/init.d/rpcd ]; then
-			/etc/init.d/rpcd restart || true
-		fi
 		if [ -x /etc/init.d/uhttpd ]; then
 			/etc/init.d/uhttpd restart || true
+		fi
+		# rpcd owns the LuCI file.exec process running this installer. Restart it
+		# last because procd may terminate this background child together with rpcd.
+		if [ -x /etc/init.d/rpcd ]; then
+			/etc/init.d/rpcd restart || true
 		fi
 	) >/dev/null 2>&1 &
 }

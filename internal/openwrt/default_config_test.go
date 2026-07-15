@@ -82,6 +82,10 @@ func TestInstallerDetectsLANSubnetAndConfiguresLanguage(t *testing.T) {
 		"existing installation detected; preserving config and skipping package installation",
 		"verify_installed_version",
 		"restart_luci_deferred",
+		"fix_luci_permissions",
+		"/www/luci-static/resources/view/neto/*.js",
+		"/usr/share/rpcd/acl.d/luci-app-neto.json",
+		"chmod 0644 \"$path\"",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("installer missing %q:\n%s", want, s)
@@ -283,6 +287,11 @@ func TestInstallerRefreshesLuCIAfterUpdate(t *testing.T) {
 	}
 	if strings.Contains(s, "RESTART_UI=0") {
 		t.Fatalf("installer must not skip LuCI restart after replacing views and ACLs:\n%s", s)
+	}
+	uhttpdRestart := strings.Index(s, "/etc/init.d/uhttpd restart")
+	rpcdRestart := strings.Index(s, "/etc/init.d/rpcd restart")
+	if uhttpdRestart < 0 || rpcdRestart < 0 || uhttpdRestart > rpcdRestart {
+		t.Fatalf("installer must restart uhttpd before rpcd because rpcd may terminate its file.exec child:\n%s", s)
 	}
 }
 
