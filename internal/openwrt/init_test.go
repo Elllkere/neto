@@ -24,6 +24,9 @@ func TestInitScriptStartsTwoProcdInstances(t *testing.T) {
 	if !strings.Contains(s, `procd_set_param command /usr/share/neto/run-sing-box-log.sh "$singbox_bin" /tmp/neto/sing-box.json`) {
 		t.Fatalf("sing-box must run through neto log wrapper:\n%s", s)
 	}
+	if strings.Count(s, "procd_set_param term_timeout 3") != 2 {
+		t.Fatalf("both procd instances must have a bounded shutdown timeout:\n%s", s)
+	}
 	if !strings.Contains(s, `"$singbox_bin" check -c /tmp/neto/sing-box.json`) {
 		t.Fatalf("missing sing-box check before procd start:\n%s", s)
 	}

@@ -295,6 +295,44 @@ func TestInstallerRefreshesLuCIAfterUpdate(t *testing.T) {
 	}
 }
 
+func TestInstallerWaitsForCleanServiceRestartAfterUpdate(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"neto_service_pids()",
+		`ubus call service list '{"name":"neto"}'`,
+		"restart_neto_safely()",
+		`/etc/init.d/neto stop`,
+		`kill -0 "$pid"`,
+		`/etc/init.d/neto start`,
+		`/etc/init.d/neto running`,
+		"neto_runtime_ready()",
+		`"dns_listener: present"`,
+		`"tproxy_listener: present"`,
+		"networking was returned to direct mode",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("installer safe restart missing %q:\n%s", want, s)
+		}
+	}
+	if strings.Count(s, `/etc/init.d/neto stop >/dev/null 2>&1 || true`) < 3 {
+		t.Fatalf("installer must return networking to direct mode on every restart failure path:\n%s", s)
+	}
+	if strings.Contains(s, "/etc/init.d/neto restart\n") {
+		t.Fatalf("installer must not race old and new procd instances with a single restart action:\n%s", s)
+	}
+	updateRestart := `restart_neto_safely
+if [ "$EXISTING_INSTALL" -eq 1 ]; then
+	# The first start replaces the procd instance definitions`
+	if !strings.Contains(s, updateRestart) ||
+		!strings.Contains(s, `log "performing final clean service restart after update"`) {
+		t.Fatalf("existing installations must get a final clean restart after registering new procd instances:\n%s", s)
+	}
+}
+
 func TestEmbeddedSingBoxLogWrapperIsInstalledAsset(t *testing.T) {
 	path := "../../embedded/files/usr/share/neto/run-sing-box-log.sh"
 	data, err := os.ReadFile(path)

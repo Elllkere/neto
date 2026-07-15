@@ -593,6 +593,78 @@ verify_installed_version() {
 	log "verified netod $actual"
 }
 
+neto_service_pids() {
+	command -v ubus >/dev/null 2>&1 || return 0
+	ubus call service list '{"name":"neto"}' 2>/dev/null |
+		sed -n 's/^[[:space:]]*"pid":[[:space:]]*\([0-9][0-9]*\),*$/\1/p'
+}
+
+neto_runtime_ready() {
+	local status expected
+
+	status="$(/usr/bin/netod status 2>/dev/null || true)"
+	for expected in \
+		"nft_table: present" \
+		"ip_rule: present" \
+		"local_route: present" \
+		"dns_listener: present" \
+		"fakeip_dns_listener: present" \
+		"real_direct_dns_listener: present" \
+		"real_proxy_dns_listener: present" \
+		"tproxy_listener: present"
+	do
+		printf '%s\n' "$status" | grep -Fqx "$expected" || return 1
+	done
+	return 0
+}
+
+restart_neto_safely() {
+	local old_pids="" pid="" alive=0 attempts=0 enabled="1"
+
+	old_pids="$(neto_service_pids || true)"
+	/etc/init.d/neto stop >/dev/null 2>&1 || true
+
+	if [ -n "$old_pids" ]; then
+		while [ "$attempts" -lt 10 ]; do
+			alive=0
+			for pid in $old_pids; do
+				if kill -0 "$pid" 2>/dev/null; then
+					alive=1
+					break
+				fi
+			done
+			[ "$alive" -eq 0 ] && break
+			attempts=$((attempts + 1))
+			sleep 1
+		done
+		[ "$alive" -eq 0 ] || die "old neto processes did not stop; networking was returned to direct mode"
+	else
+		# Older procd versions may omit instance PIDs from the service response.
+		sleep 2
+	fi
+
+	if ! /etc/init.d/neto start; then
+		/etc/init.d/neto stop >/dev/null 2>&1 || true
+		die "service failed to start after update; networking was returned to direct mode"
+	fi
+	enabled="$(uci -q get neto.main.enabled 2>/dev/null || true)"
+	[ -n "$enabled" ] || enabled="1"
+	[ "$enabled" = "1" ] || return 0
+
+	attempts=0
+	while [ "$attempts" -lt 15 ]; do
+		if /etc/init.d/neto running >/dev/null 2>&1 && neto_runtime_ready; then
+			log "service restart verified"
+			return 0
+		fi
+		attempts=$((attempts + 1))
+		sleep 1
+	done
+
+	/etc/init.d/neto stop >/dev/null 2>&1 || true
+	die "service did not become ready after update; networking was returned to direct mode"
+}
+
 clear_luci_cache() {
 	rm -f /tmp/luci-indexcache /var/run/luci-indexcache
 	rm -rf /tmp/luci-modulecache
@@ -692,7 +764,16 @@ install_files "$arch"
 verify_installed_version
 
 /etc/init.d/neto enable
-/etc/init.d/neto restart
+restart_neto_safely
+if [ "$EXISTING_INSTALL" -eq 1 ]; then
+	# The first start replaces the procd instance definitions that were loaded
+	# from the previous release. A second clean cycle is intentional: it runs
+	# only with the newly installed init script, wrappers, and binaries and
+	# matches the manual restart required by older self-updates.
+	log "performing final clean service restart after update"
+	sleep 2
+	restart_neto_safely
+fi
 
 clear_luci_cache
 log "installed"
