@@ -50,10 +50,18 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 		"password",
 		"handleOutboundLatencyTest: function()",
 		"fs.exec('/usr/bin/netod', [ 'outbounds', 'latency' ])",
-		"showOutboundLatencyResults: function(report)",
+		"updateOutboundLatencyResults: function(report)",
+		"setOutboundLatencyStatus: function(text, className, title)",
+		"setOutboundLatencyButton: function(testing)",
+		"form.DummyValue, '_latency', _('URLTest delay')",
+		"o.textvalue = function(section_id)",
+		"'data-neto-latency-tag': outboundTag(section_id)",
+		"'style': 'font-size:1.2em;font-weight:600;white-space:nowrap'",
+		"'data-neto-latency-button': '1'",
+		"this.setOutboundLatencyStatus(_('Testing…'), 'spinning', '')",
 		"_('Test latency')",
-		"result.latency_ms",
-		"Results are sorted from the lowest latency to the highest.",
+		"cellResult.latency_ms",
+		"_('Not tested')",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("outbounds.js missing %q:\n%s", want, s)
@@ -67,6 +75,9 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 		"o.default = 'proxy_default'",
 		"uci.set('neto', 'proxy_default', 'outbound')",
 		"form.value, 'tag'",
+		"showoutboundlatencyresults",
+		"ui.showmodal(_('outbound latency test')",
+		"o.renderwidget = function(section_id)",
 	} {
 		if strings.Contains(strings.ToLower(s), forbidden) {
 			t.Fatalf("outbounds.js must not expose %q:\n%s", forbidden, s)
@@ -89,7 +100,7 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 	}
 }
 
-func TestOutboundsLuCITableOnlySectionNameTypeAddressPort(t *testing.T) {
+func TestOutboundsLuCITableOnlySectionNameTypeAddressPortAndLatency(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/www/luci-static/resources/view/neto/outbounds.js")
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +113,7 @@ func TestOutboundsLuCITableOnlySectionNameTypeAddressPort(t *testing.T) {
 		"form.ListValue, 'type'",
 		"form.Value, 'server', _('Address')",
 		"form.Value, 'port'",
+		"form.DummyValue, '_latency', _('URLTest delay')",
 	}
 	for _, needle := range visible {
 		start := strings.Index(s, needle)

@@ -721,7 +721,11 @@ func commandDownload(opts downloadOptions) error {
 
 type outboundLatencyItem struct {
 	outbound config.Outbound
-	port     int
+}
+
+type outboundLatencyMeasurement struct {
+	delayMS int64
+	err     error
 }
 
 func commandOutboundsLatency(opts outboundLatencyOptions) error {
@@ -781,25 +785,16 @@ func commandOutboundsLatency(opts outboundLatencyOptions) error {
 }
 
 func testOutboundLatencyBatch(cfg config.Config, items []outboundLatencyItem) ([]outboundLatencyResult, error) {
-	usedPorts := map[int]struct{}{}
-	targets := make([]singbox.LatencyTarget, 0, len(items))
-	for i := range items {
-		for {
-			port, err := freeLocalPort()
-			if err != nil {
-				return nil, err
-			}
-			if _, exists := usedPorts[port]; exists {
-				continue
-			}
-			usedPorts[port] = struct{}{}
-			items[i].port = port
-			targets = append(targets, singbox.LatencyTarget{Tag: items[i].outbound.Tag, ListenPort: port})
-			break
-		}
+	controllerPort, err := freeLocalPort()
+	if err != nil {
+		return nil, err
+	}
+	outboundTags := make([]string, 0, len(items))
+	for _, item := range items {
+		outboundTags = append(outboundTags, item.outbound.Tag)
 	}
 
-	proxyJSON, err := singbox.GenerateLatencyClient(cfg, targets)
+	proxyJSON, err := singbox.GenerateLatencyClient(cfg, outboundTags, controllerPort)
 	if err != nil {
 		return nil, err
 	}
@@ -827,58 +822,112 @@ func testOutboundLatencyBatch(cfg config.Config, items []outboundLatencyItem) ([
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 	}()
-	for _, item := range items {
-		if err := waitForPort(item.port, 5*time.Second); err != nil {
-			return nil, fmt.Errorf("temporary sing-box did not start: %w: %s", err, strings.TrimSpace(stderr.String()))
-		}
+	if err := waitForPort(controllerPort, 5*time.Second); err != nil {
+		return nil, fmt.Errorf("temporary sing-box Clash API did not start: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
 	results := make([]outboundLatencyResult, len(items))
+	for i, item := range items {
+		results[i] = outboundLatencyResult{
+			Tag:    item.outbound.Tag,
+			Label:  firstNonEmptyString(item.outbound.Label, item.outbound.Tag),
+			Server: fmt.Sprintf("%s:%d", item.outbound.Server, item.outbound.Port),
+		}
+	}
+
+	// The first successful URLTest warms DNS and protocol state. Its value is
+	// intentionally discarded so cold setup does not inflate the report.
+	warmup := measureOutboundLatencyPass(controllerPort, items, nil)
+	measure := make([]bool, len(items))
+	for i := range warmup {
+		if warmup[i].err != nil {
+			results[i].Error = outboundLatencyError(warmup[i].err)
+			continue
+		}
+		measure[i] = true
+	}
+
+	measured := measureOutboundLatencyPass(controllerPort, items, measure)
+	for i := range measured {
+		if !measure[i] {
+			continue
+		}
+		if measured[i].err != nil {
+			results[i].Error = outboundLatencyError(measured[i].err)
+			continue
+		}
+		results[i].OK = true
+		results[i].LatencyMS = measured[i].delayMS
+		results[i].Error = ""
+	}
+	return results, nil
+}
+
+func measureOutboundLatencyPass(controllerPort int, items []outboundLatencyItem, enabled []bool) []outboundLatencyMeasurement {
+	measurements := make([]outboundLatencyMeasurement, len(items))
 	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup
 	for i, item := range items {
+		if enabled != nil && !enabled[i] {
+			continue
+		}
 		wg.Add(1)
 		go func(index int, item outboundLatencyItem) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			result := outboundLatencyResult{
-				Tag:    item.outbound.Tag,
-				Label:  firstNonEmptyString(item.outbound.Label, item.outbound.Tag),
-				Server: fmt.Sprintf("%s:%d", item.outbound.Server, item.outbound.Port),
-			}
-			started := time.Now()
-			out, err := command("curl",
-				"-fsS",
-				"--connect-timeout", "5",
-				"--max-time", "10",
-				"--user-agent", "neto/1",
-				"--proxy", fmt.Sprintf("http://127.0.0.1:%d", item.port),
-				"--output", "/dev/null",
-				latencyTestURL,
-			).CombinedOutput()
-			if err != nil {
-				message := strings.TrimSpace(string(out))
-				if message == "" {
-					message = err.Error()
-				}
-				if len(message) > 240 {
-					message = message[:240]
-				}
-				result.Error = message
-			} else {
-				result.OK = true
-				result.LatencyMS = time.Since(started).Milliseconds()
-				if result.LatencyMS < 1 {
-					result.LatencyMS = 1
-				}
-			}
-			results[index] = result
+			delayMS, err := queryOutboundDelay(controllerPort, item.outbound.Tag)
+			measurements[index] = outboundLatencyMeasurement{delayMS: delayMS, err: err}
 		}(i, item)
 	}
 	wg.Wait()
-	return results, nil
+	return measurements
+}
+
+func queryOutboundDelay(controllerPort int, outboundTag string) (int64, error) {
+	endpoint := fmt.Sprintf(
+		"http://127.0.0.1:%d/proxies/%s/delay?url=%s&timeout=10000",
+		controllerPort,
+		url.PathEscape(outboundTag),
+		url.QueryEscape(latencyTestURL),
+	)
+	out, err := command("curl",
+		"-fsS",
+		"--noproxy", "*",
+		"--connect-timeout", "2",
+		"--max-time", "12",
+		endpoint,
+	).CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(out))
+		if message == "" {
+			message = err.Error()
+		}
+		return 0, errors.New(message)
+	}
+	return parseOutboundDelay(out)
+}
+
+func parseOutboundDelay(raw []byte) (int64, error) {
+	var response struct {
+		Delay int64 `json:"delay"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return 0, fmt.Errorf("invalid sing-box URLTest response: %w", err)
+	}
+	if response.Delay < 1 {
+		return 0, fmt.Errorf("invalid sing-box URLTest delay %d", response.Delay)
+	}
+	return response.Delay, nil
+}
+
+func outboundLatencyError(err error) string {
+	message := strings.TrimSpace(err.Error())
+	if len(message) > 240 {
+		message = message[:240]
+	}
+	return message
 }
 
 func firstNonEmptyString(values ...string) string {

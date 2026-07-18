@@ -419,10 +419,11 @@ Imported nodes and subscription nodes are ordinary outbound sections and are
 selectable by rules.
 
 Outbound latency tests are management-only. `netod outbounds latency` starts
-temporary sing-box mixed listeners, sends bounded HTTP requests through the
-selected custom outbounds, and exits after producing a JSON report. It does not
-install nftables rules or route router-self traffic through the transparent
-proxy path.
+a temporary sing-box Clash API controller on localhost and queries the native
+URLTest delay endpoint for each selected custom outbound. It discards a warm-up
+pass, reports the measured pass, and exits after producing JSON. It does not
+install nftables rules, create an automatic selector, or route router-self
+traffic through the transparent proxy path.
 
 ## LuCI Layout
 

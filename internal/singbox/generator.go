@@ -39,11 +39,6 @@ type Route struct {
 	DefaultDomainResolver string `json:"default_domain_resolver,omitempty"`
 }
 
-type LatencyTarget struct {
-	Tag        string
-	ListenPort int
-}
-
 func Generate(cfg config.Config) ([]byte, error) {
 	proxyTargets := proxyroute.Targets(cfg)
 	fakeDNSHost, fakeDNSPort, err := splitHostPort(cfg.Main.SingBoxDNSFakeIPAddr())
@@ -208,51 +203,32 @@ func GenerateProxyClient(cfg config.Config, outboundTag string, listenPort int) 
 	return json.MarshalIndent(doc, "", "  ")
 }
 
-func GenerateLatencyClient(cfg config.Config, targets []LatencyTarget) ([]byte, error) {
-	if len(targets) == 0 {
+func GenerateLatencyClient(cfg config.Config, outboundTags []string, controllerPort int) ([]byte, error) {
+	if len(outboundTags) == 0 {
 		return nil, fmt.Errorf("latency test requires at least one outbound")
+	}
+	if controllerPort <= 0 || controllerPort > 65535 {
+		return nil, fmt.Errorf("invalid Clash API controller port %d", controllerPort)
 	}
 
 	usedTags := map[string]struct{}{}
-	usedPorts := map[int]struct{}{}
-	inbounds := make([]any, 0, len(targets))
-	outbounds := make([]any, 0, len(targets)+1)
-	rules := make([]any, 0, len(targets))
+	outbounds := make([]any, 0, len(outboundTags)+1)
 	outbounds = append(outbounds, map[string]any{"type": "direct", "tag": config.BuiltinDirectOutbound})
 
-	for i, target := range targets {
-		tag := strings.TrimSpace(target.Tag)
+	for _, outboundTag := range outboundTags {
+		tag := strings.TrimSpace(outboundTag)
 		if tag == "" || tag == config.BuiltinDirectOutbound || tag == config.BuiltinBlockedOutbound || tag == "block" || tag == "proxy_default" {
 			return nil, fmt.Errorf("invalid latency outbound %q", tag)
 		}
-		if target.ListenPort <= 0 || target.ListenPort > 65535 {
-			return nil, fmt.Errorf("invalid latency listen port %d", target.ListenPort)
-		}
 		if _, ok := usedTags[tag]; ok {
 			return nil, fmt.Errorf("duplicate latency outbound %q", tag)
-		}
-		if _, ok := usedPorts[target.ListenPort]; ok {
-			return nil, fmt.Errorf("duplicate latency listen port %d", target.ListenPort)
 		}
 		outbound, err := findClientOutbound(cfg, tag)
 		if err != nil {
 			return nil, err
 		}
 		usedTags[tag] = struct{}{}
-		usedPorts[target.ListenPort] = struct{}{}
-		inboundTag := fmt.Sprintf("latency-%04d-in", i)
-		inbounds = append(inbounds, map[string]any{
-			"type":        "mixed",
-			"tag":         inboundTag,
-			"listen":      "127.0.0.1",
-			"listen_port": target.ListenPort,
-		})
 		outbounds = append(outbounds, encodeOutbound(outbound))
-		rules = append(rules, map[string]any{
-			"inbound":  []string{inboundTag},
-			"action":   "route",
-			"outbound": tag,
-		})
 	}
 
 	doc := map[string]any{
@@ -260,11 +236,14 @@ func GenerateLatencyClient(cfg config.Config, targets []LatencyTarget) ([]byte, 
 			"level":     "warn",
 			"timestamp": true,
 		},
-		"inbounds":  inbounds,
 		"outbounds": outbounds,
 		"route": map[string]any{
-			"rules": rules,
 			"final": config.BuiltinDirectOutbound,
+		},
+		"experimental": map[string]any{
+			"clash_api": map[string]any{
+				"external_controller": fmt.Sprintf("127.0.0.1:%d", controllerPort),
+			},
 		},
 	}
 	return json.MarshalIndent(doc, "", "  ")

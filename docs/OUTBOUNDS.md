@@ -41,9 +41,11 @@ Protocol-specific fields находятся в edit dialog.
 ## Latency Test
 
 LuCI Outbounds page exposes `Test latency`. The test starts temporary sing-box
-mixed inbounds, sends an HTTP connectivity request through every real outbound,
-and sorts successful results from the lowest latency to the highest. Failed
-nodes are shown last with the curl error in the status tooltip.
+with a Clash API controller bound to localhost. It calls sing-box's native
+`GET /proxies/{tag}/delay` URLTest endpoint for every real outbound and writes
+the result into the read-only `URLTest delay` column of the Outbounds table.
+The fastest successful result is highlighted; failed nodes show the error in
+the cell tooltip.
 
 Large subscriptions are processed in batches of 32. Four requests run in
 parallel inside each batch, so the router does not need one sing-box process per
@@ -57,9 +59,11 @@ netod outbounds latency
 netod outbounds latency my_outbound
 ```
 
-The reported value is application-level HTTP latency through the proxy, not an
-ICMP echo time to the server address. This also verifies that proxy
-authentication and transport settings work.
+The first successful URLTest pass warms DNS and protocol state and is discarded;
+the second pass is reported. The value is sing-box URLTest delay through the
+proxy, not curl process startup time and not an ICMP echo to the server address.
+This also verifies that proxy authentication and transport settings work. The
+test does not create an `auto`/`urltest` routing outbound or change rule routing.
 
 ## Rule Selection
 

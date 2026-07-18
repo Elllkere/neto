@@ -66,6 +66,27 @@ config outbound 'test_node'
 	}
 }
 
+func TestParseOutboundDelay(t *testing.T) {
+	delay, err := parseOutboundDelay([]byte(`{"delay":87}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delay != 87 {
+		t.Fatalf("got delay %d, want 87", delay)
+	}
+
+	for _, raw := range [][]byte{
+		[]byte(`{"delay":0}`),
+		[]byte(`{"delay":-1}`),
+		[]byte(`{"error":"timeout"}`),
+		[]byte(`not-json`),
+	} {
+		if _, err := parseOutboundDelay(raw); err == nil {
+			t.Fatalf("expected invalid URLTest response error for %q", raw)
+		}
+	}
+}
+
 func TestCommandDownloadDirect(t *testing.T) {
 	dir := t.TempDir()
 	responsePath := filepath.Join(dir, "release.tar.gz")

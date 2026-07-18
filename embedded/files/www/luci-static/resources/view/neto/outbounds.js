@@ -84,6 +84,10 @@ function outboundTagExists(tag) {
 	return found;
 }
 
+function outboundTag(section_id) {
+	return String(uci.get('neto', section_id, 'tag') || section_id || '').trim();
+}
+
 function addNamedSectionValidator(el, section, reservedMessage, checkOutboundTags) {
 	var nameEl = el.querySelector('.cbi-section-create-name');
 
@@ -295,14 +299,17 @@ return view.extend({
 	},
 
 	handleOutboundLatencyTest: function() {
-		ui.showModal(_('Outbound latency test'), [
-			E('p', { 'class': 'spinning' }, _('Testing all outbounds. This may take several minutes for a large subscription…'))
-		]);
+		this.latencyTesting = true;
+		this.setOutboundLatencyButton(true);
 
 		return this.handleSaveCommitConfig()
-			.then(function() {
+			.then(L.bind(function() {
+				// map.save() redraws the GridSection, so apply the running state
+				// only after the new table nodes have replaced the old ones.
+				this.setOutboundLatencyStatus(_('Testing…'), 'spinning', '');
+				this.setOutboundLatencyButton(true);
 				return fs.exec('/usr/bin/netod', [ 'outbounds', 'latency' ]);
-			})
+			}, this))
 			.then(L.bind(function(res) {
 				var report;
 
@@ -313,52 +320,65 @@ return view.extend({
 				} catch (err) {
 					throw new Error(_('Invalid latency test response') + ': ' + err.message);
 				}
-				this.showOutboundLatencyResults(report);
+				this.updateOutboundLatencyResults(report);
+				ui.addNotification(null, E('p', {}, _('Latency test completed.')), 'info');
 			}, this));
 	},
 
-	showOutboundLatencyResults: function(report) {
+	setOutboundLatencyButton: function(testing) {
+		var buttons = document.querySelectorAll('[data-neto-latency-button]');
+
+		for (var i = 0; i < buttons.length; i++) {
+			buttons[i].disabled = testing ? true : null;
+			buttons[i].textContent = testing ? _('Testing…') : _('Test latency');
+		}
+	},
+
+	setOutboundLatencyStatus: function(text, className, title) {
+		var cells = document.querySelectorAll('[data-neto-latency-tag]');
+
+		for (var i = 0; i < cells.length; i++) {
+			cells[i].textContent = text;
+			cells[i].className = className || '';
+			cells[i].title = title || '';
+		}
+	},
+
+	updateOutboundLatencyResults: function(report) {
 		var results = Array.isArray(report && report.results) ? report.results : [];
-		var rows = [
-			E('tr', { 'class': 'tr table-titles' }, [
-				E('th', { 'class': 'th' }, _('Outbound')),
-				E('th', { 'class': 'th' }, _('Server')),
-				E('th', { 'class': 'th' }, _('Latency')),
-				E('th', { 'class': 'th' }, _('Status'))
-			])
-		];
+		var byTag = Object.create(null);
+		var best = null;
+		var cells = document.querySelectorAll('[data-neto-latency-tag]');
 
 		for (var i = 0; i < results.length; i++) {
 			var result = results[i] || {};
-			var latency = result.ok ? String(result.latency_ms) + ' ms' : '—';
-			var status = result.ok ? _('Reachable') : _('Failed');
-			var statusNode = E('span', {
-				'class': result.ok ? 'label success' : 'label danger',
-				'title': result.error || ''
-			}, status);
+			var tag = String(result.tag || '');
 
-			rows.push(E('tr', { 'class': 'tr' }, [
-				E('td', { 'class': 'td' }, [
-					E(i == 0 && result.ok ? 'strong' : 'span', {}, result.label || result.tag || '—'),
-					result.label && result.tag && result.label != result.tag ? E('small', { 'style': 'display:block;opacity:.7' }, result.tag) : ''
-				]),
-				E('td', { 'class': 'td' }, result.server || '—'),
-				E('td', { 'class': 'td' }, latency),
-				E('td', { 'class': 'td' }, statusNode)
-			]));
+			if (tag == '')
+				continue;
+			byTag[tag] = result;
+			if (result.ok && Number(result.latency_ms) > 0 && (best == null || Number(result.latency_ms) < best))
+				best = Number(result.latency_ms);
 		}
 
-		ui.showModal(_('Outbound latency test'), [
-			E('p', {}, _('Results are sorted from the lowest latency to the highest. Failed servers are shown last.')),
-			E('p', {}, [ _('Test target') + ': ', E('code', {}, String(report && report.target || '—')) ]),
-			E('table', { 'class': 'table cbi-section-table' }, rows),
-			E('div', { 'class': 'right' }, [
-				E('button', {
-					'class': 'cbi-button cbi-button-neutral',
-					'click': ui.hideModal
-				}, _('Close'))
-			])
-		]);
+		for (var j = 0; j < cells.length; j++) {
+			var cell = cells[j];
+			var cellResult = byTag[cell.getAttribute('data-neto-latency-tag')];
+
+			if (!cellResult) {
+				cell.textContent = _('Not tested');
+				cell.className = '';
+				cell.title = '';
+			} else if (cellResult.ok && Number(cellResult.latency_ms) > 0) {
+				cell.textContent = String(cellResult.latency_ms) + ' ms';
+				cell.className = Number(cellResult.latency_ms) == best ? 'label success' : 'label';
+				cell.title = String(report && report.target || '');
+			} else {
+				cell.textContent = _('Failed');
+				cell.className = 'label danger';
+				cell.title = cellResult.error || _('Latency test failed');
+			}
+		}
 	},
 
 	render: function() {
@@ -395,21 +415,21 @@ return view.extend({
 			latencyButton = E('button', {
 				'class': 'cbi-button cbi-button-action',
 				'style': 'margin-left:.5em',
+				'data-neto-latency-button': '1',
+				'disabled': self.latencyTesting ? true : null,
 				'click': function(ev) {
 					ev.preventDefault();
-					latencyButton.disabled = true;
-					latencyButton.textContent = _('Testing…');
 					return self.handleOutboundLatencyTest().then(function() {
-						latencyButton.disabled = null;
-						latencyButton.textContent = _('Test latency');
+						self.latencyTesting = false;
+						self.setOutboundLatencyButton(false);
 					}, function(err) {
-						latencyButton.disabled = null;
-						latencyButton.textContent = _('Test latency');
-						ui.hideModal();
+						self.latencyTesting = false;
+						self.setOutboundLatencyButton(false);
+						self.setOutboundLatencyStatus(_('Failed'), 'label danger', err.message || err);
 						ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
 					});
 				}
-			}, _('Test latency'));
+			}, self.latencyTesting ? _('Testing…') : _('Test latency'));
 			el.appendChild(latencyButton);
 
 			return el;
@@ -455,6 +475,14 @@ return view.extend({
 		o = s.option(form.Value, 'port', _('Port'));
 		o.datatype = 'port';
 		o.rmempty = false;
+
+		o = s.option(form.DummyValue, '_latency', _('URLTest delay'));
+		o.textvalue = function(section_id) {
+			return E('span', {
+				'data-neto-latency-tag': outboundTag(section_id),
+				'style': 'font-size:1.2em;font-weight:600;white-space:nowrap'
+			}, _('Not tested'));
+		};
 
 		o = s.option(form.Value, 'uuid', _('UUID'));
 		o.depends('type', 'vless');

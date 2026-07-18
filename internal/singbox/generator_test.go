@@ -593,31 +593,30 @@ func TestGenerateTrojanOutbound(t *testing.T) {
 	}
 }
 
-func TestGenerateLatencyClientRoutesEachInboundToItsOutbound(t *testing.T) {
+func TestGenerateLatencyClientExposesOutboundsThroughLocalClashAPI(t *testing.T) {
 	cfg := config.Config{Outbounds: []config.Outbound{
 		{Enabled: true, Tag: "first", Type: "trojan", Server: "first.example", Port: 443, Password: "one", TLS: true},
 		{Enabled: true, Tag: "second", Type: "shadowsocks", Server: "second.example", Port: 8388, Method: "aes-128-gcm", Password: "two"},
 	}}
 
-	raw, err := GenerateLatencyClient(cfg, []LatencyTarget{
-		{Tag: "first", ListenPort: 21001},
-		{Tag: "second", ListenPort: 21002},
-	})
+	raw, err := GenerateLatencyClient(cfg, []string{"first", "second"}, 21001)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(raw)
 	for _, want := range []string{
-		`"tag": "latency-0000-in"`,
-		`"listen_port": 21001`,
-		`"outbound": "first"`,
-		`"tag": "latency-0001-in"`,
-		`"listen_port": 21002`,
-		`"outbound": "second"`,
+		`"tag": "first"`,
+		`"tag": "second"`,
+		`"external_controller": "127.0.0.1:21001"`,
 		`"final": "direct"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("latency client missing %s:\n%s", want, text)
+		}
+	}
+	for _, forbidden := range []string{`"inbounds"`, `"type": "mixed"`, `latency-0000-in`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("latency client must not contain %s:\n%s", forbidden, text)
 		}
 	}
 }
@@ -625,14 +624,17 @@ func TestGenerateLatencyClientRoutesEachInboundToItsOutbound(t *testing.T) {
 func TestGenerateLatencyClientRejectsInvalidTargets(t *testing.T) {
 	cfg := config.Config{Outbounds: []config.Outbound{{Enabled: true, Tag: "first", Type: "trojan", Server: "example.com", Port: 443, Password: "secret"}}}
 
-	for _, targets := range [][]LatencyTarget{
-		nil,
-		{{Tag: "first", ListenPort: 0}},
-		{{Tag: "missing", ListenPort: 21001}},
-		{{Tag: "first", ListenPort: 21001}, {Tag: "first", ListenPort: 21002}},
+	for _, test := range []struct {
+		tags []string
+		port int
+	}{
+		{tags: nil, port: 21001},
+		{tags: []string{"first"}, port: 0},
+		{tags: []string{"missing"}, port: 21001},
+		{tags: []string{"first", "first"}, port: 21001},
 	} {
-		if _, err := GenerateLatencyClient(cfg, targets); err == nil {
-			t.Fatalf("expected latency target error for %+v", targets)
+		if _, err := GenerateLatencyClient(cfg, test.tags, test.port); err == nil {
+			t.Fatalf("expected latency target error for %+v", test)
 		}
 	}
 }
