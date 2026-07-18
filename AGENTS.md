@@ -207,6 +207,10 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
   succeeds.
 - `netod providers update [name]` updates URL providers using `curl` and script
   providers by executing `script_path`.
+- LuCI Providers exposes `Update all`, which saves UCI and runs one named
+  `netod providers update <name>` request at a time to avoid LuCI XHR timeouts.
+  A failed provider is reported but must not stop later providers; restart neto
+  once after the entire sequence.
 - LuCI Providers page can import built-in IP provider presets for Cloudflare
   (`https://www.cloudflare.com/ips-v4/`), Telegram
   (`https://core.telegram.org/resources/cidr.txt`), Akamai
@@ -285,6 +289,10 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
   file.
 - `netod subscriptions update [name]` downloads subscriptions and replaces only
   nodes belonging to that subscription.
+- The Outbounds subscriptions section exposes `Update all`, which saves UCI and
+  runs one named `netod subscriptions update <name>` request at a time to avoid
+  LuCI XHR timeouts. A failed subscription must not stop later subscriptions;
+  restart neto once after the entire sequence.
 - Subscription downloads use the system `curl` binary, not Go `net/http`, to
   keep embedded multi-architecture `netod` binaries small.
 - `auto_update=1` is implemented by neto-owned cron entries in

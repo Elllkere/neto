@@ -53,6 +53,16 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"function(ev, section_id)",
 		"NETO_PROVIDER_PROXY",
 		"fs.exec('/usr/bin/netod', [ 'providers', 'update', section_id ])",
+		"handleProviderUpdateAll: function()",
+		"runProviderUpdates: function(names)",
+		"setProviderUpdateAllButton: function(running, current, total)",
+		"fs.exec('/usr/bin/netod', [ 'providers', 'update', name ])",
+		"failures.push({ name: name, error:",
+		"showProviderUpdateFailures: function(failures)",
+		"Updating %d/%d…",
+		"'data-neto-providers-update-all': '1'",
+		"_('Updating all…')",
+		"_('Update all')",
 		"handleImportProviderPresets: function()",
 		"Import provider presets",
 	} {
@@ -72,6 +82,7 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"uci.commit(",
 		"form.Flag, 'enabled'",
 		"missing or disabled provider",
+		"fs.exec('/usr/bin/netod', [ 'providers', 'update' ])",
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("providers.js must not contain policy field %q:\n%s", forbidden, s)

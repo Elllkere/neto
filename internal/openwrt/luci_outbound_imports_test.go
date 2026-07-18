@@ -34,6 +34,16 @@ func TestOutboundsLuCIContainsImportAndSubscriptions(t *testing.T) {
 		"fs.exec('/sbin/uci', [ 'commit', 'neto' ])",
 		"throw new Error(res.stderr || res.stdout || _('Commit failed'))",
 		"fs.exec('/usr/bin/netod', [ 'subscriptions', 'update', section_id ])",
+		"handleSubscriptionUpdateAll: function()",
+		"runSubscriptionUpdates: function(names)",
+		"setSubscriptionUpdateAllButton: function(running, current, total)",
+		"fs.exec('/usr/bin/netod', [ 'subscriptions', 'update', name ])",
+		"failures.push({ name: name, error:",
+		"showSubscriptionUpdateFailures: function(failures)",
+		"Updating %d/%d…",
+		"'data-neto-subscriptions-update-all': '1'",
+		"_('Updating all…')",
+		"_('Update all')",
 		"form.Value, 'url'",
 		"form.Flag, 'auto_update'",
 		"form.ListValue, 'update_schedule'",
@@ -62,6 +72,7 @@ func TestOutboundsLuCIContainsImportAndSubscriptions(t *testing.T) {
 		"uci.get('neto', section_id, 'subscription') != null",
 		"uci.get('neto', section_id, 'subscription') == null",
 		"uci.commit(",
+		"fs.exec('/usr/bin/netod', [ 'subscriptions', 'update' ])",
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("subscription nodes must remain editable in the regular Outbounds table, found %q:\n%s", forbidden, s)

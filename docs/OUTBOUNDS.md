@@ -156,6 +156,17 @@ netod subscriptions update my_sub
 /etc/init.d/neto restart
 ```
 
+Omit the name in the CLI to update every enabled subscription:
+
+```sh
+netod subscriptions update
+```
+
+The LuCI subscriptions section exposes `Update all`, but intentionally sends
+one named update request at a time to stay below the LuCI XHR timeout. It shows
+progress, continues after individual failures, and restarts neto once after the
+full sequence.
+
 Subscription nodes are ordinary outbound sections:
 
 ```uci

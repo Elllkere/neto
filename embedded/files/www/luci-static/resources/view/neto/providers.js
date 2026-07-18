@@ -420,6 +420,78 @@ return view.extend({
 			});
 	},
 
+	handleProviderUpdateAll: function() {
+		var failures;
+		var names;
+
+		this.providerUpdateAllRunning = true;
+		this.setProviderUpdateAllButton(true);
+
+		return this.handleSaveCommitConfig()
+			.then(L.bind(function() {
+				names = [];
+				uci.sections('neto', 'provider', function(section, sid) {
+					names.push(String(section['.name'] || sid));
+				});
+				if (names.length == 0)
+					throw new Error(_('No providers configured'));
+
+				return this.runProviderUpdates(names);
+			}, this))
+			.then(function(updateFailures) {
+				failures = updateFailures;
+				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
+			})
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Restart failed'));
+				if (failures.length == 0)
+					window.location.reload();
+				return failures;
+			});
+	},
+
+	runProviderUpdates: function(names) {
+		var failures = [];
+		var self = this;
+		var chain = Promise.resolve();
+
+		names.forEach(function(name, index) {
+			chain = chain.then(function() {
+				self.setProviderUpdateAllButton(true, index + 1, names.length);
+				return fs.exec('/usr/bin/netod', [ 'providers', 'update', name ])
+					.then(function(res) {
+						if (res.code)
+							failures.push({ name: name, error: res.stderr || res.stdout || _('Update failed') });
+					}, function(err) {
+						failures.push({ name: name, error: err.message || err });
+					});
+			});
+		});
+
+		return chain.then(function() { return failures; });
+	},
+
+	setProviderUpdateAllButton: function(running, current, total) {
+		var buttons = document.querySelectorAll('[data-neto-providers-update-all]');
+		var text = running && total ? _('Updating %d/%d…').format(current, total) : (running ? _('Updating all…') : _('Update all'));
+
+		for (var i = 0; i < buttons.length; i++) {
+			buttons[i].disabled = running ? true : null;
+			buttons[i].textContent = text;
+		}
+	},
+
+	showProviderUpdateFailures: function(failures) {
+		ui.addNotification(null, E('div', {}, [
+			E('p', {}, _('Some providers failed to update. Successful updates were kept.')),
+			E('ul', {}, failures.map(function(item) {
+				return E('li', {}, [ E('strong', {}, item.name + ': '), String(item.error || _('Update failed')) ]);
+			})),
+			E('p', {}, _('Reload the page to show successful updates.'))
+		]), 'warning');
+	},
+
 	handleImportProviderPresets: function() {
 		return this.map.save(normalizeProviders)
 			.then(function() {
@@ -490,6 +562,26 @@ return view.extend({
 					});
 				}
 			}, _('Import provider presets')));
+
+			el.appendChild(E('button', {
+				'class': 'cbi-button cbi-button-action',
+				'style': 'margin-left:.5em',
+				'data-neto-providers-update-all': '1',
+				'disabled': self.providerUpdateAllRunning ? true : null,
+				'click': function(ev) {
+					ev.preventDefault();
+					return self.handleProviderUpdateAll().then(function(failures) {
+						self.providerUpdateAllRunning = false;
+						self.setProviderUpdateAllButton(false);
+						if (failures.length)
+							self.showProviderUpdateFailures(failures);
+					}, function(err) {
+						self.providerUpdateAllRunning = false;
+						self.setProviderUpdateAllButton(false);
+						ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+					});
+				}
+			}, self.providerUpdateAllRunning ? _('Updating all…') : _('Update all')));
 
 			return el;
 		};

@@ -56,7 +56,7 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 		"form.DummyValue, '_latency', _('URLTest delay')",
 		"o.textvalue = function(section_id)",
 		"'data-neto-latency-tag': outboundTag(section_id)",
-		"'style': 'font-size:1.2em;font-weight:600;white-space:nowrap'",
+		"'style': 'font-size:1.1em;font-weight:600;white-space:nowrap'",
 		"'data-neto-latency-button': '1'",
 		"this.setOutboundLatencyStatus(_('Testing…'), 'spinning', '')",
 		"_('Test latency')",

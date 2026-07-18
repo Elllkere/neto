@@ -298,6 +298,79 @@ return view.extend({
 			});
 	},
 
+	handleSubscriptionUpdateAll: function() {
+		var failures;
+		var names;
+
+		this.subscriptionUpdateAllRunning = true;
+		this.setSubscriptionUpdateAllButton(true);
+
+		return this.handleSaveCommitConfig()
+			.then(L.bind(function() {
+				names = [];
+				uci.sections('neto', 'subscription', function(section, sid) {
+					if (String(section.enabled == null ? '1' : section.enabled) != '0')
+						names.push(String(section['.name'] || sid));
+				});
+				if (names.length == 0)
+					throw new Error(_('No enabled subscriptions configured'));
+
+				return this.runSubscriptionUpdates(names);
+			}, this))
+			.then(function(updateFailures) {
+				failures = updateFailures;
+				return fs.exec('/etc/init.d/neto', [ 'restart' ]);
+			})
+			.then(function(res) {
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Restart failed'));
+				if (failures.length == 0)
+					window.location.reload();
+				return failures;
+			});
+	},
+
+	runSubscriptionUpdates: function(names) {
+		var failures = [];
+		var self = this;
+		var chain = Promise.resolve();
+
+		names.forEach(function(name, index) {
+			chain = chain.then(function() {
+				self.setSubscriptionUpdateAllButton(true, index + 1, names.length);
+				return fs.exec('/usr/bin/netod', [ 'subscriptions', 'update', name ])
+					.then(function(res) {
+						if (res.code)
+							failures.push({ name: name, error: res.stderr || res.stdout || _('Update failed') });
+					}, function(err) {
+						failures.push({ name: name, error: err.message || err });
+					});
+			});
+		});
+
+		return chain.then(function() { return failures; });
+	},
+
+	setSubscriptionUpdateAllButton: function(running, current, total) {
+		var buttons = document.querySelectorAll('[data-neto-subscriptions-update-all]');
+		var text = running && total ? _('Updating %d/%d…').format(current, total) : (running ? _('Updating all…') : _('Update all'));
+
+		for (var i = 0; i < buttons.length; i++) {
+			buttons[i].disabled = running ? true : null;
+			buttons[i].textContent = text;
+		}
+	},
+
+	showSubscriptionUpdateFailures: function(failures) {
+		ui.addNotification(null, E('div', {}, [
+			E('p', {}, _('Some subscriptions failed to update. Successful updates were kept.')),
+			E('ul', {}, failures.map(function(item) {
+				return E('li', {}, [ E('strong', {}, item.name + ': '), String(item.error || _('Update failed')) ]);
+			})),
+			E('p', {}, _('Reload the page to show successful updates.'))
+		]), 'warning');
+	},
+
 	handleOutboundLatencyTest: function() {
 		this.latencyTesting = true;
 		this.setOutboundLatencyButton(true);
@@ -480,7 +553,7 @@ return view.extend({
 		o.textvalue = function(section_id) {
 			return E('span', {
 				'data-neto-latency-tag': outboundTag(section_id),
-				'style': 'font-size:1.2em;font-weight:600;white-space:nowrap'
+				'style': 'font-size:1.1em;font-weight:600;white-space:nowrap'
 			}, _('Not tested'));
 		};
 
@@ -724,6 +797,25 @@ return view.extend({
 		sub.renderSectionAdd = function() {
 			var el = form.GridSection.prototype.renderSectionAdd.apply(this, arguments);
 			addNamedSectionValidator(el, this, _('This name is reserved'));
+			el.appendChild(E('button', {
+				'class': 'cbi-button cbi-button-action',
+				'style': 'margin-left:.5em',
+				'data-neto-subscriptions-update-all': '1',
+				'disabled': self.subscriptionUpdateAllRunning ? true : null,
+				'click': function(ev) {
+					ev.preventDefault();
+					return self.handleSubscriptionUpdateAll().then(function(failures) {
+						self.subscriptionUpdateAllRunning = false;
+						self.setSubscriptionUpdateAllButton(false);
+						if (failures.length)
+							self.showSubscriptionUpdateFailures(failures);
+					}, function(err) {
+						self.subscriptionUpdateAllRunning = false;
+						self.setSubscriptionUpdateAllButton(false);
+						ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+					});
+				}
+			}, self.subscriptionUpdateAllRunning ? _('Updating all…') : _('Update all')));
 			return el;
 		};
 
