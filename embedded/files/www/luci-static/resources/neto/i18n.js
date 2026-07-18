@@ -109,6 +109,8 @@ var ru = {
 	'Create an outbound before selecting proxy update.': 'Создайте исходящий перед выбором обновления через proxy.',
 	'Test latency': 'Проверить задержку',
 	'Testing…': 'Проверка…',
+	'Testing %d/%d…': 'Проверка %d/%d…',
+	'No custom outbounds configured': 'Нет настроенных исходящих',
 	'Latency test failed': 'Не удалось проверить задержку',
 	'Invalid latency test response': 'Некорректный ответ теста задержки',
 	'Latency test completed.': 'Проверка задержки завершена.',

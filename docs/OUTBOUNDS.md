@@ -45,12 +45,14 @@ with a Clash API controller bound to localhost. It calls sing-box's native
 `GET /proxies/{tag}/delay` URLTest endpoint for every real outbound and writes
 the result into the read-only `URLTest delay` column of the Outbounds table.
 The fastest successful result is highlighted; failed nodes show the error in
-the cell tooltip.
+the cell tooltip. LuCI sends one named test request at a time and updates the
+table incrementally, so a large subscription cannot exceed the XHR timeout as
+one monolithic request. A timeout or failure affects only that outbound and
+does not stop the remaining tests.
 
-Large subscriptions are processed in batches of 32. Four requests run in
-parallel inside each batch, so the router does not need one sing-box process per
-node. The temporary test does not add nftables rules and does not route router
-self traffic through neto TProxy.
+The all-outbounds CLI command processes large subscriptions in batches of 32,
+with four requests in parallel inside each batch. The temporary test does not
+add nftables rules and does not route router self traffic through neto TProxy.
 
 The same report is available as JSON from the CLI:
 

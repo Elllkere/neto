@@ -372,45 +372,106 @@ return view.extend({
 	},
 
 	handleOutboundLatencyTest: function() {
+		var targets;
+
 		this.latencyTesting = true;
 		this.setOutboundLatencyButton(true);
 
 		return this.handleSaveCommitConfig()
 			.then(L.bind(function() {
-				// map.save() redraws the GridSection, so apply the running state
-				// only after the new table nodes have replaced the old ones.
-				this.setOutboundLatencyStatus(_('Testing…'), 'spinning', '');
-				this.setOutboundLatencyButton(true);
-				return fs.exec('/usr/bin/netod', [ 'outbounds', 'latency' ]);
-			}, this))
-			.then(L.bind(function(res) {
-				var report;
+				targets = [];
+				uci.sections('neto', 'outbound', function(section, sid) {
+					var tag = String(section.tag || section['.name'] || sid || '').trim();
+					if (tag == '' || isReservedTag(tag))
+						return;
+					targets.push({
+						tag: tag,
+						label: String(section.label || section.name || tag),
+						server: String(section.server || section.address || '') + (section.port ? ':' + section.port : '')
+					});
+				});
+				if (targets.length == 0)
+					throw new Error(_('No custom outbounds configured'));
 
-				if (res.code)
-					throw new Error(res.stderr || res.stdout || _('Latency test failed'));
-				try {
-					report = JSON.parse(String(res.stdout || ''));
-				} catch (err) {
-					throw new Error(_('Invalid latency test response') + ': ' + err.message);
-				}
+				// map.save() redraws the GridSection. Start progress only after
+				// the new table nodes have replaced the old ones.
+				this.setOutboundLatencyStatus(_('Not tested'), '', '');
+				return this.runOutboundLatencyTests(targets);
+			}, this))
+			.then(L.bind(function(report) {
 				this.updateOutboundLatencyResults(report);
 				ui.addNotification(null, E('p', {}, _('Latency test completed.')), 'info');
 			}, this));
 	},
 
-	setOutboundLatencyButton: function(testing) {
+	runOutboundLatencyTests: function(targets) {
+		var report = { target: '', results: [] };
+		var self = this;
+		var chain = Promise.resolve();
+
+		targets.forEach(function(target, index) {
+			chain = chain.then(function() {
+				self.setOutboundLatencyButton(true, index + 1, targets.length);
+				self.setOutboundLatencyStatus(_('Testing…'), 'spinning', '', target.tag);
+
+				return fs.exec('/usr/bin/netod', [ 'outbounds', 'latency', target.tag ])
+					.then(function(res) {
+						var itemReport;
+
+						if (res.code) {
+							report.results.push(self.outboundLatencyFailure(target, res.stderr || res.stdout || _('Latency test failed')));
+							return;
+						}
+						try {
+							itemReport = JSON.parse(String(res.stdout || ''));
+							if (!Array.isArray(itemReport.results) || itemReport.results.length == 0)
+								throw new Error(_('Invalid latency test response'));
+							report.target = report.target || String(itemReport.target || '');
+							itemReport.results[0].tag = target.tag;
+							itemReport.results[0].label = itemReport.results[0].label || target.label;
+							itemReport.results[0].server = itemReport.results[0].server || target.server;
+							report.results.push(itemReport.results[0]);
+						} catch (err) {
+							report.results.push(self.outboundLatencyFailure(target, _('Invalid latency test response') + ': ' + (err.message || err)));
+						}
+					}, function(err) {
+						report.results.push(self.outboundLatencyFailure(target, err.message || err));
+					})
+					.then(function() {
+						self.updateOutboundLatencyResults(report);
+					});
+			});
+		});
+
+		return chain.then(function() { return report; });
+	},
+
+	outboundLatencyFailure: function(target, error) {
+		return {
+			tag: target.tag,
+			label: target.label,
+			server: target.server,
+			ok: false,
+			error: String(error || _('Latency test failed'))
+		};
+	},
+
+	setOutboundLatencyButton: function(testing, current, total) {
 		var buttons = document.querySelectorAll('[data-neto-latency-button]');
+		var text = testing && total ? _('Testing %d/%d…').format(current, total) : (testing ? _('Testing…') : _('Test latency'));
 
 		for (var i = 0; i < buttons.length; i++) {
 			buttons[i].disabled = testing ? true : null;
-			buttons[i].textContent = testing ? _('Testing…') : _('Test latency');
+			buttons[i].textContent = text;
 		}
 	},
 
-	setOutboundLatencyStatus: function(text, className, title) {
+	setOutboundLatencyStatus: function(text, className, title, tag) {
 		var cells = document.querySelectorAll('[data-neto-latency-tag]');
 
 		for (var i = 0; i < cells.length; i++) {
+			if (tag && cells[i].getAttribute('data-neto-latency-tag') != tag)
+				continue;
 			cells[i].textContent = text;
 			cells[i].className = className || '';
 			cells[i].title = title || '';
@@ -498,7 +559,7 @@ return view.extend({
 					}, function(err) {
 						self.latencyTesting = false;
 						self.setOutboundLatencyButton(false);
-						self.setOutboundLatencyStatus(_('Failed'), 'label danger', err.message || err);
+						self.setOutboundLatencyStatus(_('Not tested'), '', err.message || err);
 						ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
 					});
 				}

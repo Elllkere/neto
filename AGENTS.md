@@ -250,9 +250,12 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
 - Outbounds LuCI should keep the table compact: text label/name section title,
   type, address, port, and a read-only URLTest delay column. Do not add a second
   editable name/input column. Protocol details belong in the edit modal.
-- Outbounds LuCI exposes a batch latency test. It uses the native sing-box
-  Clash API URLTest delay endpoint through a localhost-only temporary controller,
-  without adding an automatic selector or router-self nft/TProxy routing.
+- Outbounds LuCI exposes a latency test. It invokes one named
+  `netod outbounds latency <tag>` request at a time to avoid LuCI XHR timeouts,
+  continues after an individual failure, and updates row results incrementally.
+  The backend uses the native sing-box Clash API URLTest delay endpoint through
+  a localhost-only temporary controller, without adding an automatic selector
+  or router-self nft/TProxy routing.
 - Outbounds LuCI should expose homeproxy-like controls for supported protocols:
   VLESS flow dropdown, Shadowsocks method dropdown, TLS min/max/ciphers, allow
   insecure, ECH, uTLS fingerprint, REALITY, and V2Ray transport fields. Hide
