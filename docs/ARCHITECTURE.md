@@ -131,10 +131,20 @@ Order in `from_lan` chain:
 1. DNAT-associated connections, including port-forward replies, -> `return`.
 2. `direct_clients4` -> `return`.
 3. `reserved4` -> `return`.
-4. `proxy_clients4` -> `jump to_proxy_default`.
-5. `FakeIP` range rule in `custom` mode.
-6. ordered IP/provider/CIDR rules.
+4. `proxy_clients4` -> first custom outbound TProxy target.
+5. `FakeIP` range rule in `custom` mode when domain proxy rules exist.
+6. ordered IP/provider/CIDR rules -> the selected outbound TProxy target.
 7. default `return`.
+
+Each custom outbound has a generated TProxy inbound. Its port is
+`tproxy_port + outbound_index`, where `outbound_index` follows UCI section
+order. nftables therefore preserves the selected outbound for packet-level
+IP/CIDR rules without expanding provider CIDRs into sing-box rules.
+
+FakeIP traffic initially enters the first TProxy inbound. Before sing-box route
+matching, FakeIP reverse mapping restores the domain; generated ordered domain
+route rules then select the outbound configured on the matching neto rule.
+Unmatched sing-box traffic has `route.final=direct`.
 
 `TProxy` policy routing:
 

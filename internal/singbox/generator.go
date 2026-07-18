@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/elllkere/neto/internal/config"
+	"github.com/elllkere/neto/internal/proxyroute"
 )
 
 const MinimumVersion = "1.12.0"
@@ -39,6 +40,7 @@ type Route struct {
 }
 
 func Generate(cfg config.Config) ([]byte, error) {
+	proxyTargets := proxyroute.Targets(cfg)
 	fakeDNSHost, fakeDNSPort, err := splitHostPort(cfg.Main.SingBoxDNSFakeIPAddr())
 	if err != nil {
 		return nil, err
@@ -75,7 +77,44 @@ func Generate(cfg config.Config) ([]byte, error) {
 		map[string]any{"action": "sniff"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 	}
-	routeRules = append(routeRules, clientOutboundRouteRules(cfg)...)
+	routeRules = append(routeRules, clientOutboundRouteRules(cfg, proxyTargets)...)
+	routeRules = append(routeRules, domainOutboundRouteRules(cfg, proxyTargets)...)
+	for _, target := range proxyTargets {
+		routeRules = append(routeRules, map[string]any{
+			"inbound":  []string{target.Inbound},
+			"action":   "route",
+			"outbound": target.Tag,
+		})
+	}
+
+	inbounds := []any{
+		map[string]any{
+			"type":        "direct",
+			"tag":         "dns-fakeip-in",
+			"listen":      fakeDNSHost,
+			"listen_port": fakeDNSPort,
+		},
+		map[string]any{
+			"type":        "direct",
+			"tag":         "dns-real-direct-in",
+			"listen":      realDirectDNSHost,
+			"listen_port": realDirectDNSPort,
+		},
+		map[string]any{
+			"type":        "direct",
+			"tag":         "dns-real-proxy-in",
+			"listen":      realProxyDNSHost,
+			"listen_port": realProxyDNSPort,
+		},
+	}
+	for _, target := range proxyTargets {
+		inbounds = append(inbounds, map[string]any{
+			"type":        "tproxy",
+			"tag":         target.Inbound,
+			"listen":      "127.0.0.1",
+			"listen_port": target.Port,
+		})
+	}
 
 	doc := Config{
 		Log: map[string]any{
@@ -105,36 +144,11 @@ func Generate(cfg config.Config) ([]byte, error) {
 			Strategy:         "prefer_ipv4",
 			IndependentCache: true,
 		},
-		Inbounds: []any{
-			map[string]any{
-				"type":        "direct",
-				"tag":         "dns-fakeip-in",
-				"listen":      fakeDNSHost,
-				"listen_port": fakeDNSPort,
-			},
-			map[string]any{
-				"type":        "direct",
-				"tag":         "dns-real-direct-in",
-				"listen":      realDirectDNSHost,
-				"listen_port": realDirectDNSPort,
-			},
-			map[string]any{
-				"type":        "direct",
-				"tag":         "dns-real-proxy-in",
-				"listen":      realProxyDNSHost,
-				"listen_port": realProxyDNSPort,
-			},
-			map[string]any{
-				"type":        "tproxy",
-				"tag":         "tproxy-in",
-				"listen":      "127.0.0.1",
-				"listen_port": cfg.Main.TProxyPort,
-			},
-		},
+		Inbounds:  inbounds,
 		Outbounds: nil,
 		Route: Route{
 			Rules:                 routeRules,
-			Final:                 SelectedProxyOutbound(cfg),
+			Final:                 config.BuiltinDirectOutbound,
 			DefaultDomainResolver: "real-direct",
 		},
 	}
@@ -275,32 +289,6 @@ func generateOutbounds(cfg config.Config) ([]any, error) {
 	return out, nil
 }
 
-func SelectedProxyOutbound(cfg config.Config) string {
-	allowed := cfg.AllowedOutboundTags()
-	for _, rule := range cfg.EffectiveRules() {
-		if !rule.Enabled || rule.Action != "proxy" {
-			continue
-		}
-		tag := strings.TrimSpace(rule.Outbound)
-		if tag == "" || tag == config.BuiltinDirectOutbound || tag == config.BuiltinBlockedOutbound {
-			continue
-		}
-		if _, ok := allowed[tag]; ok {
-			return tag
-		}
-	}
-	if cfg.Main.RoutingMode == "simple" {
-		rule := cfg.Main.EffectiveSimpleRule()
-		if rule.Enabled && rule.Action == "proxy" && strings.TrimSpace(rule.Outbound) == "" {
-			return firstCustomOutboundTag(cfg)
-		}
-	}
-	if cfg.Main.RoutingMode == "global" || hasProxyClient(cfg) {
-		return firstCustomOutboundTag(cfg)
-	}
-	return config.BuiltinDirectOutbound
-}
-
 func firstCustomOutboundTag(cfg config.Config) string {
 	for _, outbound := range cfg.EnabledCustomOutbounds() {
 		return outbound.Tag
@@ -317,11 +305,15 @@ func DNSProxyOutbound(cfg config.Config) string {
 			}
 		}
 	}
-	return SelectedProxyOutbound(cfg)
+	return firstCustomOutboundTag(cfg)
 }
 
-func clientOutboundRouteRules(cfg config.Config) []any {
+func clientOutboundRouteRules(cfg config.Config, targets []proxyroute.Target) []any {
 	allowed := cfg.AllowedOutboundTags()
+	inbounds := make([]string, 0, len(targets))
+	for _, target := range targets {
+		inbounds = append(inbounds, target.Inbound)
+	}
 	seen := map[string]struct{}{}
 	var out []any
 
@@ -348,7 +340,7 @@ func clientOutboundRouteRules(cfg config.Config) []any {
 		seen[key] = struct{}{}
 
 		out = append(out, map[string]any{
-			"inbound":        []string{"tproxy-in"},
+			"inbound":        inbounds,
 			"source_ip_cidr": []string{ip + "/32"},
 			"action":         "route",
 			"outbound":       tag,
@@ -358,13 +350,76 @@ func clientOutboundRouteRules(cfg config.Config) []any {
 	return out
 }
 
-func hasProxyClient(cfg config.Config) bool {
-	for _, client := range cfg.Clients {
-		if client.Policy == "proxy" {
-			return true
+func domainOutboundRouteRules(cfg config.Config, targets []proxyroute.Target) []any {
+	if len(targets) == 0 {
+		return nil
+	}
+	inbounds := make([]string, 0, len(targets))
+	for _, target := range targets {
+		inbounds = append(inbounds, target.Inbound)
+	}
+
+	var out []any
+	for _, rule := range cfg.EffectiveRules() {
+		if !rule.Enabled || rule.Action != "proxy" {
+			continue
+		}
+		includes := domainRegexps(rule.DomainEquals, rule.DomainContains, rule.DomainStartsWith, rule.DomainEndsWith)
+		if len(includes) == 0 {
+			continue
+		}
+		if _, ok := proxyroute.Find(targets, rule.Outbound); !ok {
+			continue
+		}
+
+		includeRule := map[string]any{
+			"inbound":      inbounds,
+			"domain_regex": includes,
+		}
+		excludes := domainRegexps(rule.ExcludeDomainEquals, rule.ExcludeDomainContains, rule.ExcludeDomainStartsWith, rule.ExcludeDomainEndsWith)
+		if len(excludes) == 0 {
+			includeRule["action"] = "route"
+			includeRule["outbound"] = rule.Outbound
+			out = append(out, includeRule)
+			continue
+		}
+		out = append(out, map[string]any{
+			"type": "logical",
+			"mode": "and",
+			"rules": []any{
+				includeRule,
+				map[string]any{"domain_regex": excludes, "invert": true},
+			},
+			"action":   "route",
+			"outbound": rule.Outbound,
+		})
+	}
+	return out
+}
+
+func domainRegexps(equals, contains, startsWith, endsWith []string) []string {
+	out := make([]string, 0, len(equals)+len(contains)+len(startsWith)+len(endsWith))
+	for _, value := range equals {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, "^"+regexp.QuoteMeta(value)+"$")
 		}
 	}
-	return false
+	for _, value := range contains {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, regexp.QuoteMeta(value))
+		}
+	}
+	for _, value := range startsWith {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, "^"+regexp.QuoteMeta(value))
+		}
+	}
+	for _, value := range endsWith {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, regexp.QuoteMeta(value)+"$")
+		}
+	}
+	return out
 }
 
 func encodeOutbound(outbound config.Outbound) map[string]any {

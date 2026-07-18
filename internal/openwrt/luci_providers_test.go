@@ -34,6 +34,10 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 		"o.value('direct', 'direct')",
 		"o.value('proxy', 'proxy')",
 		"form.ListValue, 'update_outbound'",
+		"firstProxyOutboundTag()",
+		"proxyOutboundTagExists(value)",
+		"o.forcewrite = true",
+		"return _('Create an outbound before selecting proxy update.')",
 		"form.DummyValue, 'item_count'",
 		"form.DummyValue, 'last_update'",
 		"validateProviderReferences()",
@@ -71,6 +75,14 @@ func TestProvidersLuCIUsesProviderSections(t *testing.T) {
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("providers.js must not contain policy field %q:\n%s", forbidden, s)
+		}
+	}
+	for _, forbidden := range []string{
+		"option.value('', _('Auto'))",
+		"option.value('', _('Select outbound'))",
+	} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("providers.js must not expose empty outbound choice %q:\n%s", forbidden, s)
 		}
 	}
 }

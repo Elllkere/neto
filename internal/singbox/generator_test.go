@@ -10,6 +10,7 @@ import (
 
 func TestGenerateUsesModernFakeIPServer(t *testing.T) {
 	cfg := config.Defaults()
+	cfg.Outbounds = []config.Outbound{{Enabled: true, Tag: "test", Type: "vless", Server: "example.com", Port: 443, UUID: "a3482e88-686a-4a58-8126-99c9df64b060"}}
 	out, err := Generate(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +26,7 @@ func TestGenerateUsesModernFakeIPServer(t *testing.T) {
 	if strings.Contains(raw, `"fake-ip"`) || strings.Contains(raw, `"fake_ip"`) {
 		t.Fatalf("legacy fake-ip config detected:\n%s", raw)
 	}
-	for _, want := range []string{`"listen_port": 15353`, `"listen_port": 15354`, `"listen_port": 15355`, `"listen_port": 16001`} {
+	for _, want := range []string{`"listen_port": 15353`, `"listen_port": 15354`, `"listen_port": 15355`, `"listen_port": 16001`, `"tag": "tproxy-0000-in"`} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("expected DNS and TProxy listeners %q:\n%s", want, raw)
 		}
@@ -206,8 +207,8 @@ func TestGenerateRoutesCapturedTrafficToReferencedProxyOutbound(t *testing.T) {
 		DomainContains: []string{"check-host"},
 	}}
 	route := generatedRoute(t, cfg)
-	if route["final"] != "test" {
-		t.Fatalf("captured traffic should use referenced proxy outbound, got route %+v", route)
+	if route["final"] != "direct" {
+		t.Fatalf("unmatched traffic should stay direct, got route %+v", route)
 	}
 	rules := route["rules"].([]any)
 	sniff := rules[0].(map[string]any)
@@ -216,6 +217,10 @@ func TestGenerateRoutesCapturedTrafficToReferencedProxyOutbound(t *testing.T) {
 	}
 	if _, ok := sniff["override_destination"]; ok {
 		t.Fatalf("override_destination is not accepted by sing-box 1.13 route action, got %+v", sniff)
+	}
+	domainRule := rules[2].(map[string]any)
+	if domainRule["outbound"] != "test" || domainRule["action"] != "route" {
+		t.Fatalf("domain rule should select its own outbound, got %+v", domainRule)
 	}
 }
 
@@ -234,12 +239,14 @@ func TestGenerateRoutesSimpleModeToReferencedProxyOutbound(t *testing.T) {
 	cfg.Main.SimpleRule.Outbound = "test"
 	cfg.Main.SimpleRule.DomainContains = []string{"check-host"}
 	route := generatedRoute(t, cfg)
-	if route["final"] != "test" {
-		t.Fatalf("simple mode captured traffic should use referenced proxy outbound, got route %+v", route)
+	rules := route["rules"].([]any)
+	domainRule := rules[2].(map[string]any)
+	if domainRule["outbound"] != "test" {
+		t.Fatalf("simple mode domain rule should use referenced proxy outbound, got route %+v", route)
 	}
 }
 
-func TestGenerateRoutesSimpleModeUsesFirstCustomOutboundWhenUnset(t *testing.T) {
+func TestGenerateRoutesSimpleModeUsesSelectedFirstCustomOutbound(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Main.RoutingMode = "simple"
 	cfg.Outbounds = []config.Outbound{{
@@ -251,37 +258,75 @@ func TestGenerateRoutesSimpleModeUsesFirstCustomOutboundWhenUnset(t *testing.T) 
 		UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
 		TLS:     true,
 	}}
-	cfg.Main.SimpleRule.Outbound = ""
+	cfg.Main.SimpleRule.Outbound = "first"
 	cfg.Main.SimpleRule.DomainContains = []string{"check-host"}
 	route := generatedRoute(t, cfg)
-	if route["final"] != "first" {
-		t.Fatalf("simple mode without selected outbound should use first custom outbound, got route %+v", route)
+	rules := route["rules"].([]any)
+	if rules[2].(map[string]any)["outbound"] != "first" {
+		t.Fatalf("simple mode should use its selected first outbound, got route %+v", route)
 	}
 }
 
-func TestGenerateKeepsDirectFinalWhenProxyRuleUsesDirect(t *testing.T) {
+func TestGenerateRoutesDifferentDomainRulesToDifferentOutbounds(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Outbounds = []config.Outbound{
+		{Enabled: true, Tag: "first", Type: "vless", Server: "first.example.com", Port: 443, UUID: "a3482e88-686a-4a58-8126-99c9df64b060"},
+		{Enabled: true, Tag: "second", Type: "trojan", Server: "second.example.com", Port: 443, Password: "secret"},
+	}
+	cfg.Rules = []config.Rule{
+		{Name: "youtube", Enabled: true, Priority: 100, Action: "proxy", Outbound: "first", DNSMode: "auto", DomainContains: []string{"youtube"}},
+		{Name: "telegram", Enabled: true, Priority: 200, Action: "proxy", Outbound: "second", DNSMode: "auto", DomainContains: []string{"telegram"}},
+	}
+	route := generatedRoute(t, cfg)
+	rules := route["rules"].([]any)
+	if rules[2].(map[string]any)["outbound"] != "first" || rules[3].(map[string]any)["outbound"] != "second" {
+		t.Fatalf("domain rules should keep independent outbounds, got route %+v", route)
+	}
+}
+
+func TestGenerateDomainOutboundRulePreservesLiteralMatchersAndExcludes(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Outbounds = []config.Outbound{{
-		Enabled: true,
-		Tag:     "test",
-		Type:    "vless",
-		Server:  "example.com",
-		Port:    443,
-		UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
-		TLS:     true,
+		Enabled: true, Tag: "proxy", Type: "vless", Server: "example.com", Port: 443,
+		UUID: "a3482e88-686a-4a58-8126-99c9df64b060",
 	}}
 	cfg.Rules = []config.Rule{{
-		Name:           "test",
-		Enabled:        true,
-		Priority:       100,
-		Action:         "proxy",
-		Outbound:       "direct",
-		DNSMode:        "fakeip",
-		DomainContains: []string{"check-host"},
+		Name:                    "domains",
+		Enabled:                 true,
+		Action:                  "proxy",
+		Outbound:                "proxy",
+		DNSMode:                 "auto",
+		DomainEquals:            []string{"example.com"},
+		DomainContains:          []string{"video+cdn"},
+		DomainStartsWith:        []string{"www."},
+		DomainEndsWith:          []string{".example.org"},
+		ExcludeDomainEndsWith:   []string{".ads.example.org"},
+		ExcludeDomainContains:   []string{"tracking"},
+		ExcludeDomainEquals:     []string{"blocked.example.com"},
+		ExcludeDomainStartsWith: []string{"old."},
 	}}
+
 	route := generatedRoute(t, cfg)
-	if route["final"] != "direct" {
-		t.Fatalf("direct-selected proxy rule should keep direct final, got route %+v", route)
+	rule := route["rules"].([]any)[2].(map[string]any)
+	if rule["type"] != "logical" || rule["mode"] != "and" || rule["outbound"] != "proxy" {
+		t.Fatalf("unexpected logical domain route rule: %+v", rule)
+	}
+	nested := rule["rules"].([]any)
+	include := nested[0].(map[string]any)["domain_regex"].([]any)
+	excludeRule := nested[1].(map[string]any)
+	exclude := excludeRule["domain_regex"].([]any)
+	if excludeRule["invert"] != true {
+		t.Fatalf("domain exclusions must invert the exclusion matcher: %+v", excludeRule)
+	}
+	for _, want := range []string{`^example\.com$`, `video\+cdn`, `^www\.`, `\.example\.org$`} {
+		if !containsAnyString(include, want) {
+			t.Fatalf("missing include regexp %q in %+v", want, include)
+		}
+	}
+	for _, want := range []string{`^blocked\.example\.com$`, `tracking`, `^old\.`, `\.ads\.example\.org$`} {
+		if !containsAnyString(exclude, want) {
+			t.Fatalf("missing exclude regexp %q in %+v", want, exclude)
+		}
 	}
 }
 
@@ -298,8 +343,9 @@ func TestGenerateGlobalModeUsesFirstCustomOutbound(t *testing.T) {
 		TLS:     true,
 	}}
 	route := generatedRoute(t, cfg)
-	if route["final"] != "test" {
-		t.Fatalf("global captured traffic should use first custom outbound, got route %+v", route)
+	rules := route["rules"].([]any)
+	if rules[2].(map[string]any)["outbound"] != "test" {
+		t.Fatalf("global inbound should use first custom outbound, got route %+v", route)
 	}
 }
 
@@ -341,7 +387,7 @@ func TestGenerateRoutesProxyClientToSelectedOutbound(t *testing.T) {
 		t.Fatalf("unexpected client outbound route rule: %+v", rule)
 	}
 	inbounds := rule["inbound"].([]any)
-	if len(inbounds) != 1 || inbounds[0] != "tproxy-in" {
+	if len(inbounds) != 2 || inbounds[0] != "tproxy-0000-in" || inbounds[1] != "tproxy-0001-in" {
 		t.Fatalf("client outbound route must be scoped to tproxy inbound: %+v", rule)
 	}
 	sourceCIDRs := rule["source_ip_cidr"].([]any)
@@ -578,6 +624,15 @@ func generatedOutbound(t *testing.T, cfg config.Config, tag string) map[string]a
 	}
 	t.Fatalf("outbound %q not found in %s", tag, string(out))
 	return nil
+}
+
+func containsAnyString(values []any, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func generatedRoute(t *testing.T, cfg config.Config) map[string]any {

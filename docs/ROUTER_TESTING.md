@@ -254,9 +254,9 @@ nft list table inet neto | grep -E 'tcp dport|udp dport|sport'
 Examples:
 
 ```text
-ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default
-ip daddr @rule4_0000 udp dport 443 jump to_proxy_default
-ip daddr @rule4_0000 tcp dport 1000-2000 jump to_proxy_default
+ip daddr @rule4_0000 tcp dport 443 jump to_proxy_0000
+ip daddr @rule4_0000 udp dport 443 jump to_proxy_0000
+ip daddr @rule4_0000 tcp dport 1000-2000 jump to_proxy_0000
 ```
 
 Check TProxy policy routing:

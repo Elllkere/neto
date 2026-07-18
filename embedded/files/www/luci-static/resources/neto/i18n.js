@@ -105,6 +105,8 @@ var ru = {
 	'These are literal string operations, not DNS-aware matching.': 'Это буквальные строковые операции, а не DNS-aware сопоставление.',
 	'For root + subdomains, use Equals: example.com and Ends with: .example.com': 'Для корня и поддоменов используйте Equals: example.com и Ends with: .example.com',
 	'Rule details': 'Детали правила',
+	'Create an outbound before adding a proxy rule.': 'Создайте исходящий перед добавлением proxy-правила.',
+	'Create an outbound before selecting proxy update.': 'Создайте исходящий перед выбором обновления через proxy.',
 	'Action': 'Действие',
 	'Outbound': 'Исходящий',
 	'Domain input': 'Ввод доменов',
@@ -246,8 +248,6 @@ var ru = {
 	'Clear failed': 'Очистка не удалась',
 	'Command failed': 'Команда не удалась',
 	'No logs yet': 'Логов пока нет',
-	'Auto': 'Авто',
-	'Select outbound': 'Выберите исходящий',
 	'Description': 'Описание',
 	'No status available': 'Статус недоступен'
 };

@@ -10,7 +10,7 @@
 var _ = netoI18n.translate;
 
 function addOutboundChoices(option) {
-	option.value('', _('Auto'));
+	var first = '';
 
 	uci.sections('neto', 'outbound', function(section, sid) {
 		var tag = String(section.tag || sid || section['.name'] || '').trim();
@@ -19,17 +19,37 @@ function addOutboundChoices(option) {
 		if (tag == '' || tag == 'direct' || tag == 'blocked' || tag == 'block' || tag == 'proxy_default')
 			return;
 
+		if (first == '')
+			first = tag;
 		option.value(tag, label || tag);
 	});
+
+	option.default = first;
+	return first;
 }
 
 function rewriteClientState() {
+	var first = '';
+	var available = {};
+
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var tag = String(section.tag || sid || section['.name'] || '').trim();
+
+		if (tag == '' || tag == 'direct' || tag == 'blocked' || tag == 'block' || tag == 'proxy_default')
+			return;
+		if (first == '')
+			first = tag;
+		available[tag] = true;
+	});
+
 	uci.sections('neto', 'client', function(section, sid) {
 		var policy = String(uci.get('neto', sid, 'policy') || 'default').trim();
 		var outbound = String(uci.get('neto', sid, 'outbound') || '').trim();
 
-		if (policy != 'proxy' || outbound == '' || outbound == 'direct' || outbound == 'blocked' || outbound == 'block' || outbound == 'proxy_default')
+		if (policy != 'proxy')
 			uci.unset('neto', sid, 'outbound');
+		else if (!available[outbound] && first != '')
+			uci.set('neto', sid, 'outbound', first);
 	});
 }
 
@@ -82,8 +102,7 @@ return view.extend({
 		o = s.option(form.ListValue, 'outbound', _('Outbound'));
 		addOutboundChoices(o);
 		o.depends('policy', 'proxy');
-		o.default = '';
-		o.rmempty = true;
+		o.rmempty = false;
 		o.editable = true;
 
 		return m.render();

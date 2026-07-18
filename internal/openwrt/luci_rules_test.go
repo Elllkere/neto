@@ -77,12 +77,13 @@ func TestRulesLuCISortsRenderedRulesByPriority(t *testing.T) {
 		"function nextRulePriority()",
 		"var priority = rulePriority(ids[i], 1000 + i)",
 		"return max + 100",
-		"function initializeNewRuleSection(section_id, priority)",
+		"function initializeNewRuleSection(section_id, priority, outbound)",
 		"s.handleAdd = function(ev, name)",
 		"var priority = nextRulePriority()",
 		"data.add = function(configName, sectionType, sectionName)",
 		"var sid = add.apply(this, arguments)",
-		"initializeNewRuleSection(sid, priority)",
+		"initializeNewRuleSection(sid, priority, firstOutbound)",
+		"Create an outbound before adding a proxy rule.",
 		"return form.GridSection.prototype.handleAdd.apply(this, arguments)",
 		"data.add = add",
 	} {
@@ -294,12 +295,24 @@ func TestRulesLuCIOutboundVisibleInTable(t *testing.T) {
 	if !strings.Contains(block, "o.editable = true") {
 		t.Fatalf("outbound should be editable in rules table:\n%s", block)
 	}
-	if !strings.Contains(block, "addOutboundChoices(o)") || !strings.Contains(block, "o.depends('action', 'proxy')") || !strings.Contains(block, "o.default = ''") {
+	if !strings.Contains(block, "addOutboundChoices(o)") || !strings.Contains(block, "o.depends('action', 'proxy')") || !strings.Contains(block, "o.rmempty = false") {
 		t.Fatalf("outbound should use dynamic custom choices only for proxy action:\n%s", block)
+	}
+	for _, want := range []string{
+		"o.forcewrite = true",
+		"return outboundTagExists(value) ? value : firstOutbound",
+		"if (!outboundTagExists(value))",
+		"return _('Create an outbound before adding a proxy rule.')",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("rule outbound must be populated and validated before saving; missing %q:\n%s", want, block)
+		}
 	}
 	for _, forbidden := range []string{
 		"option.value('direct'",
 		"option.value('blocked'",
+		"option.value('', _('Auto'))",
+		"option.value('', _('Select outbound'))",
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Fatalf("rules.js must not expose builtin outbound choice %q:\n%s", forbidden, s)
@@ -312,9 +325,11 @@ func TestRulesLuCIOutboundVisibleInTable(t *testing.T) {
 		t.Fatalf("rules.js must not filter custom outbounds by removed enabled option:\n%s", s)
 	}
 	for _, want := range []string{
+		"firstOutbound = firstOutboundTag()",
 		"var tag = String(section.tag || sid || section['.name'] || '').trim()",
 		"var label = String(section.label || section.name || tag).trim()",
 		"option.value(tag, label || tag)",
+		"option.default = first",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("rules.js should support pending custom outbounds; missing %q:\n%s", want, s)

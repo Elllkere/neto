@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseInitialConfig(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config main 'main'
 	option enabled '1'
 	option singbox_bin '/usr/libexec/neto/sing-box'
@@ -46,7 +46,7 @@ config rule
 	option dns_mode 'real_ip'
 	option outbound 'direct'
 	list file '/etc/neto/providers/cloudflare-v4.txt'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +74,69 @@ config rule
 	if cfg.Rules[1].Action != "proxy" || cfg.Rules[1].DNSMode != "real_ip" || len(cfg.Rules[1].Files) != 1 {
 		t.Fatalf("unexpected provider rule: %+v", cfg.Rules[1])
 	}
-	if len(cfg.Outbounds) != 0 {
+	if len(cfg.Outbounds) != 1 || cfg.Rules[0].Outbound != "test_proxy" || cfg.Rules[1].Outbound != "test_proxy" {
 		t.Fatalf("unexpected outbound: %+v", cfg.Outbounds)
+	}
+}
+
+func TestParseRequiresCustomOutboundForProxyRule(t *testing.T) {
+	_, err := Parse(`
+config rule
+	option name 'youtube'
+	option action 'proxy'
+	list domain_contains 'youtube'
+`)
+	if err == nil || !strings.Contains(err.Error(), "requires a custom outbound") {
+		t.Fatalf("got %v, want custom outbound requirement", err)
+	}
+}
+
+func TestParseAssignsFirstCustomOutboundWhenLegacySelectionIsMissing(t *testing.T) {
+	cfg, err := Parse(withTestOutbound(`
+config rule
+	option name 'youtube'
+	option action 'proxy'
+	list domain_contains 'youtube'
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Rules[0].Outbound != "test_proxy" {
+		t.Fatalf("got outbound %q, want first custom outbound", cfg.Rules[0].Outbound)
+	}
+}
+
+func TestParsePreservesDifferentExplicitRuleOutbounds(t *testing.T) {
+	cfg, err := Parse(`
+config outbound 'first'
+	option type 'vless'
+	option server 'first.example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+
+config outbound 'second'
+	option type 'trojan'
+	option server 'second.example.com'
+	option port '443'
+	option password 'secret'
+
+config rule
+	option name 'youtube'
+	option action 'proxy'
+	option outbound 'first'
+	list domain_contains 'youtube'
+
+config rule
+	option name 'telegram'
+	option action 'proxy'
+	option outbound 'second'
+	list domain_contains 'telegram'
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Rules[0].Outbound != "first" || cfg.Rules[1].Outbound != "second" {
+		t.Fatalf("rule outbounds collapsed: %+v", cfg.Rules)
 	}
 }
 
@@ -227,7 +288,7 @@ config main 'main'
 }
 
 func TestClientPolicyAliases(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config client
 	option ip '192.168.8.10'
 	option policy 'bypass'
@@ -243,7 +304,7 @@ config client
 config client
 	option ip '192.168.8.13'
 	option policy 'default'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,14 +369,14 @@ config client
 }
 
 func TestRoutingModeOptions(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config main 'main'
 	option routing_mode 'global'
 	option default_outbound 'direct'
 	list lan_subnet '192.168.8.0/24'
 	list lan_subnet '192.168.9.0/24'
 	list lan_iface 'br-lan'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +450,7 @@ config outbound 'my_vless'
 }
 
 func TestParseOrderedRules(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config rule
 	option name 'proxy_youtube'
 	option enabled '1'
@@ -405,7 +466,7 @@ config rule
 	option action 'direct'
 	option dns_mode 'real_ip'
 	list domain_equals 'youtube.kz'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +482,7 @@ config rule
 }
 
 func TestParseRuleAliases(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config rule
 	option name 'aliases'
 	option action 'proxy'
@@ -434,7 +495,7 @@ config rule
 	list exclude_domain_keyword 'ads'
 	list exclude_domain_prefix 'old'
 	list exclude_domain_suffix '.bad.example.com'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,14 +521,14 @@ config rule
 }
 
 func TestParseIgnoresDeprecatedMatchAll(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config rule
 	option name 'old_match_all'
 	option enabled '1'
 	option action 'proxy'
 	option dns_mode 'fakeip'
 	option match_all '1'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +544,7 @@ config rule
 }
 
 func TestParseRuleAlternateDomainAndIPInputs(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config rule
 	option name 'alternate_domains'
 	option action 'proxy'
@@ -513,7 +574,7 @@ config provider 'google_ips'
 config provider 'legacy_provider'
 	option type 'ip'
 	option url 'https://example.com/legacy.txt'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,13 +605,13 @@ func TestLoadFileExpandsDomainFilesAsEquals(t *testing.T) {
 	if err := os.WriteFile(domains, []byte("Example.COM.\n# comment\nexample.org\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, []byte(`
+	if err := os.WriteFile(cfgPath, []byte(withTestOutbound(`
 config rule
 	option name 'domains'
 	option action 'proxy'
 	option dns_mode 'fakeip'
 	list domain_file '`+domains+`'
-`), 0644); err != nil {
+`)), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadFile(cfgPath)
@@ -571,7 +632,7 @@ func TestLoadFileExpandsDomainProviderCacheAsRootAndSubdomains(t *testing.T) {
 	if err := os.WriteFile(cache, []byte("YouTube.COM. www.youtube.com\nx.com twimg.com # comment\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, []byte(`
+	if err := os.WriteFile(cfgPath, []byte(withTestOutbound(`
 config provider 'youtube'
 	option type 'domain'
 	option url 'https://example.com/youtube.txt'
@@ -582,7 +643,7 @@ config rule
 	option action 'proxy'
 	option dns_mode 'fakeip'
 	list domain_provider 'youtube'
-`), 0644); err != nil {
+`)), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadFile(cfgPath)
@@ -628,7 +689,7 @@ config rule
 }
 
 func TestParseAllowsMixedDomainAndProviderCIDRRule(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config provider 'cloudflare'
 	option type 'ip'
 	option url 'https://example.com/cloudflare.txt'
@@ -639,7 +700,7 @@ config rule
 	option dns_mode 'auto'
 	list domain_contains 'youtube'
 	list ip_provider 'cloudflare'
-`)
+`))
 	if err != nil {
 		t.Fatalf("mixed domain+provider rule should validate: %v", err)
 	}
@@ -649,12 +710,12 @@ config rule
 }
 
 func TestParseAllowsDomainOnlyRuleWithoutProvider(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config rule
 	option name 'youtube'
 	option action 'proxy'
 	list domain_contains 'youtube'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,7 +725,7 @@ config rule
 }
 
 func TestParseValidatesPacketPortRange(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config provider 'cloudflare'
 	option type 'ip'
 	option url 'https://example.com/cloudflare.txt'
@@ -675,7 +736,7 @@ config rule
 	list ip_provider 'cloudflare'
 	list proto 'tcp'
 	list dst_port '1000-2000'
-`)
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,7 +806,7 @@ config rule
 }
 
 func TestParseAllowsMixedDomainProviderRuleWithPortMatch(t *testing.T) {
-	cfg, err := Parse(`
+	cfg, err := Parse(withTestOutbound(`
 config provider 'cloudflare'
 	option type 'ip'
 	option url 'https://example.com/cloudflare.txt'
@@ -756,7 +817,7 @@ config rule
 	list domain_contains 'youtube'
 	list ip_provider 'cloudflare'
 	list dst_port '443'
-`)
+`))
 	if err != nil {
 		t.Fatalf("mixed rule with port should validate: %v", err)
 	}
@@ -1291,6 +1352,12 @@ func TestParseDeprecatedProxyDefaultOutboundIsIgnored(t *testing.T) {
 config outbound 'proxy_default'
 	option type 'direct'
 
+config outbound 'replacement'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+
 config rule
 	option name 'old_rule'
 	option action 'proxy'
@@ -1300,11 +1367,11 @@ config rule
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Outbounds) != 1 || cfg.Outbounds[0].Enabled {
+	if len(cfg.Outbounds) != 2 || cfg.Outbounds[0].Enabled || !cfg.Outbounds[1].Enabled {
 		t.Fatalf("deprecated proxy_default outbound should be ignored: %+v", cfg.Outbounds)
 	}
-	if cfg.Rules[0].Outbound != "direct" {
-		t.Fatalf("deprecated proxy_default rule outbound should become direct: %+v", cfg.Rules[0])
+	if cfg.Rules[0].Outbound != "replacement" {
+		t.Fatalf("deprecated proxy_default rule outbound should use first custom outbound: %+v", cfg.Rules[0])
 	}
 	if len(cfg.Warnings) < 2 {
 		t.Fatalf("expected deprecation warnings, got %+v", cfg.Warnings)
@@ -1604,4 +1671,15 @@ config outbound 'my_socks'
 			}
 		})
 	}
+}
+
+func withTestOutbound(uci string) string {
+	return uci + `
+
+config outbound 'test_proxy'
+	option type 'vless'
+	option server 'example.com'
+	option port '443'
+	option uuid 'a3482e88-686a-4a58-8126-99c9df64b060'
+`
 }

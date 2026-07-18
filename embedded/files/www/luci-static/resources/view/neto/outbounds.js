@@ -41,7 +41,7 @@ function dependsTransport(option, transport) {
 }
 
 function addProxyOutboundChoices(option) {
-	option.value('', _('Auto'));
+	var first = '';
 
 	uci.sections('neto', 'outbound', function(section, sid) {
 		var tag = String(section.tag || sid || section['.name'] || '').trim();
@@ -50,8 +50,13 @@ function addProxyOutboundChoices(option) {
 		if (tag == '' || isReservedTag(tag))
 			return;
 
+		if (first == '')
+			first = tag;
 		option.value(tag, label || tag);
 	});
+
+	option.default = first;
+	option.rmempty = false;
 }
 
 function addUpdateIntervalChoices(option) {

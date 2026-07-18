@@ -83,7 +83,8 @@ Client policies:
 
 - absent/default: follow general `routing_mode`.
 - `proxy`: force non-reserved TCP/UDP from this client through neto.
-  `option outbound` may select a custom sing-box outbound for this client.
+  `option outbound` selects a custom sing-box outbound for this client; a
+  missing legacy value is normalized to the first custom outbound.
 - `direct`: hard bypass. Real DNS only, no FakeIP, nft return before proxy rules.
 
 Routing modes:
@@ -251,7 +252,15 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
   REALITY public key/short ID until REALITY is enabled.
 - `proxy_default` is deprecated. LuCI must not create or offer it.
 - Old rules with `option outbound 'proxy_default'` may be normalized to
-  `direct` for compatibility.
+  the first custom outbound for compatibility.
+- Outbound selectors do not expose `Auto` or an empty `Select outbound`
+  choice. When a selection is missing, LuCI and config compatibility loading
+  use the first custom outbound in UCI order.
+- LuCI must not create a proxy rule when no custom outbound exists.
+- Each proxy rule routes through its own selected outbound. IP/CIDR rules use
+  per-outbound nft TProxy targets; FakeIP domain rules use sing-box reverse
+  mapping followed by ordered domain route rules. Do not collapse rule
+  outbounds into one shared sing-box `route.final`.
 
 ## Current Import / Subscription Model
 

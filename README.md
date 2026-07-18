@@ -288,6 +288,11 @@ Built-in outbounds:
 Imports/subscriptions создают обычные outbound sections. После import node
 можно выбрать в rule outbound dropdown так же, как manual profile.
 
+Каждый proxy rule использует выбранный у него outbound независимо от других
+rules. Пустых `Auto`/`Select outbound` в outbound selectors нет: новый rule
+получает первый custom outbound, а без единого custom outbound LuCI не дает
+создать proxy rule.
+
 ## Providers
 
 Provider - это data source, а rule - это routing policy.

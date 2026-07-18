@@ -126,8 +126,21 @@ function proxyOutboundExists(tag) {
 	return found;
 }
 
+function firstProxyOutboundTag() {
+	var first = '';
+
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var tag = String(section.tag || sid || section['.name'] || '').trim();
+
+		if (first == '' && tag != '' && !isReservedOutboundTag(tag))
+			first = tag;
+	});
+
+	return first;
+}
+
 function addProxyOutboundChoices(option) {
-	option.value('', _('Select outbound'));
+	var first = '';
 
 	uci.sections('neto', 'outbound', function(section, sid) {
 		var tag = String(section.tag || sid || section['.name'] || '').trim();
@@ -136,8 +149,13 @@ function addProxyOutboundChoices(option) {
 		if (tag == '' || isReservedOutboundTag(tag))
 			return;
 
+		if (first == '')
+			first = tag;
 		option.value(tag, label || tag);
 	});
+
+	option.default = first;
+	return first;
 }
 
 function addProviderChoices(option, type) {
@@ -398,7 +416,11 @@ function normalizeSimpleRuleState() {
 	if (action != 'proxy') {
 		uci.set('neto', 'main', 'simple_outbound', 'direct');
 	} else if (outbound == '' || isReservedOutboundTag(outbound) || !proxyOutboundExists(outbound)) {
-		uci.unset('neto', 'main', 'simple_outbound');
+		outbound = firstProxyOutboundTag();
+		if (outbound == '')
+			uci.unset('neto', 'main', 'simple_outbound');
+		else
+			uci.set('neto', 'main', 'simple_outbound', outbound);
 	} else {
 		uci.set('neto', 'main', 'simple_outbound', outbound);
 	}
@@ -803,8 +825,7 @@ return view.extend({
 
 		o = s.option(form.ListValue, 'simple_outbound', _('Simple outbound'));
 		addProxyOutboundChoices(o);
-		o.default = '';
-		o.rmempty = true;
+		o.rmempty = false;
 		o.retain = true;
 		o.depends({ 'routing_mode': 'simple', 'simple_action': 'proxy' });
 

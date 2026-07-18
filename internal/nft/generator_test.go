@@ -10,7 +10,7 @@ import (
 )
 
 func TestGenerateOrder(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Clients = []config.Client{
 		{Name: "direct", IP: "192.168.8.50", Policy: "direct"},
@@ -30,12 +30,11 @@ func TestGenerateOrder(t *testing.T) {
 	dnat := strings.Index(out, "ct status dnat return")
 	direct := strings.Index(out, "ip saddr @direct_clients4 return")
 	reserved := strings.Index(out, "ip daddr @reserved4 return")
-	forced := strings.Index(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_default")
-	fakeip := strings.Index(out, "ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } jump to_proxy_default")
-	subnet := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default")
-	def := strings.Index(out, "\t\treturn\n\t}\n\tchain to_proxy_default")
+	forced := strings.Index(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_0000")
+	subnet := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_0000")
+	def := strings.Index(out, "\t\treturn\n\t}\n\tchain to_proxy_0000")
 
-	if !(guard >= 0 && guard < fromLAN && fromLAN < dnat && dnat < direct && direct < reserved && reserved < forced && forced < fakeip && fakeip < subnet && subnet < def) {
+	if !(guard >= 0 && guard < fromLAN && fromLAN < dnat && dnat < direct && direct < reserved && reserved < forced && forced < subnet && subnet < def) {
 		t.Fatalf("unexpected rule order:\n%s", out)
 	}
 	if strings.Count(out, "1.1.1.0/24") != 1 {
@@ -44,7 +43,7 @@ func TestGenerateOrder(t *testing.T) {
 }
 
 func TestGenerateReturnsDNATConnectionsBeforeProxyClientPolicy(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Clients = []config.Client{
 		{Name: "rdp_host", IP: "192.168.8.100", Policy: "proxy"},
@@ -55,14 +54,14 @@ func TestGenerateReturnsDNATConnectionsBeforeProxyClientPolicy(t *testing.T) {
 	}
 
 	dnat := strings.Index(out, "ct status dnat return")
-	forced := strings.Index(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_default")
+	forced := strings.Index(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_0000")
 	if dnat < 0 || forced < 0 || dnat > forced {
 		t.Fatalf("DNAT-associated port-forward replies must return before proxy client policy:\n%s", out)
 	}
 }
 
 func TestGenerateUsesSetForManyProviderCIDRs(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Rules = []config.Rule{providerRule("large", 100, "proxy")}
 	cidrs := make([]string, 0, 7000)
@@ -80,25 +79,26 @@ func TestGenerateUsesSetForManyProviderCIDRs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") != 1 {
+	if strings.Count(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_0000") != 1 {
 		t.Fatalf("expected one set-based proxy rule:\n%s", out)
 	}
 	if strings.Count(out, "set rule4_0000") != 1 {
 		t.Fatalf("expected one rule4_0000 set:\n%s", out)
 	}
-	if strings.Count(out, "jump to_proxy_default") > 3 {
+	if strings.Count(out, "jump to_proxy_0000") > 3 {
 		t.Fatalf("expected no per-CIDR proxy jump rules:\n%s", out)
 	}
 }
 
 func TestGenerateInlineIPCIDRRule(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Rules = []config.Rule{{
-		Name:    "inline_ip",
-		Enabled: true,
-		Action:  "proxy",
-		DNSMode: "real_ip",
+		Name:     "inline_ip",
+		Enabled:  true,
+		Action:   "proxy",
+		Outbound: "test",
+		DNSMode:  "real_ip",
 		IPCIDRs: []string{
 			"8.8.8.8",
 		},
@@ -107,13 +107,13 @@ func TestGenerateInlineIPCIDRRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "8.8.8.8/32") || !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") {
+	if !strings.Contains(out, "8.8.8.8/32") || !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_0000") {
 		t.Fatalf("inline IP/CIDR rule was not emitted:\n%s", out)
 	}
 }
 
 func TestGenerateBlockIPCIDRRuleDropsPacket(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Rules = []config.Rule{{
 		Name:    "blocked_ip",
@@ -137,7 +137,7 @@ func TestGenerateBlockIPCIDRRuleDropsPacket(t *testing.T) {
 }
 
 func TestGenerateIPCIDRRuleStopsDroppingWhenActionChangesFromBlock(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Rules = []config.Rule{{
 		Name:    "changed_ip",
@@ -171,6 +171,7 @@ func TestGenerateIPCIDRRuleStopsDroppingWhenActionChangesFromBlock(t *testing.T)
 	}
 
 	cfg.Rules[0].Action = "proxy"
+	cfg.Rules[0].Outbound = "test"
 	proxy, err := Generate(Input{Config: cfg, RuleCIDRs: ruleCIDRs})
 	if err != nil {
 		t.Fatal(err)
@@ -178,18 +179,19 @@ func TestGenerateIPCIDRRuleStopsDroppingWhenActionChangesFromBlock(t *testing.T)
 	if strings.Contains(proxy, "ip daddr @rule4_0000 meta l4proto { tcp, udp } drop") {
 		t.Fatalf("proxy rule must remove previous block drop:\n%s", proxy)
 	}
-	if !strings.Contains(proxy, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") {
+	if !strings.Contains(proxy, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_0000") {
 		t.Fatalf("proxy rule must jump after block is removed:\n%s", proxy)
 	}
 }
 
 func TestGenerateMixedDomainAndProviderIPRule(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Rules = []config.Rule{{
 		Name:           "mixed",
 		Enabled:        true,
 		Action:         "proxy",
+		Outbound:       "test",
 		DNSMode:        "auto",
 		DomainContains: []string{"youtube"},
 		IPProviders:    []string{"cloudflare"},
@@ -201,13 +203,13 @@ func TestGenerateMixedDomainAndProviderIPRule(t *testing.T) {
 	if !strings.Contains(out, "set rule4_0000") || !strings.Contains(out, "1.1.1.0/24") {
 		t.Fatalf("mixed rule provider CIDR set was not emitted:\n%s", out)
 	}
-	if !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") {
+	if !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_0000") {
 		t.Fatalf("mixed rule provider packet rule was not emitted:\n%s", out)
 	}
 }
 
 func TestGenerateProviderRuleTCPDstPort(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	rule := providerRule("cloudflare", 100, "proxy")
 	rule.Proto = []string{"tcp"}
@@ -217,7 +219,7 @@ func TestGenerateProviderRuleTCPDstPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default") {
+	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_0000") {
 		t.Fatalf("tcp dst port rule missing:\n%s", out)
 	}
 	if strings.Contains(out, "udp dport 443") {
@@ -226,7 +228,7 @@ func TestGenerateProviderRuleTCPDstPort(t *testing.T) {
 }
 
 func TestGenerateProviderRuleUDPDstPort(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	rule := providerRule("cloudflare", 100, "proxy")
 	rule.Proto = []string{"udp"}
@@ -236,7 +238,7 @@ func TestGenerateProviderRuleUDPDstPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_default") {
+	if !strings.Contains(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_0000") {
 		t.Fatalf("udp dst port rule missing:\n%s", out)
 	}
 	if strings.Contains(out, "tcp dport 443") {
@@ -245,7 +247,7 @@ func TestGenerateProviderRuleUDPDstPort(t *testing.T) {
 }
 
 func TestGenerateProviderRuleTCPUDPDstPort(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	rule := providerRule("cloudflare", 100, "proxy")
 	rule.Proto = []string{"tcp", "udp"}
@@ -255,15 +257,15 @@ func TestGenerateProviderRuleTCPUDPDstPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(out, " dport 443 jump to_proxy_default") != 2 ||
-		!strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default") ||
-		!strings.Contains(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_default") {
+	if strings.Count(out, " dport 443 jump to_proxy_0000") != 2 ||
+		!strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_0000") ||
+		!strings.Contains(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_0000") {
 		t.Fatalf("tcp+udp dst port rules missing:\n%s", out)
 	}
 }
 
 func TestGenerateProviderRuleDefaultsPortsToTCPUDP(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	rule := providerRule("cloudflare", 100, "proxy")
 	rule.DstPorts = []string{"443"}
@@ -272,13 +274,13 @@ func TestGenerateProviderRuleDefaultsPortsToTCPUDP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "tcp dport 443 jump to_proxy_default") || !strings.Contains(out, "udp dport 443 jump to_proxy_default") {
+	if !strings.Contains(out, "tcp dport 443 jump to_proxy_0000") || !strings.Contains(out, "udp dport 443 jump to_proxy_0000") {
 		t.Fatalf("port rule without proto must default to tcp+udp:\n%s", out)
 	}
 }
 
 func TestGenerateProviderRulePortRange(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	rule := providerRule("cloudflare", 100, "proxy")
 	rule.Proto = []string{"tcp"}
@@ -288,18 +290,19 @@ func TestGenerateProviderRulePortRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 1000-2000 jump to_proxy_default") {
+	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 1000-2000 jump to_proxy_0000") {
 		t.Fatalf("tcp dst port range rule missing:\n%s", out)
 	}
 }
 
 func TestGenerateMixedDomainAndProviderPortRule(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Rules = []config.Rule{{
 		Name:           "mixed",
 		Enabled:        true,
 		Action:         "proxy",
+		Outbound:       "test",
 		DNSMode:        "auto",
 		DomainContains: []string{"youtube"},
 		IPProviders:    []string{"cloudflare"},
@@ -310,13 +313,13 @@ func TestGenerateMixedDomainAndProviderPortRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default") {
+	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_0000") {
 		t.Fatalf("mixed rule provider port match missing:\n%s", out)
 	}
 }
 
 func TestGenerateCounters(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = true
 	cfg.Rules = []config.Rule{providerRule("cloudflare", 100, "proxy")}
 	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{0: policy.MustIPv4CIDRs("1.1.1.0/24")}})
@@ -326,9 +329,8 @@ func TestGenerateCounters(t *testing.T) {
 	for _, rule := range []string{
 		"ip saddr @direct_clients4 counter return",
 		"ip daddr @reserved4 counter return",
-		"ip saddr @proxy_clients4 meta l4proto { tcp, udp } counter jump to_proxy_default",
-		"ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } counter jump to_proxy_default",
-		"ip daddr @rule4_0000 meta l4proto { tcp, udp } counter jump to_proxy_default",
+		"ip saddr @proxy_clients4 meta l4proto { tcp, udp } counter jump to_proxy_0000",
+		"ip daddr @rule4_0000 meta l4proto { tcp, udp } counter jump to_proxy_0000",
 		"meta l4proto { tcp, udp } counter meta mark set",
 	} {
 		if !strings.Contains(out, rule) {
@@ -338,7 +340,7 @@ func TestGenerateCounters(t *testing.T) {
 }
 
 func TestGenerateProviderPortRuleCounters(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = true
 	rule := providerRule("cloudflare", 100, "proxy")
 	rule.Proto = []string{"tcp"}
@@ -348,29 +350,29 @@ func TestGenerateProviderPortRuleCounters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 counter jump to_proxy_default") {
+	if !strings.Contains(out, "ip daddr @rule4_0000 tcp dport 443 counter jump to_proxy_0000") {
 		t.Fatalf("port rule counter missing:\n%s", out)
 	}
 }
 
 func TestGenerateCustomModeNoGlobalCatchAll(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.RoutingMode = "custom"
 	out, err := Generate(Input{Config: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_default\n") {
+	if strings.Contains(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_0000\n") {
 		t.Fatalf("custom mode must not include global catch-all:\n%s", out)
 	}
-	if !strings.Contains(out, "ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } jump to_proxy_default") {
-		t.Fatalf("custom mode must include fakeip proxy rule:\n%s", out)
+	if strings.Contains(out, "ip daddr 198.18.0.0/15 meta l4proto") {
+		t.Fatalf("custom mode without domain proxy rules must not capture FakeIP:\n%s", out)
 	}
 }
 
 func TestGenerateSimpleModeUsesSimpleIPRule(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.RoutingMode = "simple"
 	cfg.Main.SimpleRule = providerRule("simple_ips", 100, "proxy")
@@ -378,19 +380,19 @@ func TestGenerateSimpleModeUsesSimpleIPRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } jump to_proxy_default") {
-		t.Fatalf("simple mode must include fakeip proxy rule:\n%s", out)
+	if strings.Contains(out, "ip daddr 198.18.0.0/15 meta l4proto") {
+		t.Fatalf("simple IP-only mode must not capture FakeIP:\n%s", out)
 	}
-	if !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default") {
+	if !strings.Contains(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_0000") {
 		t.Fatalf("simple IP provider rule missing:\n%s", out)
 	}
-	if strings.Contains(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_default\n") {
+	if strings.Contains(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_0000\n") {
 		t.Fatalf("simple mode must not include global catch-all:\n%s", out)
 	}
 }
 
 func TestGenerateGlobalModeCatchAll(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.RoutingMode = "global"
 	cfg.Clients = []config.Client{
@@ -405,7 +407,7 @@ func TestGenerateGlobalModeCatchAll(t *testing.T) {
 	nonLANReturn := strings.Index(out, "ip saddr @lan_subnets4 jump from_lan\n\t\treturn\n\t}\n\tchain from_lan")
 	direct := strings.Index(out, "ip saddr @direct_clients4 return")
 	reserved := strings.Index(out, "ip daddr @reserved4 return")
-	global := strings.Index(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_default\n")
+	global := strings.Index(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_0000\n")
 	if !(guard >= 0 && nonLANReturn >= 0 && guard < direct && direct < reserved && reserved < global) {
 		t.Fatalf("global rule order is wrong:\n%s", out)
 	}
@@ -415,23 +417,31 @@ func TestGenerateGlobalModeCatchAll(t *testing.T) {
 }
 
 func TestCustomClientDirectReturnsBeforeProxy(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.RoutingMode = "custom"
 	cfg.Clients = []config.Client{{Name: "pc", IP: "192.168.8.50", Policy: "direct"}}
+	cfg.Rules = []config.Rule{{
+		Name:           "domain_proxy",
+		Enabled:        true,
+		Action:         "proxy",
+		Outbound:       "test",
+		DNSMode:        "auto",
+		DomainContains: []string{"example"},
+	}}
 	out, err := Generate(Input{Config: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}
 	directRule := strings.Index(out, "ip saddr @direct_clients4 return")
-	fakeRule := strings.Index(out, "ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } jump to_proxy_default")
+	fakeRule := strings.Index(out, "ip daddr 198.18.0.0/15 meta l4proto { tcp, udp } jump to_proxy_0000")
 	if !(directRule >= 0 && fakeRule >= 0 && directRule < fakeRule) {
 		t.Fatalf("direct client must return before fakeip proxy:\n%s", out)
 	}
 }
 
 func TestCustomClientProxySourceRule(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.RoutingMode = "custom"
 	cfg.Clients = []config.Client{{Name: "pc", IP: "192.168.8.100", Policy: "proxy"}}
@@ -442,13 +452,13 @@ func TestCustomClientProxySourceRule(t *testing.T) {
 	if !strings.Contains(out, "set proxy_clients4") || !strings.Contains(out, "192.168.8.100") {
 		t.Fatalf("proxy client set missing:\n%s", out)
 	}
-	if !strings.Contains(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_default") {
+	if !strings.Contains(out, "ip saddr @proxy_clients4 meta l4proto { tcp, udp } jump to_proxy_0000") {
 		t.Fatalf("proxy client source rule missing:\n%s", out)
 	}
 }
 
 func TestGlobalClientDefaultUsesCatchAll(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.RoutingMode = "global"
 	cfg.Clients = []config.Client{{Name: "pc", IP: "192.168.8.60", Policy: "default"}}
@@ -462,13 +472,13 @@ func TestGlobalClientDefaultUsesCatchAll(t *testing.T) {
 	if !strings.Contains(out, "ip saddr @lan_subnets4 jump from_lan") {
 		t.Fatalf("LAN guard missing:\n%s", out)
 	}
-	if !strings.Contains(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_default\n") {
+	if !strings.Contains(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_0000\n") {
 		t.Fatalf("global catch-all missing:\n%s", out)
 	}
 }
 
 func TestGenerateLANSubnetsSet(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.LANSubnets = []string{"192.168.10.0/24", "192.168.8.0/24", "192.168.8.0/24"}
 	out, err := Generate(Input{Config: cfg})
@@ -487,7 +497,7 @@ func TestGenerateLANSubnetsSet(t *testing.T) {
 }
 
 func TestGenerateLANIfaceGuard(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.LANIfaces = []string{"br-lan", "lan0"}
 	out, err := Generate(Input{Config: cfg})
@@ -500,7 +510,7 @@ func TestGenerateLANIfaceGuard(t *testing.T) {
 }
 
 func TestGenerateGlobalNonLANReturnsBeforeCatchAll(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Main.RoutingMode = "global"
 	out, err := Generate(Input{Config: cfg})
@@ -508,14 +518,14 @@ func TestGenerateGlobalNonLANReturnsBeforeCatchAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	nonLANReturn := strings.Index(out, "\t\treturn\n\t}\n\tchain from_lan")
-	global := strings.Index(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_default\n")
+	global := strings.Index(out, "\t\tmeta l4proto { tcp, udp } jump to_proxy_0000\n")
 	if !(nonLANReturn >= 0 && global >= 0 && nonLANReturn < global) {
 		t.Fatalf("non-LAN return must be before global proxy rule:\n%s", out)
 	}
 }
 
 func TestGenerateProviderRulePriorityDirectBeforeProxy(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Rules = []config.Rule{
 		providerRule("direct_google", 10, "direct"),
@@ -529,14 +539,14 @@ func TestGenerateProviderRulePriorityDirectBeforeProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } return")
-	proxy := strings.Index(out, "ip daddr @rule4_0001 meta l4proto { tcp, udp } jump to_proxy_default")
+	proxy := strings.Index(out, "ip daddr @rule4_0001 meta l4proto { tcp, udp } jump to_proxy_0000")
 	if !(direct >= 0 && proxy >= 0 && direct < proxy) {
 		t.Fatalf("direct provider rule must be before proxy rule:\n%s", out)
 	}
 }
 
 func TestGenerateProviderRulePriorityProxyBeforeDirect(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	cfg.Rules = []config.Rule{
 		providerRule("proxy_youtube", 10, "proxy"),
@@ -549,15 +559,52 @@ func TestGenerateProviderRulePriorityProxyBeforeDirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_default")
+	proxy := strings.Index(out, "ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_0000")
 	direct := strings.Index(out, "ip daddr @rule4_0001 meta l4proto { tcp, udp } return")
 	if !(proxy >= 0 && direct >= 0 && proxy < direct) {
 		t.Fatalf("proxy provider rule must be before direct rule:\n%s", out)
 	}
 }
 
+func TestGenerateRoutesDifferentIPRulesToDifferentTProxyPorts(t *testing.T) {
+	cfg := testConfig()
+	cfg.Main.NFTCounters = false
+	cfg.Outbounds = append(cfg.Outbounds, config.Outbound{
+		Enabled:  true,
+		Tag:      "second",
+		Type:     "trojan",
+		Server:   "second.example.com",
+		Port:     443,
+		Password: "secret",
+	})
+	cfg.Rules = []config.Rule{
+		{Name: "first", Enabled: true, Priority: 100, Action: "proxy", Outbound: "test", DNSMode: "real_ip", IPCIDRs: []string{"1.1.1.1"}},
+		{Name: "second", Enabled: true, Priority: 200, Action: "proxy", Outbound: "second", DNSMode: "real_ip", IPCIDRs: []string{"8.8.8.8"}},
+	}
+
+	out, err := Generate(Input{Config: cfg, RuleCIDRs: map[int][]*net.IPNet{
+		0: policy.MustIPv4CIDRs("1.1.1.1"),
+		1: policy.MustIPv4CIDRs("8.8.8.8"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ip daddr @rule4_0000 meta l4proto { tcp, udp } jump to_proxy_0000",
+		"ip daddr @rule4_0001 meta l4proto { tcp, udp } jump to_proxy_0001",
+		"chain to_proxy_0000",
+		"tproxy ip to 127.0.0.1:16001",
+		"chain to_proxy_0001",
+		"tproxy ip to 127.0.0.1:16002",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing per-outbound TProxy routing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestGenerateProviderPortRulePriorityStable(t *testing.T) {
-	cfg := config.Defaults()
+	cfg := testConfig()
 	cfg.Main.NFTCounters = false
 	first := providerRule("first_https", 10, "proxy")
 	first.Proto = []string{"tcp", "udp"}
@@ -571,8 +618,8 @@ func TestGenerateProviderPortRulePriorityStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstTCP := strings.Index(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_default")
-	firstUDP := strings.Index(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_default")
+	firstTCP := strings.Index(out, "ip daddr @rule4_0000 tcp dport 443 jump to_proxy_0000")
+	firstUDP := strings.Index(out, "ip daddr @rule4_0000 udp dport 443 jump to_proxy_0000")
 	secondRule := strings.Index(out, "ip daddr @rule4_0001 meta l4proto { tcp, udp } return")
 	if !(firstTCP >= 0 && firstUDP >= 0 && secondRule >= 0 && firstTCP < firstUDP && firstUDP < secondRule) {
 		t.Fatalf("port-expanded rule priority is unstable:\n%s", out)
@@ -599,8 +646,21 @@ func providerRule(name string, priority int, action string) config.Rule {
 		Enabled:  true,
 		Priority: priority,
 		Action:   action,
-		Outbound: "proxy_default",
+		Outbound: "test",
 		DNSMode:  "real_ip",
 		Files:    []string{"/tmp/" + name + ".txt"},
 	}
+}
+
+func testConfig() config.Config {
+	cfg := config.Defaults()
+	cfg.Outbounds = []config.Outbound{{
+		Enabled: true,
+		Tag:     "test",
+		Type:    "vless",
+		Server:  "example.com",
+		Port:    443,
+		UUID:    "a3482e88-686a-4a58-8126-99c9df64b060",
+	}}
+	return cfg
 }

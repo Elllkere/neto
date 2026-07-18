@@ -9,6 +9,7 @@ import (
 
 	"github.com/elllkere/neto/internal/config"
 	"github.com/elllkere/neto/internal/policy"
+	"github.com/elllkere/neto/internal/proxyroute"
 	"github.com/elllkere/neto/internal/ruleengine"
 )
 
@@ -23,6 +24,11 @@ func Generate(in Input) (string, error) {
 	proxyClients := collectClients(cfg, "proxy")
 	lanSubnets := policy.NormalizeIPv4CIDRs(policy.MustIPv4CIDRs(cfg.Main.LANSubnets...))
 	reserved4 := reservedCIDRs(cfg)
+	proxyTargets := proxyroute.Targets(cfg)
+	var defaultProxyTarget proxyroute.Target
+	if len(proxyTargets) > 0 {
+		defaultProxyTarget = proxyTargets[0]
+	}
 
 	var b strings.Builder
 	b.WriteString("table inet neto {\n")
@@ -40,24 +46,30 @@ func Generate(in Input) (string, error) {
 	b.WriteString(fmt.Sprintf("\t\tct status dnat%s return\n", counter(cfg)))
 	b.WriteString(fmt.Sprintf("\t\tip saddr @direct_clients4%s return\n", counter(cfg)))
 	b.WriteString(fmt.Sprintf("\t\tip daddr @reserved4%s return\n", counter(cfg)))
-	b.WriteString(fmt.Sprintf("\t\tip saddr @proxy_clients4 meta l4proto { tcp, udp }%s jump to_proxy_default\n", counter(cfg)))
+	if defaultProxyTarget.Tag != "" {
+		b.WriteString(fmt.Sprintf("\t\tip saddr @proxy_clients4 meta l4proto { tcp, udp }%s jump %s\n", counter(cfg), defaultProxyTarget.Chain))
+	}
 	switch cfg.Main.RoutingMode {
 	case "global":
-		b.WriteString(fmt.Sprintf("\t\tmeta l4proto { tcp, udp }%s jump to_proxy_default\n", counter(cfg)))
-	default:
-		if cfg.Main.FakeIPEnabled {
-			b.WriteString(fmt.Sprintf("\t\tip daddr %s meta l4proto { tcp, udp }%s jump to_proxy_default\n", cfg.Main.FakeIPRange, counter(cfg)))
+		if defaultProxyTarget.Tag != "" {
+			b.WriteString(fmt.Sprintf("\t\tmeta l4proto { tcp, udp }%s jump %s\n", counter(cfg), defaultProxyTarget.Chain))
 		}
-		if err := writeOrderedIPRules(&b, cfg, in.RuleCIDRs); err != nil {
+	default:
+		if cfg.Main.FakeIPEnabled && defaultProxyTarget.Tag != "" && hasProxyDomainRule(cfg) {
+			b.WriteString(fmt.Sprintf("\t\tip daddr %s meta l4proto { tcp, udp }%s jump %s\n", cfg.Main.FakeIPRange, counter(cfg), defaultProxyTarget.Chain))
+		}
+		if err := writeOrderedIPRules(&b, cfg, in.RuleCIDRs, proxyTargets); err != nil {
 			return "", err
 		}
 	}
 	b.WriteString("\t\treturn\n")
 	b.WriteString("\t}\n")
-	b.WriteString("\tchain to_proxy_default {\n")
-	b.WriteString(fmt.Sprintf("\t\tmeta l4proto { tcp, udp }%s meta mark set %s tproxy ip to 127.0.0.1:%d accept\n", counter(cfg), cfg.Main.Mark, cfg.Main.TProxyPort))
-	b.WriteString("\t\treturn\n")
-	b.WriteString("\t}\n")
+	for _, target := range proxyTargets {
+		b.WriteString(fmt.Sprintf("\tchain %s {\n", target.Chain))
+		b.WriteString(fmt.Sprintf("\t\tmeta l4proto { tcp, udp }%s meta mark set %s tproxy ip to 127.0.0.1:%d accept\n", counter(cfg), cfg.Main.Mark, target.Port))
+		b.WriteString("\t\treturn\n")
+		b.WriteString("\t}\n")
+	}
 	b.WriteString("}\n")
 	return b.String(), nil
 }
@@ -71,7 +83,7 @@ func writeRuleSets(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*n
 	}
 }
 
-func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet) error {
+func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[int][]*net.IPNet, proxyTargets []proxyroute.Target) error {
 	for i, rule := range cfg.EffectiveRules() {
 		if !ruleengine.HasIPMatch(rule) {
 			continue
@@ -85,8 +97,12 @@ func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[in
 		}
 		switch rule.Action {
 		case "proxy":
+			target, ok := proxyroute.Find(proxyTargets, rule.Outbound)
+			if !ok {
+				return fmt.Errorf("rule %q outbound %q has no TProxy target", rule.Name, rule.Outbound)
+			}
 			for _, match := range matches {
-				b.WriteString(fmt.Sprintf("\t\t%s%s jump to_proxy_default\n", match, counter(cfg)))
+				b.WriteString(fmt.Sprintf("\t\t%s%s jump %s\n", match, counter(cfg), target.Chain))
 			}
 		case "direct", "block":
 			for _, match := range matches {
@@ -99,6 +115,15 @@ func writeOrderedIPRules(b *strings.Builder, cfg config.Config, ruleCIDRs map[in
 		}
 	}
 	return nil
+}
+
+func hasProxyDomainRule(cfg config.Config) bool {
+	for _, rule := range cfg.EffectiveRules() {
+		if rule.Enabled && rule.Action == "proxy" && ruleengine.HasDomainIncludes(rule) {
+			return true
+		}
+	}
+	return false
 }
 
 func rulePacketMatches(setName string, rule config.Rule) ([]string, error) {

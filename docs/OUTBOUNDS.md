@@ -18,7 +18,7 @@ Built-in outbound tags:
 
 `proxy_default` deprecated. LuCI не должен создавать или предлагать
 `proxy_default`. Старые rules с `option outbound 'proxy_default'` могут быть
-normalized для compatibility.
+normalized в первый custom outbound для compatibility.
 
 ## Creatable Outbound Types
 
@@ -51,6 +51,17 @@ config rule
 `direct` и `blocked` относятся к action/built-in behavior, а не к proxy outbound
 selection в Rules UI.
 
+`Auto` и пустой `Select outbound` не используются. Новый proxy rule сразу
+получает первый custom outbound в порядке UCI. Если custom outbounds отсутствуют,
+LuCI не создает proxy rule, а backend validation отклоняет такой config.
+
+Выбор применяется независимо для каждого rule:
+
+- IP/CIDR/provider packet matches направляются nftables на TProxy inbound
+  выбранного outbound;
+- FakeIP domain matches восстанавливают домен через sing-box FakeIP mapping и
+  затем попадают в ordered sing-box domain route rule с тем же outbound.
+
 ## Client Selection
 
 Client with `policy=proxy` may select a custom outbound:
@@ -62,8 +73,8 @@ config client
 	option outbound 'my_vless'
 ```
 
-If `outbound` is unset, the generated sing-box route falls back to the normal
-selected proxy outbound.
+If a legacy proxy client has no `outbound`, config loading selects the first
+custom outbound. LuCI does not expose an empty or `Auto` selection.
 
 ## Imports
 

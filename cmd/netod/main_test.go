@@ -77,6 +77,12 @@ func TestCommandDownloadProxyRequiresSingBox(t *testing.T) {
 config main 'main'
 	option singbox_bin '/missing/sing-box'
 	option update_via 'proxy'
+
+config outbound 'updater'
+	option type 'trojan'
+	option server 'example.com'
+	option port '443'
+	option password 'secret'
 `), 0644); err != nil {
 		t.Fatal(err)
 	}

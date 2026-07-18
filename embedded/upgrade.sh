@@ -160,7 +160,7 @@ download() {
 		else
 			"$NETOD_BIN" download -url "$url" -output "$dest" -via proxy && return 0
 		fi
-		echo "neto upgrade: failed to download $url through outbound ${UPDATE_OUTBOUND:-auto}" >&2
+		echo "neto upgrade: failed to download $url through outbound ${UPDATE_OUTBOUND:-missing}" >&2
 		exit 1
 	fi
 	if curl_usable; then

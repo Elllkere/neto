@@ -592,6 +592,7 @@ func Parse(data string) (Config, error) {
 			cfg.Subscriptions = append(cfg.Subscriptions, parseSubscription(s))
 		}
 	}
+	assignFirstCustomOutbound(&cfg)
 	sort.SliceStable(cfg.Rules, func(i, j int) bool {
 		return cfg.Rules[i].Priority < cfg.Rules[j].Priority
 	})
@@ -601,6 +602,49 @@ func Parse(data string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func assignFirstCustomOutbound(cfg *Config) {
+	var first string
+	for _, outbound := range cfg.EnabledCustomOutbounds() {
+		first = strings.TrimSpace(outbound.Tag)
+		if first != "" {
+			break
+		}
+	}
+	if first == "" {
+		return
+	}
+
+	for i := range cfg.Rules {
+		if cfg.Rules[i].Action == "proxy" && (strings.TrimSpace(cfg.Rules[i].Outbound) == "" || reservedCustomOutboundTag(cfg.Rules[i].Outbound)) {
+			cfg.Rules[i].Outbound = first
+		}
+	}
+	if cfg.Main.RoutingMode == "simple" && cfg.Main.SimpleRule.Action == "proxy" && (strings.TrimSpace(cfg.Main.SimpleRule.Outbound) == "" || reservedCustomOutboundTag(cfg.Main.SimpleRule.Outbound)) {
+		cfg.Main.SimpleRule.Outbound = first
+	}
+	for i := range cfg.Clients {
+		if cfg.Clients[i].Policy == "proxy" && strings.TrimSpace(cfg.Clients[i].Outbound) == "" {
+			cfg.Clients[i].Outbound = first
+		}
+	}
+	if cfg.Main.UpdateVia == "proxy" && strings.TrimSpace(cfg.Main.UpdateOutbound) == "" {
+		cfg.Main.UpdateOutbound = first
+	}
+	if cfg.Main.RealDNSMode == "proxy" && strings.TrimSpace(cfg.Main.RealDNSOutbound) == "" {
+		cfg.Main.RealDNSOutbound = first
+	}
+	for i := range cfg.Providers {
+		if cfg.Providers[i].UpdateVia == "proxy" && strings.TrimSpace(cfg.Providers[i].UpdateOutbound) == "" {
+			cfg.Providers[i].UpdateOutbound = first
+		}
+	}
+	for i := range cfg.Subscriptions {
+		if cfg.Subscriptions[i].UpdateVia == "proxy" && strings.TrimSpace(cfg.Subscriptions[i].UpdateOutbound) == "" {
+			cfg.Subscriptions[i].UpdateOutbound = first
+		}
+	}
 }
 
 func (c Config) Validate() error {
@@ -757,10 +801,19 @@ func (c Config) Validate() error {
 			return fmt.Errorf("outbound %q has unsupported type %q", outbound.Tag, outbound.Type)
 		}
 	}
+	if len(c.EnabledCustomOutbounds()) > 0 && c.Main.TProxyPort+len(c.EnabledCustomOutbounds())-1 > 65535 {
+		return fmt.Errorf("tproxy_port %d leaves insufficient ports for %d custom outbounds", c.Main.TProxyPort, len(c.EnabledCustomOutbounds()))
+	}
+	if c.Main.RoutingMode == "global" && len(c.EnabledCustomOutbounds()) == 0 {
+		return fmt.Errorf("routing_mode global requires a custom outbound")
+	}
 	for _, cl := range c.Clients {
 		clientOutbound := strings.TrimSpace(cl.Outbound)
-		if cl.Policy != "proxy" || clientOutbound == "" {
+		if cl.Policy != "proxy" {
 			continue
+		}
+		if clientOutbound == "" {
+			return fmt.Errorf("client %q policy proxy requires a custom outbound", cl.Name)
 		}
 		if clientOutbound == "proxy_default" {
 			return fmt.Errorf("client %q outbound 'proxy_default' is deprecated; choose a custom outbound", cl.Name)
@@ -792,7 +845,10 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("main has unsupported update_via %q", c.Main.UpdateVia)
 	}
-	if c.Main.UpdateVia == "proxy" && strings.TrimSpace(c.Main.UpdateOutbound) != "" {
+	if c.Main.UpdateVia == "proxy" && strings.TrimSpace(c.Main.UpdateOutbound) == "" {
+		return fmt.Errorf("main update_via proxy requires update_outbound")
+	}
+	if c.Main.UpdateVia == "proxy" {
 		if reservedCustomOutboundTag(c.Main.UpdateOutbound) {
 			return fmt.Errorf("main update_outbound %q must be a custom outbound", c.Main.UpdateOutbound)
 		}
@@ -853,12 +909,15 @@ func (c Config) Validate() error {
 				return fmt.Errorf("provider %q has unsupported update_schedule %q", name, p.UpdateSchedule)
 			}
 		}
-		if p.UpdateVia == "proxy" && strings.TrimSpace(p.UpdateOutbound) != "" {
+		if p.UpdateVia == "proxy" && strings.TrimSpace(p.UpdateOutbound) == "" {
+			return fmt.Errorf("provider %q update_via proxy requires update_outbound", name)
+		}
+		if p.UpdateVia == "proxy" {
+			if reservedCustomOutboundTag(p.UpdateOutbound) {
+				return fmt.Errorf("provider %q update_outbound must be a custom outbound", name)
+			}
 			if _, ok := seenOutboundTags[p.UpdateOutbound]; !ok {
 				return fmt.Errorf("provider %q has unsupported update_outbound %q", name, p.UpdateOutbound)
-			}
-			if p.UpdateOutbound == BuiltinBlockedOutbound {
-				return fmt.Errorf("provider %q update_outbound must not be blocked", name)
 			}
 		}
 	}
@@ -899,12 +958,15 @@ func (c Config) Validate() error {
 				return fmt.Errorf("subscription %q has unsupported update_schedule %q", name, sub.UpdateSchedule)
 			}
 		}
-		if sub.UpdateVia == "proxy" && strings.TrimSpace(sub.UpdateOutbound) != "" {
+		if sub.UpdateVia == "proxy" && strings.TrimSpace(sub.UpdateOutbound) == "" {
+			return fmt.Errorf("subscription %q update_via proxy requires update_outbound", name)
+		}
+		if sub.UpdateVia == "proxy" {
+			if reservedCustomOutboundTag(sub.UpdateOutbound) {
+				return fmt.Errorf("subscription %q update_outbound must be a custom outbound", name)
+			}
 			if _, ok := seenOutboundTags[sub.UpdateOutbound]; !ok {
 				return fmt.Errorf("subscription %q has unsupported update_outbound %q", name, sub.UpdateOutbound)
-			}
-			if sub.UpdateOutbound == BuiltinBlockedOutbound {
-				return fmt.Errorf("subscription %q update_outbound must not be blocked", name)
 			}
 		}
 	}
@@ -954,10 +1016,6 @@ func (c Config) Validate() error {
 		if r.Action == "direct" && r.DNSMode == "fakeip" {
 			return fmt.Errorf("rule %q: direct rules require real DNS", r.Name)
 		}
-		outboundTag := strings.TrimSpace(firstNonEmpty(r.Outbound, BuiltinDirectOutbound))
-		if _, ok := seenOutboundTags[outboundTag]; !ok {
-			return fmt.Errorf("rule %q has unsupported outbound %q", r.Name, outboundTag)
-		}
 		for _, file := range r.Files {
 			if strings.TrimSpace(file) == "" {
 				return fmt.Errorf("rule %q contains an empty provider file path", r.Name)
@@ -978,6 +1036,16 @@ func (c Config) Validate() error {
 			if _, ok := seenProviders[providerName]; !ok {
 				return fmt.Errorf("rule %q references unknown provider %q", r.Name, providerName)
 			}
+		}
+		outboundTag := strings.TrimSpace(r.Outbound)
+		if r.Action == "proxy" && (outboundTag == "" || reservedCustomOutboundTag(outboundTag)) {
+			return fmt.Errorf("rule %q action proxy requires a custom outbound", r.Name)
+		}
+		if outboundTag == "" {
+			outboundTag = BuiltinDirectOutbound
+		}
+		if _, ok := seenOutboundTags[outboundTag]; !ok {
+			return fmt.Errorf("rule %q has unsupported outbound %q", r.Name, outboundTag)
 		}
 	}
 	return nil
@@ -1255,17 +1323,21 @@ func applySimpleRule(m *Main, s section) {
 }
 
 func parseRule(s section, order int) (Rule, []string) {
-	outbound := strings.TrimSpace(firstNonEmpty(s.options["outbound"], BuiltinDirectOutbound))
+	action := strings.ToLower(strings.TrimSpace(firstNonEmpty(s.options["action"], "proxy")))
+	outbound := strings.TrimSpace(s.options["outbound"])
 	var warnings []string
 	if outbound == "proxy_default" {
+		outbound = ""
+		warnings = append(warnings, fmt.Sprintf("rule %q: outbound 'proxy_default' is deprecated; choose a custom outbound", firstNonEmpty(s.options["name"], s.name, fmt.Sprintf("rule_%d", order+1))))
+	}
+	if action != "proxy" {
 		outbound = BuiltinDirectOutbound
-		warnings = append(warnings, fmt.Sprintf("rule %q: outbound 'proxy_default' is deprecated; using 'direct'", firstNonEmpty(s.options["name"], s.name, fmt.Sprintf("rule_%d", order+1))))
 	}
 	r := Rule{
 		Name:     firstNonEmpty(s.options["name"], s.name, fmt.Sprintf("rule_%d", order+1)),
 		Enabled:  true,
 		Priority: 1000 + order,
-		Action:   firstNonEmpty(s.options["action"], "proxy"),
+		Action:   action,
 		Outbound: outbound,
 		DNSMode:  firstNonEmpty(s.options["dns_mode"], "auto"),
 	}

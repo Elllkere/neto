@@ -120,6 +120,8 @@ var builtinIPProviders = [
 ];
 
 function normalizeProviders() {
+	var firstOutbound = firstProxyOutboundTag();
+
 	uci.sections('neto', 'provider', function(section, sid) {
 		uci.unset('neto', sid, 'enabled');
 
@@ -149,6 +151,19 @@ function normalizeProviders() {
 
 		if (uci.get('neto', sid, 'update_via') == null)
 			uci.set('neto', sid, 'update_via', 'direct');
+
+		if (String(uci.get('neto', sid, 'update_via') || 'direct').trim() == 'proxy') {
+			var outbound = String(uci.get('neto', sid, 'update_outbound') || '').trim();
+
+			if (!proxyOutboundTagExists(outbound)) {
+				if (firstOutbound != '')
+					uci.set('neto', sid, 'update_outbound', firstOutbound);
+				else
+					uci.unset('neto', sid, 'update_outbound');
+			}
+		} else {
+			uci.unset('neto', sid, 'update_outbound');
+		}
 	});
 }
 
@@ -224,8 +239,38 @@ function validateProviderReferences() {
 		throw new Error(error);
 }
 
+function firstProxyOutboundTag() {
+	var first = '';
+
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var tag = String(section.tag || sid || section['.name'] || '').trim();
+
+		if (first == '' && tag != '' && tag != 'direct' && tag != 'blocked' && tag != 'block' && tag != 'proxy_default')
+			first = tag;
+	});
+
+	return first;
+}
+
+function proxyOutboundTagExists(wanted) {
+	var found = false;
+
+	wanted = String(wanted || '').trim();
+	if (wanted == '')
+		return false;
+
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var tag = String(section.tag || sid || section['.name'] || '').trim();
+
+		if (tag == wanted && tag != 'direct' && tag != 'blocked' && tag != 'block' && tag != 'proxy_default')
+			found = true;
+	});
+
+	return found;
+}
+
 function addProxyOutboundChoices(option) {
-	option.value('', _('Auto'));
+	var first = firstProxyOutboundTag();
 
 	uci.sections('neto', 'outbound', function(section, sid) {
 		var tag = String(section.tag || sid || section['.name'] || '').trim();
@@ -236,6 +281,10 @@ function addProxyOutboundChoices(option) {
 
 		option.value(tag, label || tag);
 	});
+
+	option.default = first;
+	option.rmempty = false;
+	return first;
 }
 
 function addUpdateIntervalChoices(option) {
@@ -538,8 +587,20 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'update_outbound', _('Update outbound'));
-		addProxyOutboundChoices(o);
+		var firstUpdateOutbound = addProxyOutboundChoices(o);
 		o.depends('update_via', 'proxy');
+		o.forcewrite = true;
+		o.cfgvalue = function(section_id) {
+			var value = String(uci.get('neto', section_id, 'update_outbound') || '').trim();
+
+			return proxyOutboundTagExists(value) ? value : firstUpdateOutbound;
+		};
+		o.validate = function(section_id, value) {
+			if (!proxyOutboundTagExists(value))
+				return _('Create an outbound before selecting proxy update.');
+
+			return true;
+		};
 		o.modalonly = true;
 
 		o = s.option(form.DummyValue, 'item_count', _('Items'));

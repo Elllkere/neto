@@ -86,7 +86,11 @@ LAN traffic -> nft decides before sing-box
 Direct/bypass traffic must not enter sing-box.
 
 Client `proxy` policy forces non-reserved TCP/UDP from that LAN client through
-neto and can optionally select a custom sing-box outbound for that client.
+neto and selects a custom sing-box outbound for that client.
+
+Each proxy rule independently uses its selected custom outbound. Outbound
+selectors have no empty `Auto` choice: the first custom outbound is selected
+initially, and LuCI does not create a proxy rule when none exists.
 
 ## Status
 

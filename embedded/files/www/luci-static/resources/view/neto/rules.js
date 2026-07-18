@@ -81,9 +81,10 @@ function nextRulePriority() {
 	return max + 100;
 }
 
-function initializeNewRuleSection(section_id, priority) {
+function initializeNewRuleSection(section_id, priority, outbound) {
 	uci.set('neto', section_id, 'enabled', '1');
 	uci.set('neto', section_id, 'action', 'proxy');
+	uci.set('neto', section_id, 'outbound', outbound);
 	uci.set('neto', section_id, 'dns_mode', 'auto');
 	uci.set('neto', section_id, 'priority', String(priority));
 	uci.set('neto', section_id, 'domain_input', 'fields');
@@ -123,8 +124,39 @@ function orderedRuleSectionIDs() {
 	return rendered || sortRuleSectionIDs(ids);
 }
 
+function firstOutboundTag() {
+	var first = '';
+
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var tag = String(section.tag || sid || section['.name'] || '').trim();
+
+		if (first == '' && tag != '' && tag != 'direct' && tag != 'blocked' && tag != 'block' && tag != 'proxy_default')
+			first = tag;
+	});
+
+	return first;
+}
+
+function outboundTagExists(wanted) {
+	var found = false;
+
+	wanted = String(wanted || '').trim();
+	if (wanted == '')
+		return false;
+
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var tag = String(section.tag || sid || section['.name'] || '').trim();
+
+		if (tag == wanted && tag != 'direct' && tag != 'blocked' && tag != 'block' && tag != 'proxy_default')
+			found = true;
+	});
+
+	return found;
+}
+
 function rewriteRuleState() {
 	var n = 0;
+	var firstOutbound = firstOutboundTag();
 
 	if (String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim() != 'custom')
 		return;
@@ -157,8 +189,11 @@ function rewriteRuleState() {
 
 		if (action != 'proxy') {
 			uci.set('neto', sid, 'outbound', 'direct');
-		} else if (outbound == null || outbound == '' || outbound == 'direct' || outbound == 'blocked' || outbound == 'block' || outbound == 'proxy_default') {
-			uci.unset('neto', sid, 'outbound');
+		} else if (outbound == null || outbound == '' || outbound == 'direct' || outbound == 'blocked' || outbound == 'block' || outbound == 'proxy_default' || !outboundTagExists(outbound)) {
+			if (firstOutbound != '')
+				uci.set('neto', sid, 'outbound', firstOutbound);
+			else
+				uci.unset('neto', sid, 'outbound');
 		}
 
 		if (domainInput == '') {
@@ -213,7 +248,7 @@ function rewriteRuleState() {
 }
 
 function addOutboundChoices(option) {
-	option.value('', _('Select outbound'));
+	var first = '';
 
 	uci.sections('neto', 'outbound', function(section, sid) {
 		var tag = String(section.tag || sid || section['.name'] || '').trim();
@@ -222,8 +257,13 @@ function addOutboundChoices(option) {
 		if (tag == '' || tag == 'direct' || tag == 'blocked' || tag == 'block' || tag == 'proxy_default')
 			return;
 
+		if (first == '')
+			first = tag;
 		option.value(tag, label || tag);
 	});
+
+	option.default = first;
+	return first;
 }
 
 function toArray(value) {
@@ -735,7 +775,7 @@ return view.extend({
 	},
 
 	render: function() {
-		var m, s, o, routingMode, self;
+		var m, s, o, routingMode, self, firstOutbound;
 
 		netoUI.syncRulesTab();
 
@@ -743,6 +783,7 @@ return view.extend({
 		this.map = m;
 		self = this;
 		routingMode = String(uci.get('neto', 'main', 'routing_mode') || 'custom').trim();
+		firstOutbound = firstOutboundTag();
 
 		if (routingMode != 'custom')
 			return m.render();
@@ -768,6 +809,10 @@ return view.extend({
 			return sortRuleSectionIDs(form.GridSection.prototype.cfgsections.apply(this, arguments));
 		};
 		s.handleAdd = function(ev, name) {
+			if (firstOutbound == '') {
+				ui.addNotification(null, E('p', {}, [ _('Create an outbound before adding a proxy rule.') ]), 'warning');
+				return Promise.resolve();
+			}
 			var data = this.map.data;
 			var add = data.add;
 			var priority = nextRulePriority();
@@ -775,7 +820,7 @@ return view.extend({
 			data.add = function(configName, sectionType, sectionName) {
 				var sid = add.apply(this, arguments);
 
-				initializeNewRuleSection(sid, priority);
+				initializeNewRuleSection(sid, priority, firstOutbound);
 				return sid;
 			};
 
@@ -794,6 +839,10 @@ return view.extend({
 				'style': 'margin-left:.5em',
 				'click': function(ev) {
 					ev.preventDefault();
+					if (firstOutbound == '') {
+						ui.addNotification(null, E('p', {}, [ _('Create an outbound before adding a proxy rule.') ]), 'warning');
+						return;
+					}
 					self.showImportRules();
 				}
 			}, _('Import')));
@@ -831,8 +880,19 @@ return view.extend({
 		o = s.option(form.ListValue, 'outbound', _('Outbound'));
 		addOutboundChoices(o);
 		o.depends('action', 'proxy');
-		o.default = '';
-		o.rmempty = true;
+		o.rmempty = false;
+		o.forcewrite = true;
+		o.cfgvalue = function(section_id) {
+			var value = String(uci.get('neto', section_id, 'outbound') || '').trim();
+
+			return outboundTagExists(value) ? value : firstOutbound;
+		};
+		o.validate = function(section_id, value) {
+			if (!outboundTagExists(value))
+				return _('Create an outbound before adding a proxy rule.');
+
+			return true;
+		};
 		o.editable = true;
 
 		o = s.option(form.ListValue, 'domain_input', _('Domain input'));
