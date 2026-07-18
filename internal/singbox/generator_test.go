@@ -593,6 +593,50 @@ func TestGenerateTrojanOutbound(t *testing.T) {
 	}
 }
 
+func TestGenerateLatencyClientRoutesEachInboundToItsOutbound(t *testing.T) {
+	cfg := config.Config{Outbounds: []config.Outbound{
+		{Enabled: true, Tag: "first", Type: "trojan", Server: "first.example", Port: 443, Password: "one", TLS: true},
+		{Enabled: true, Tag: "second", Type: "shadowsocks", Server: "second.example", Port: 8388, Method: "aes-128-gcm", Password: "two"},
+	}}
+
+	raw, err := GenerateLatencyClient(cfg, []LatencyTarget{
+		{Tag: "first", ListenPort: 21001},
+		{Tag: "second", ListenPort: 21002},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		`"tag": "latency-0000-in"`,
+		`"listen_port": 21001`,
+		`"outbound": "first"`,
+		`"tag": "latency-0001-in"`,
+		`"listen_port": 21002`,
+		`"outbound": "second"`,
+		`"final": "direct"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("latency client missing %s:\n%s", want, text)
+		}
+	}
+}
+
+func TestGenerateLatencyClientRejectsInvalidTargets(t *testing.T) {
+	cfg := config.Config{Outbounds: []config.Outbound{{Enabled: true, Tag: "first", Type: "trojan", Server: "example.com", Port: 443, Password: "secret"}}}
+
+	for _, targets := range [][]LatencyTarget{
+		nil,
+		{{Tag: "first", ListenPort: 0}},
+		{{Tag: "missing", ListenPort: 21001}},
+		{{Tag: "first", ListenPort: 21001}, {Tag: "first", ListenPort: 21002}},
+	} {
+		if _, err := GenerateLatencyClient(cfg, targets); err == nil {
+			t.Fatalf("expected latency target error for %+v", targets)
+		}
+	}
+}
+
 func TestCompareVersion(t *testing.T) {
 	if compareVersion("1.11.9", MinimumVersion) >= 0 {
 		t.Fatal("1.11.9 should be unsupported")

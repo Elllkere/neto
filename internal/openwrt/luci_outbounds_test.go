@@ -48,6 +48,12 @@ func TestOutboundsLuCIExposesNativeTypes(t *testing.T) {
 		"hysteria_obfs_type",
 		"method",
 		"password",
+		"handleOutboundLatencyTest: function()",
+		"fs.exec('/usr/bin/netod', [ 'outbounds', 'latency' ])",
+		"showOutboundLatencyResults: function(report)",
+		"_('Test latency')",
+		"result.latency_ms",
+		"Results are sorted from the lowest latency to the highest.",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("outbounds.js missing %q:\n%s", want, s)

@@ -418,6 +418,12 @@ Creatable outbound types:
 Imported nodes and subscription nodes are ordinary outbound sections and are
 selectable by rules.
 
+Outbound latency tests are management-only. `netod outbounds latency` starts
+temporary sing-box mixed listeners, sends bounded HTTP requests through the
+selected custom outbounds, and exits after producing a JSON report. It does not
+install nftables rules or route router-self traffic through the transparent
+proxy path.
+
 ## LuCI Layout
 
 Tabs:

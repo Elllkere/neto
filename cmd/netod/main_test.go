@@ -32,6 +32,40 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestParseOutboundLatencyOptions(t *testing.T) {
+	opts, err := parseOutboundLatencyOptions([]string{"latency", "-config", "/tmp/neto-test", "fast_node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.tag != "fast_node" || opts.configPath != "/tmp/neto-test" {
+		t.Fatalf("unexpected latency options: %+v", opts)
+	}
+	if _, err := parseOutboundLatencyOptions([]string{"test"}); err == nil {
+		t.Fatal("expected invalid outbounds subcommand to fail")
+	}
+}
+
+func TestCommandOutboundsLatencyRequiresSingBox(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "neto")
+	if err := os.WriteFile(cfgPath, []byte(`
+config main 'main'
+	option singbox_bin '/missing/sing-box'
+
+config outbound 'test_node'
+	option type 'trojan'
+	option server 'example.com'
+	option port '443'
+	option password 'secret'
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err := commandOutboundsLatency(outboundLatencyOptions{configPath: cfgPath})
+	if err == nil || !strings.Contains(err.Error(), "sing-box binary is missing") {
+		t.Fatalf("got %v, want missing sing-box error", err)
+	}
+}
+
 func TestCommandDownloadDirect(t *testing.T) {
 	dir := t.TempDir()
 	responsePath := filepath.Join(dir, "release.tar.gz")

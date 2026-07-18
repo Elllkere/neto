@@ -92,6 +92,9 @@ Each proxy rule independently uses its selected custom outbound. Outbound
 selectors have no empty `Auto` choice: the first custom outbound is selected
 initially, and LuCI does not create a proxy rule when none exists.
 
+The Outbounds page can test every proxy profile and sort the results by HTTP
+latency. The same JSON report is available with `netod outbounds latency`.
+
 ## Status
 
 Supported:

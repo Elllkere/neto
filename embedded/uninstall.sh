@@ -98,7 +98,14 @@ rm -rf /usr/libexec/neto
 rm -rf /usr/share/neto
 rm -f /usr/share/luci/menu.d/luci-app-neto.json
 rm -f /usr/share/rpcd/acl.d/luci-app-neto.json
-rm -rf /www/luci-static/resources/view/neto
+for path in \
+	/www/luci-static/resources/view/neto \
+	/www/luci-static/resources/view/neto_* \
+	/www/luci-static/resources/neto \
+	/www/luci-static/resources/neto_*
+do
+	[ -d "$path" ] && rm -rf "$path"
+done
 rm -rf /tmp/neto
 rm -rf /var/lib/neto
 rm -rf /etc/neto/dnsmasq-state

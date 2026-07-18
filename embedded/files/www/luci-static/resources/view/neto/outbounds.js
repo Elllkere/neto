@@ -294,6 +294,73 @@ return view.extend({
 			});
 	},
 
+	handleOutboundLatencyTest: function() {
+		ui.showModal(_('Outbound latency test'), [
+			E('p', { 'class': 'spinning' }, _('Testing all outbounds. This may take several minutes for a large subscription…'))
+		]);
+
+		return this.handleSaveCommitConfig()
+			.then(function() {
+				return fs.exec('/usr/bin/netod', [ 'outbounds', 'latency' ]);
+			})
+			.then(L.bind(function(res) {
+				var report;
+
+				if (res.code)
+					throw new Error(res.stderr || res.stdout || _('Latency test failed'));
+				try {
+					report = JSON.parse(String(res.stdout || ''));
+				} catch (err) {
+					throw new Error(_('Invalid latency test response') + ': ' + err.message);
+				}
+				this.showOutboundLatencyResults(report);
+			}, this));
+	},
+
+	showOutboundLatencyResults: function(report) {
+		var results = Array.isArray(report && report.results) ? report.results : [];
+		var rows = [
+			E('tr', { 'class': 'tr table-titles' }, [
+				E('th', { 'class': 'th' }, _('Outbound')),
+				E('th', { 'class': 'th' }, _('Server')),
+				E('th', { 'class': 'th' }, _('Latency')),
+				E('th', { 'class': 'th' }, _('Status'))
+			])
+		];
+
+		for (var i = 0; i < results.length; i++) {
+			var result = results[i] || {};
+			var latency = result.ok ? String(result.latency_ms) + ' ms' : '—';
+			var status = result.ok ? _('Reachable') : _('Failed');
+			var statusNode = E('span', {
+				'class': result.ok ? 'label success' : 'label danger',
+				'title': result.error || ''
+			}, status);
+
+			rows.push(E('tr', { 'class': 'tr' }, [
+				E('td', { 'class': 'td' }, [
+					E(i == 0 && result.ok ? 'strong' : 'span', {}, result.label || result.tag || '—'),
+					result.label && result.tag && result.label != result.tag ? E('small', { 'style': 'display:block;opacity:.7' }, result.tag) : ''
+				]),
+				E('td', { 'class': 'td' }, result.server || '—'),
+				E('td', { 'class': 'td' }, latency),
+				E('td', { 'class': 'td' }, statusNode)
+			]));
+		}
+
+		ui.showModal(_('Outbound latency test'), [
+			E('p', {}, _('Results are sorted from the lowest latency to the highest. Failed servers are shown last.')),
+			E('p', {}, [ _('Test target') + ': ', E('code', {}, String(report && report.target || '—')) ]),
+			E('table', { 'class': 'table cbi-section-table' }, rows),
+			E('div', { 'class': 'right' }, [
+				E('button', {
+					'class': 'cbi-button cbi-button-neutral',
+					'click': ui.hideModal
+				}, _('Close'))
+			])
+		]);
+	},
+
 	render: function() {
 		var m, s, o, self, sub;
 
@@ -316,6 +383,7 @@ return view.extend({
 		};
 		s.renderSectionAdd = function() {
 			var el = form.GridSection.prototype.renderSectionAdd.apply(this, arguments);
+			var latencyButton;
 			addNamedSectionValidator(el, this, _('This tag is reserved'), true);
 			el.appendChild(E('button', {
 				'class': 'cbi-button cbi-button-action',
@@ -324,6 +392,25 @@ return view.extend({
 					return self.showImportModal();
 				}
 			}, _('Import')));
+			latencyButton = E('button', {
+				'class': 'cbi-button cbi-button-action',
+				'style': 'margin-left:.5em',
+				'click': function(ev) {
+					ev.preventDefault();
+					latencyButton.disabled = true;
+					latencyButton.textContent = _('Testing…');
+					return self.handleOutboundLatencyTest().then(function() {
+						latencyButton.disabled = null;
+						latencyButton.textContent = _('Test latency');
+					}, function(err) {
+						latencyButton.disabled = null;
+						latencyButton.textContent = _('Test latency');
+						ui.hideModal();
+						ui.addNotification(null, E('p', {}, [ err.message || err ]), 'danger');
+					});
+				}
+			}, _('Test latency'));
+			el.appendChild(latencyButton);
 
 			return el;
 		};

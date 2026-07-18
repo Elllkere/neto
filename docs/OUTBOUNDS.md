@@ -38,6 +38,29 @@ Outbounds table остается компактной:
 
 Protocol-specific fields находятся в edit dialog.
 
+## Latency Test
+
+LuCI Outbounds page exposes `Test latency`. The test starts temporary sing-box
+mixed inbounds, sends an HTTP connectivity request through every real outbound,
+and sorts successful results from the lowest latency to the highest. Failed
+nodes are shown last with the curl error in the status tooltip.
+
+Large subscriptions are processed in batches of 32. Four requests run in
+parallel inside each batch, so the router does not need one sing-box process per
+node. The temporary test does not add nftables rules and does not route router
+self traffic through neto TProxy.
+
+The same report is available as JSON from the CLI:
+
+```sh
+netod outbounds latency
+netod outbounds latency my_outbound
+```
+
+The reported value is application-level HTTP latency through the proxy, not an
+ICMP echo time to the server address. This also verifies that proxy
+authentication and transport settings work.
+
 ## Rule Selection
 
 Rule with `action=proxy` выбирает custom outbound:

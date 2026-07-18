@@ -55,6 +55,31 @@ done
 	echo "missing neto-version.txt" >&2
 	exit 1
 }
+[ -s "$TMP/neto-ui-cache.txt" ] || {
+	echo "missing LuCI cache namespace" >&2
+	exit 1
+}
+ui_namespace="$(sed -n '1{s/[[:space:]]//g;p;}' "$TMP/neto-ui-cache.txt")"
+case "$ui_namespace" in
+	neto_[0-9]*) ;;
+	*)
+		echo "invalid LuCI cache namespace: $ui_namespace" >&2
+		exit 1
+		;;
+esac
+[ -f "$TMP/files/www/luci-static/resources/view/$ui_namespace/outbounds.js" ] || {
+	echo "missing versioned LuCI outbounds view" >&2
+	exit 1
+}
+[ -f "$TMP/files/www/luci-static/resources/$ui_namespace/i18n.js" ] || {
+	echo "missing versioned LuCI helper modules" >&2
+	exit 1
+}
+grep -Fq "\"path\": \"$ui_namespace/outbounds\"" \
+	"$TMP/files/usr/share/luci/menu.d/luci-app-neto.json" || {
+	echo "LuCI menu does not reference versioned outbounds view" >&2
+	exit 1
+}
 expected_version="$(sed -n '1{s/[[:space:]]//g;p;}' "$TMP/neto-version.txt")"
 actual_version="$("$TMP/bin/linux-amd64/netod" version | awk '{ print $2; exit }')"
 [ "$actual_version" = "$expected_version" ] || {

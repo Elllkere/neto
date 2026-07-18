@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,8 +14,10 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -66,6 +69,27 @@ type downloadOptions struct {
 	via        string
 	outbound   string
 }
+
+type outboundLatencyOptions struct {
+	configPath string
+	tag        string
+}
+
+type outboundLatencyResult struct {
+	Tag       string `json:"tag"`
+	Label     string `json:"label"`
+	Server    string `json:"server"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
+	OK        bool   `json:"ok"`
+	Error     string `json:"error,omitempty"`
+}
+
+type outboundLatencyReport struct {
+	Target  string                  `json:"target"`
+	Results []outboundLatencyResult `json:"results"`
+}
+
+const latencyTestURL = "https://www.gstatic.com/generate_204"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -145,12 +169,38 @@ func run(args []string) error {
 			return err
 		}
 		return commandDownload(opts)
+	case "outbounds":
+		opts, err := parseOutboundLatencyOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		return commandOutboundsLatency(opts)
 	case "logs":
 		return commandLogs(args[1:])
 	default:
 		usage()
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func parseOutboundLatencyOptions(args []string) (outboundLatencyOptions, error) {
+	if len(args) == 0 || args[0] != "latency" {
+		return outboundLatencyOptions{}, fmt.Errorf("usage: netod outbounds latency [tag] [options]")
+	}
+	fs := flag.NewFlagSet("netod outbounds latency", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	opts := outboundLatencyOptions{configPath: config.DefaultPath}
+	fs.StringVar(&opts.configPath, "config", opts.configPath, "path to UCI config")
+	if err := fs.Parse(args[1:]); err != nil {
+		return outboundLatencyOptions{}, err
+	}
+	if fs.NArg() > 1 {
+		return outboundLatencyOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(1))
+	}
+	if fs.NArg() == 1 {
+		opts.tag = strings.TrimSpace(fs.Arg(0))
+	}
+	return opts, nil
 }
 
 func parseDownloadOptions(args []string) (downloadOptions, error) {
@@ -259,7 +309,7 @@ func parseProviderOptions(args []string) (providerOptions, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions|providers|download|logs> [options]")
+	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions|providers|download|outbounds|logs> [options]")
 }
 
 func commandCheck(opts options) error {
@@ -667,6 +717,177 @@ func commandDownload(opts downloadOptions) error {
 	default:
 		return fmt.Errorf("unsupported update_via %q", via)
 	}
+}
+
+type outboundLatencyItem struct {
+	outbound config.Outbound
+	port     int
+}
+
+func commandOutboundsLatency(opts outboundLatencyOptions) error {
+	cfg, err := loadConfigForManagement(opts.configPath)
+	if err != nil {
+		return err
+	}
+	if err := requireCommand("curl"); err != nil {
+		return err
+	}
+	if !singbox.BinaryExists(cfg.Main.SingBoxBin) {
+		return fmt.Errorf("sing-box binary is missing or not executable: %s", cfg.Main.SingBoxBin)
+	}
+
+	items := make([]outboundLatencyItem, 0, len(cfg.EnabledCustomOutbounds()))
+	for _, outbound := range cfg.EnabledCustomOutbounds() {
+		if opts.tag != "" && outbound.Tag != opts.tag {
+			continue
+		}
+		items = append(items, outboundLatencyItem{outbound: outbound})
+	}
+	if len(items) == 0 {
+		if opts.tag != "" {
+			return fmt.Errorf("outbound %q not found", opts.tag)
+		}
+		return fmt.Errorf("no custom outbounds configured")
+	}
+
+	results := make([]outboundLatencyResult, 0, len(items))
+	const batchSize = 32
+	for start := 0; start < len(items); start += batchSize {
+		end := start + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		batchResults, err := testOutboundLatencyBatch(cfg, items[start:end])
+		if err != nil {
+			return err
+		}
+		results = append(results, batchResults...)
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].OK != results[j].OK {
+			return results[i].OK
+		}
+		if results[i].OK && results[i].LatencyMS != results[j].LatencyMS {
+			return results[i].LatencyMS < results[j].LatencyMS
+		}
+		return strings.ToLower(results[i].Label) < strings.ToLower(results[j].Label)
+	})
+
+	return json.NewEncoder(os.Stdout).Encode(outboundLatencyReport{
+		Target:  latencyTestURL,
+		Results: results,
+	})
+}
+
+func testOutboundLatencyBatch(cfg config.Config, items []outboundLatencyItem) ([]outboundLatencyResult, error) {
+	usedPorts := map[int]struct{}{}
+	targets := make([]singbox.LatencyTarget, 0, len(items))
+	for i := range items {
+		for {
+			port, err := freeLocalPort()
+			if err != nil {
+				return nil, err
+			}
+			if _, exists := usedPorts[port]; exists {
+				continue
+			}
+			usedPorts[port] = struct{}{}
+			items[i].port = port
+			targets = append(targets, singbox.LatencyTarget{Tag: items[i].outbound.Tag, ListenPort: port})
+			break
+		}
+	}
+
+	proxyJSON, err := singbox.GenerateLatencyClient(cfg, targets)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp("", "neto-latency-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "sing-box.json")
+	if err := os.WriteFile(path, append(proxyJSON, '\n'), 0600); err != nil {
+		return nil, err
+	}
+	if err := singbox.CheckBinary(cfg.Main.SingBoxBin, path); err != nil {
+		return nil, err
+	}
+
+	var stderr bytes.Buffer
+	cmd := exec.Command(cfg.Main.SingBoxBin, "run", "-c", path)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+	for _, item := range items {
+		if err := waitForPort(item.port, 5*time.Second); err != nil {
+			return nil, fmt.Errorf("temporary sing-box did not start: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
+	}
+
+	results := make([]outboundLatencyResult, len(items))
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
+	for i, item := range items {
+		wg.Add(1)
+		go func(index int, item outboundLatencyItem) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			result := outboundLatencyResult{
+				Tag:    item.outbound.Tag,
+				Label:  firstNonEmptyString(item.outbound.Label, item.outbound.Tag),
+				Server: fmt.Sprintf("%s:%d", item.outbound.Server, item.outbound.Port),
+			}
+			started := time.Now()
+			out, err := command("curl",
+				"-fsS",
+				"--connect-timeout", "5",
+				"--max-time", "10",
+				"--user-agent", "neto/1",
+				"--proxy", fmt.Sprintf("http://127.0.0.1:%d", item.port),
+				"--output", "/dev/null",
+				latencyTestURL,
+			).CombinedOutput()
+			if err != nil {
+				message := strings.TrimSpace(string(out))
+				if message == "" {
+					message = err.Error()
+				}
+				if len(message) > 240 {
+					message = message[:240]
+				}
+				result.Error = message
+			} else {
+				result.OK = true
+				result.LatencyMS = time.Since(started).Milliseconds()
+				if result.LatencyMS < 1 {
+					result.LatencyMS = 1
+				}
+			}
+			results[index] = result
+		}(i, item)
+	}
+	wg.Wait()
+	return results, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func fetchProviderWithScript(cfg config.Config, p config.Provider) ([]byte, error) {

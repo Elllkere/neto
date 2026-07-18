@@ -492,13 +492,17 @@ fix_luci_permissions() {
 
 	for path in \
 		/www/luci-static/resources/neto \
-		/www/luci-static/resources/view/neto
+		/www/luci-static/resources/neto_* \
+		/www/luci-static/resources/view/neto \
+		/www/luci-static/resources/view/neto_*
 	do
 		[ -d "$path" ] && chmod 0755 "$path"
 	done
 	for path in \
 		/www/luci-static/resources/neto/*.js \
+		/www/luci-static/resources/neto_*/*.js \
 		/www/luci-static/resources/view/neto/*.js \
+		/www/luci-static/resources/view/neto_*/*.js \
 		/usr/share/luci/menu.d/luci-app-neto.json \
 		/usr/share/rpcd/acl.d/luci-app-neto.json
 	do
@@ -524,6 +528,7 @@ ensure_lan_subnet_config() {
 install_files() {
 	local arch="$1"
 	local config_created=0
+	local path
 
 	[ -x "$WORK_DIR/bin/$arch/netod" ] || die "archive does not contain netod for $arch"
 
@@ -536,6 +541,16 @@ install_files() {
 		config_created=1
 	fi
 
+	# Remove only neto-owned LuCI namespaces from previous releases. The archive
+	# installs content-versioned paths so the browser requests fresh module URLs.
+	for path in \
+		/www/luci-static/resources/neto \
+		/www/luci-static/resources/neto_* \
+		/www/luci-static/resources/view/neto \
+		/www/luci-static/resources/view/neto_*
+	do
+		[ -d "$path" ] && rm -rf "$path"
+	done
 	cp -R "$WORK_DIR/files/." /
 	fix_luci_permissions
 	chmod 0755 /etc/init.d/neto

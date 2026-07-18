@@ -246,6 +246,9 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
 - Outbounds LuCI should keep the table compact: text label/name section title,
   type, address, and port only. Do not add a second editable name/input column.
   Protocol details belong in the edit modal.
+- Outbounds LuCI exposes a batch latency test. It uses temporary sing-box mixed
+  inbounds and HTTP requests through each outbound, without adding router-self
+  nft/TProxy routing.
 - Outbounds LuCI should expose homeproxy-like controls for supported protocols:
   VLESS flow dropdown, Shadowsocks method dropdown, TLS min/max/ciphers, allow
   insecure, ECH, uTLS fingerprint, REALITY, and V2Ray transport fields. Hide

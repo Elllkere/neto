@@ -55,6 +55,26 @@ cp "$ROOT_DIR/embedded/upgrade.sh" "$ARCHIVE_ROOT/upgrade.sh"
 printf '%s\n' "$VERSION" > "$ARCHIVE_ROOT/neto-version.txt"
 chmod 0755 "$ARCHIVE_ROOT/install.sh" "$ARCHIVE_ROOT/uninstall.sh" "$ARCHIVE_ROOT/upgrade.sh"
 
+# Base LuCI's resource version does not change when this standalone app is
+# upgraded. Give each distinct neto UI build a content-derived module namespace
+# so browsers cannot reuse stale view or helper scripts.
+UI_VIEW_DIR="$ARCHIVE_ROOT/files/www/luci-static/resources/view/neto"
+UI_HELPER_DIR="$ARCHIVE_ROOT/files/www/luci-static/resources/neto"
+UI_CACHE_KEY="$({
+	for file in "$UI_VIEW_DIR"/*.js "$UI_HELPER_DIR"/*.js; do
+		cksum "$file" | awk '{ print $1 ":" $2 }'
+	done
+} | cksum | awk '{ print $1 }')"
+UI_NAMESPACE="neto_${UI_CACHE_KEY}"
+mv "$UI_VIEW_DIR" "$ARCHIVE_ROOT/files/www/luci-static/resources/view/$UI_NAMESPACE"
+mv "$UI_HELPER_DIR" "$ARCHIVE_ROOT/files/www/luci-static/resources/$UI_NAMESPACE"
+for file in "$ARCHIVE_ROOT/files/www/luci-static/resources/view/$UI_NAMESPACE"/*.js; do
+	sed -i "s/'require neto\./'require $UI_NAMESPACE./g" "$file"
+done
+sed -i "s#\"path\": \"neto/#\"path\": \"$UI_NAMESPACE/#g" \
+	"$ARCHIVE_ROOT/files/usr/share/luci/menu.d/luci-app-neto.json"
+printf '%s\n' "$UI_NAMESPACE" > "$ARCHIVE_ROOT/neto-ui-cache.txt"
+
 build_netod "linux-amd64" "amd64" "" ""
 build_netod "linux-arm64" "arm64" "" ""
 build_netod "linux-armv7" "arm" "7" ""
