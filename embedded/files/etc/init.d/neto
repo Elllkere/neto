@@ -387,6 +387,18 @@ reload_service() {
 	start_service
 }
 
+neto_add_interface_trigger() {
+	local section="$1"
+
+	# Router-local traffic is deliberately outside neto policy, and loopback
+	# changes must not restart the service. Watch every other logical network
+	# so custom LAN/WAN names recover just like the usual lan/wan sections.
+	[ "$section" = "loopback" ] && return 0
+	procd_add_reload_interface_trigger "$section"
+}
+
 service_triggers() {
-	procd_add_reload_trigger "$CONFIG_NAME"
+	procd_add_reload_trigger "$CONFIG_NAME" network
+	config_load network
+	config_foreach neto_add_interface_trigger interface
 }

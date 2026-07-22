@@ -44,6 +44,26 @@ func TestInitScriptStartsTwoProcdInstances(t *testing.T) {
 	}
 }
 
+func TestInitScriptReloadsAfterNetworkInterfaceChanges(t *testing.T) {
+	data, err := os.ReadFile("../../embedded/files/etc/init.d/neto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		"neto_add_interface_trigger()",
+		`[ "$section" = "loopback" ] && return 0`,
+		`procd_add_reload_interface_trigger "$section"`,
+		`procd_add_reload_trigger "$CONFIG_NAME" network`,
+		"config_load network",
+		"config_foreach neto_add_interface_trigger interface",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q in init script:\n%s", want, s)
+		}
+	}
+}
+
 func TestInitScriptManagesDNSMasqUCI(t *testing.T) {
 	data, err := os.ReadFile("../../embedded/files/etc/init.d/neto")
 	if err != nil {
