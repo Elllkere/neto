@@ -34,6 +34,9 @@ func TestClientsLuCIProxyPolicyCanSelectOutbound(t *testing.T) {
 		"tag == 'direct' || tag == 'blocked' || tag == 'block' || tag == 'proxy_default'",
 		"form.ListValue, 'outbound', _('Outbound')",
 		"o.depends('policy', 'proxy')",
+		"function outboundTagExists(wanted)",
+		"return outboundTagExists(value) ? value : firstOutbound",
+		"o.forcewrite = true",
 		"function rewriteClientState()",
 		"this.map.save(rewriteClientState)",
 		"uci.unset('neto', sid, 'outbound')",
@@ -41,5 +44,15 @@ func TestClientsLuCIProxyPolicyCanSelectOutbound(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("clients.js missing proxy outbound UI behavior %q:\n%s", want, s)
 		}
+	}
+
+	policyStart := strings.Index(s, "form.ListValue, 'policy', _('Policy')")
+	outboundStart := strings.Index(s, "form.ListValue, 'outbound', _('Outbound')")
+	if policyStart < 0 || outboundStart <= policyStart {
+		t.Fatalf("clients.js policy/outbound option order is invalid:\n%s", s)
+	}
+	policyBlock := s[policyStart:outboundStart]
+	if !strings.Contains(policyBlock, "o.rmempty = false;") || !strings.Contains(policyBlock, "o.editable = true;") {
+		t.Fatalf("client policy must be an editable, persistent table selector:\n%s", policyBlock)
 	}
 }

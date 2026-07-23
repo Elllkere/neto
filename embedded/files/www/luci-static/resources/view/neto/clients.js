@@ -28,6 +28,23 @@ function addOutboundChoices(option) {
 	return first;
 }
 
+function outboundTagExists(wanted) {
+	var found = false;
+
+	wanted = String(wanted || '').trim();
+	if (wanted == '')
+		return false;
+
+	uci.sections('neto', 'outbound', function(section, sid) {
+		var tag = String(section.tag || sid || section['.name'] || '').trim();
+
+		if (tag == wanted && tag != 'direct' && tag != 'blocked' && tag != 'block' && tag != 'proxy_default')
+			found = true;
+	});
+
+	return found;
+}
+
 function rewriteClientState() {
 	var first = '';
 	var available = {};
@@ -74,7 +91,7 @@ return view.extend({
 	},
 
 	render: function() {
-		var m, s, o;
+		var m, s, o, firstOutbound;
 
 		netoUI.syncRulesTab();
 
@@ -98,11 +115,25 @@ return view.extend({
 		o.value('proxy', 'proxy');
 		o.value('direct', 'direct');
 		o.default = 'default';
+		o.rmempty = false;
+		o.editable = true;
 
 		o = s.option(form.ListValue, 'outbound', _('Outbound'));
-		addOutboundChoices(o);
+		firstOutbound = addOutboundChoices(o);
 		o.depends('policy', 'proxy');
 		o.rmempty = false;
+		o.forcewrite = true;
+		o.cfgvalue = function(section_id) {
+			var value = String(uci.get('neto', section_id, 'outbound') || '').trim();
+
+			return outboundTagExists(value) ? value : firstOutbound;
+		};
+		o.validate = function(section_id, value) {
+			if (!outboundTagExists(value))
+				return _('Create an outbound before selecting proxy policy.');
+
+			return true;
+		};
 		o.editable = true;
 
 		return m.render();
