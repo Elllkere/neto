@@ -47,6 +47,11 @@ type options struct {
 	skipSingBoxCheck  bool
 }
 
+type readyOptions struct {
+	configPath string
+	timeout    time.Duration
+}
+
 type importOptions struct {
 	configPath string
 	filePath   string
@@ -145,6 +150,12 @@ func run(args []string) error {
 			return err
 		}
 		return commandRun(opts)
+	case "ready":
+		opts, err := parseReadyOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		return commandReady(opts)
 	case "import-uri":
 		opts, err := parseImportOptions(args[1:])
 		if err != nil {
@@ -199,6 +210,27 @@ func parseOutboundLatencyOptions(args []string) (outboundLatencyOptions, error) 
 	}
 	if fs.NArg() == 1 {
 		opts.tag = strings.TrimSpace(fs.Arg(0))
+	}
+	return opts, nil
+}
+
+func parseReadyOptions(args []string) (readyOptions, error) {
+	fs := flag.NewFlagSet("netod ready", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	opts := readyOptions{
+		configPath: config.DefaultPath,
+		timeout:    30 * time.Second,
+	}
+	fs.StringVar(&opts.configPath, "config", opts.configPath, "path to UCI config")
+	fs.DurationVar(&opts.timeout, "timeout", opts.timeout, "maximum time to wait for end-to-end DNS readiness")
+	if err := fs.Parse(args); err != nil {
+		return readyOptions{}, err
+	}
+	if fs.NArg() != 0 {
+		return readyOptions{}, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if opts.timeout <= 0 {
+		return readyOptions{}, fmt.Errorf("ready timeout must be positive")
 	}
 	return opts, nil
 }
@@ -309,7 +341,7 @@ func parseProviderOptions(args []string) (providerOptions, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|import-uri|subscriptions|providers|download|outbounds|logs> [options]")
+	fmt.Fprintln(os.Stderr, "usage: netod <version|check|compile|apply|status|debug|run|ready|import-uri|subscriptions|providers|download|outbounds|logs> [options]")
 }
 
 func commandCheck(opts options) error {
@@ -473,6 +505,24 @@ func commandRun(opts options) error {
 	defer stop()
 
 	return dnsproxy.New(cfg).Run(ctx)
+}
+
+func commandReady(opts readyOptions) error {
+	cfg, err := config.LoadFile(opts.configPath)
+	if err != nil {
+		return err
+	}
+	if !cfg.Main.Enabled {
+		return fmt.Errorf("neto is disabled")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), opts.timeout)
+	defer cancel()
+	if err := dnsproxy.WaitReady(ctx, cfg.Main.DNSListen); err != nil {
+		return err
+	}
+	fmt.Println("DNS ready")
+	return nil
 }
 
 func commandImportURI(opts importOptions) error {

@@ -30,6 +30,15 @@ func TestInitScriptStartsTwoProcdInstances(t *testing.T) {
 	if !strings.Contains(s, `"$singbox_bin" check -c /tmp/neto/sing-box.json`) {
 		t.Fatalf("missing sing-box check before procd start:\n%s", s)
 	}
+	startService := strings.Index(s, "start_service()")
+	lastInstance := strings.LastIndex(s, "procd_close_instance")
+	startedHook := strings.Index(s, "service_started()")
+	ready := strings.Index(s[startService:], `"$NETOD" ready -timeout 30s`) + startService
+	apply := strings.Index(s[startService:], `"$NETOD" apply`) + startService
+	dnsmasq := strings.Index(s[startService:], "neto_write_dnsmasq") + startService
+	if !(lastInstance >= 0 && startedHook > lastInstance && ready > startedHook && apply > ready && dnsmasq > apply) {
+		t.Fatalf("DNS services must become ready before nft and dnsmasq are enabled:\n%s", s)
+	}
 	start := strings.Index(s, "procd_open_instance sing-box")
 	if start < 0 {
 		t.Fatalf("missing sing-box procd block:\n%s", s)
@@ -61,6 +70,12 @@ func TestInitScriptReloadsAfterNetworkInterfaceChanges(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q in init script:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "reload_service()") {
+		t.Fatalf("reload must use rc.common's procd-aware start wrapper:\n%s", s)
+	}
+	if !strings.Contains(s, `if [ "$enabled" -ne 1 ]; then`) || !strings.Contains(s, "\t\tstop_service\n") {
+		t.Fatalf("disabled reload must clean neto-owned runtime state:\n%s", s)
 	}
 }
 

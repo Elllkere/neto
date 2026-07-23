@@ -509,6 +509,45 @@ func TestGenerateLANIfaceGuard(t *testing.T) {
 	}
 }
 
+func TestGenerateRedirectsLANPlainDNSIntoDNSMasq(t *testing.T) {
+	cfg := testConfig()
+	cfg.Main.NFTCounters = false
+	cfg.Main.LANIfaces = []string{"br-lan", "lan0"}
+	out, err := Generate(Input{Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"chain dns_prerouting",
+		"type nat hook prerouting priority dstnat; policy accept;",
+		`iifname { "br-lan", "lan0" } ip saddr @lan_subnets4 udp dport 53 redirect to :53`,
+		`iifname { "br-lan", "lan0" } ip saddr @lan_subnets4 tcp dport 53 redirect to :53`,
+		"udp dport 53 return",
+		"tcp dport 53 return",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing LAN DNS interception %q:\n%s", want, out)
+		}
+	}
+	dnsReturn := strings.Index(out, "udp dport 53 return")
+	proxyPolicy := strings.Index(out, "ip saddr @proxy_clients4")
+	if dnsReturn < 0 || proxyPolicy < 0 || dnsReturn > proxyPolicy {
+		t.Fatalf("plain DNS must bypass TProxy before the later nat redirect:\n%s", out)
+	}
+}
+
+func TestGenerateDoesNotRedirectDNSWhenDNSMasqManagementDisabled(t *testing.T) {
+	cfg := testConfig()
+	cfg.Main.ManageDNSMasq = false
+	out, err := Generate(Input{Config: cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "chain dns_prerouting") || strings.Contains(out, "redirect to :53") || strings.Contains(out, "dport 53") {
+		t.Fatalf("DNS interception requires manage_dnsmasq=1:\n%s", out)
+	}
+}
+
 func TestGenerateGlobalNonLANReturnsBeforeCatchAll(t *testing.T) {
 	cfg := testConfig()
 	cfg.Main.NFTCounters = false

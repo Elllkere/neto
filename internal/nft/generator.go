@@ -37,12 +37,25 @@ func Generate(in Input) (string, error) {
 	writeSet(&b, "direct_clients4", directClients)
 	writeSet(&b, "proxy_clients4", proxyClients)
 	writeRuleSets(&b, cfg, in.RuleCIDRs)
+	if cfg.Main.ManageDNSMasq {
+		b.WriteString("\tchain dns_prerouting {\n")
+		b.WriteString("\t\ttype nat hook prerouting priority dstnat; policy accept;\n")
+		b.WriteString(fmt.Sprintf("\t\t%s udp dport 53%s redirect to :53\n", lanSourceMatcher(cfg), counter(cfg)))
+		b.WriteString(fmt.Sprintf("\t\t%s tcp dport 53%s redirect to :53\n", lanSourceMatcher(cfg), counter(cfg)))
+		b.WriteString("\t}\n")
+	}
 	b.WriteString("\tchain prerouting {\n")
 	b.WriteString("\t\ttype filter hook prerouting priority mangle; policy accept;\n")
 	b.WriteString(lanGuardRule(cfg))
 	b.WriteString("\t\treturn\n")
 	b.WriteString("\t}\n")
 	b.WriteString("\tchain from_lan {\n")
+	if cfg.Main.ManageDNSMasq {
+		// Plain DNS must reach the later nat redirect even in global mode or
+		// for a force-proxy client. Otherwise TProxy would consume it first.
+		b.WriteString(fmt.Sprintf("\t\tudp dport 53%s return\n", counter(cfg)))
+		b.WriteString(fmt.Sprintf("\t\ttcp dport 53%s return\n", counter(cfg)))
+	}
 	b.WriteString(fmt.Sprintf("\t\tct status dnat%s return\n", counter(cfg)))
 	b.WriteString(fmt.Sprintf("\t\tip saddr @direct_clients4%s return\n", counter(cfg)))
 	b.WriteString(fmt.Sprintf("\t\tip daddr @reserved4%s return\n", counter(cfg)))
@@ -258,10 +271,14 @@ func ruleSetName(index int) string {
 }
 
 func lanGuardRule(cfg config.Config) string {
+	return "\t\t" + lanSourceMatcher(cfg) + " jump from_lan\n"
+}
+
+func lanSourceMatcher(cfg config.Config) string {
 	if len(cfg.Main.LANIfaces) == 0 {
-		return "\t\tip saddr @lan_subnets4 jump from_lan\n"
+		return "ip saddr @lan_subnets4"
 	}
-	return fmt.Sprintf("\t\tiifname %s ip saddr @lan_subnets4 jump from_lan\n", ifaceMatcher(cfg.Main.LANIfaces))
+	return fmt.Sprintf("iifname %s ip saddr @lan_subnets4", ifaceMatcher(cfg.Main.LANIfaces))
 }
 
 func ifaceMatcher(ifaces []string) string {

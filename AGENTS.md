@@ -125,6 +125,10 @@ Routing modes:
 - dnsmasq `addsubnet=32` is used only as local metadata so netod can recover
   the original LAN client IP. netod must strip EDNS Client Subnet before
   forwarding DNS queries to sing-box/public resolvers.
+- When `manage_dnsmasq=1`, nftables redirects plain IPv4 LAN TCP/UDP port 53
+  traffic to the router dnsmasq. This keeps DNS from clients behind a bridge/AP
+  on the FakeIP policy path even when they select another classic DNS server.
+  DoH/DoT are not intercepted.
 - Domain proxy rules in custom and simple mode may use FakeIP. Direct clients,
   direct rules, provider/CIDR-only rules, and global mode use real DNS.
 - A rule may mix domain matchers with provider/CIDR/IP matchers. Domain matchers
@@ -271,6 +275,12 @@ FakeIP matching must ignore ports because DNS phase has no packet port.
   per-outbound nft TProxy targets; FakeIP domain rules use sing-box reverse
   mapping followed by ordered domain route rules. Do not collapse rule
   outbounds into one shared sing-box `route.final`.
+- Startup must not enable nft/TProxy policy or point dnsmasq at netod until an
+  end-to-end query through netod and the selected sing-box real-DNS listener
+  succeeds.
+- Do not implement `reload_service()` by calling `start_service()` directly.
+  Network/config reloads must use rc.common's procd-aware start wrapper so the
+  service definition is actually submitted before `service_started()` runs.
 
 ## Current Import / Subscription Model
 

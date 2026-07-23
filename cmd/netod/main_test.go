@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elllkere/neto/internal/config"
 )
@@ -42,6 +43,19 @@ func TestParseOutboundLatencyOptions(t *testing.T) {
 	}
 	if _, err := parseOutboundLatencyOptions([]string{"test"}); err == nil {
 		t.Fatal("expected invalid outbounds subcommand to fail")
+	}
+}
+
+func TestParseReadyOptions(t *testing.T) {
+	opts, err := parseReadyOptions([]string{"-config", "/tmp/neto-test", "-timeout", "7s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.configPath != "/tmp/neto-test" || opts.timeout != 7*time.Second {
+		t.Fatalf("unexpected ready options: %+v", opts)
+	}
+	if _, err := parseReadyOptions([]string{"-timeout", "0s"}); err == nil {
+		t.Fatal("expected non-positive timeout to fail")
 	}
 }
 

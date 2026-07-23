@@ -237,13 +237,14 @@ Expected order:
 
 1. LAN source guard in `prerouting`.
 2. non-LAN return.
-3. `ct status dnat` return.
-4. `direct_clients4` return.
-5. `reserved4` return.
-6. `proxy_clients4`.
-7. FakeIP rule in `custom` mode.
-8. ordered provider/CIDR/IP rules.
-9. default return.
+3. plain DNS return to the later dnsmasq redirect when `manage_dnsmasq=1`.
+4. `ct status dnat` return.
+5. `direct_clients4` return.
+6. `reserved4` return.
+7. `proxy_clients4`.
+8. FakeIP rule in `custom` mode.
+9. ordered provider/CIDR/IP rules.
+10. default return.
 
 Check packet port rules:
 
@@ -320,6 +321,18 @@ addsubnet='32'
 
 `addsubnet=32` is used only so netod can recover LAN client IP. netod strips
 EDNS Client Subnet before forwarding DNS to sing-box/public resolvers.
+
+When `manage_dnsmasq=1`, neto also redirects plain IPv4 LAN DNS on TCP/UDP port
+53 to dnsmasq. This is required for domain/FakeIP rules when clients behind a
+bridge or AP use another classic DNS server. DoH/DoT bypasses this interception.
+Check the rules with:
+
+```sh
+nft list chain inet neto dns_prerouting
+```
+
+Expected rules contain `udp dport 53 redirect to :53` and
+`tcp dport 53 redirect to :53`.
 
 Stopping neto should restore previous dnsmasq state:
 

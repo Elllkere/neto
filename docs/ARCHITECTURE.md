@@ -249,6 +249,18 @@ dnsmasq uses `addsubnet=32` so `netod` can recover original LAN client IP
 through EDNS Client Subnet. `netod` strips ECS before forwarding queries to
 sing-box/public resolvers.
 
+With `manage_dnsmasq=1`, the nftables table also redirects plain IPv4 LAN
+TCP/UDP port 53 traffic to the router's dnsmasq. This covers clients behind an
+AP/bridge which select a different classic DNS server. Encrypted DNS (DoH/DoT)
+is not intercepted. At service startup, nft/TProxy and the dnsmasq upstream
+switch are enabled only after an end-to-end real-DNS probe through netod and
+sing-box succeeds.
+
+Network and configuration reload triggers use rc.common's normal procd-aware
+start path. They must not invoke `start_service()` directly: that bypasses
+submission of the new procd instance set and can leave dnsmasq/nftables active
+without their DNS backends.
+
 ## Rules and Matchers
 
 Domain matchers are literal string operations:

@@ -338,14 +338,15 @@ start_service() {
 	local enabled singbox_bin
 	config_get_bool enabled main enabled 1
 	if [ "$enabled" -ne 1 ]; then
-		neto_remove_cron
+		# A procd reload falls back to the normal start wrapper. Returning an
+		# empty instance set stops existing daemons; clean owned runtime state.
+		stop_service
 		return 0
 	fi
 	config_get singbox_bin main singbox_bin "/usr/libexec/neto/sing-box"
 
 	"$NETOD" check || return 1
 	"$NETOD" compile || return 1
-	"$NETOD" apply || return 1
 	"$singbox_bin" check -c /tmp/neto/sing-box.json || return 1
 
 	procd_open_instance netod
@@ -361,7 +362,19 @@ start_service() {
 	procd_set_param term_timeout 3
 	procd_set_param respawn 3600 5 5
 	procd_close_instance
+}
 
+service_started() {
+	config_load "$CONFIG_NAME"
+
+	local enabled
+	config_get_bool enabled main enabled 1
+	[ "$enabled" -eq 1 ] || return 0
+
+	# Do not expose dnsmasq or LAN policy to half-started local DNS services.
+	# The end-to-end probe covers netod and the selected sing-box real-DNS path.
+	"$NETOD" ready -timeout 30s || return 1
+	"$NETOD" apply || return 1
 	neto_write_dnsmasq
 	neto_write_cron
 }
@@ -380,11 +393,6 @@ stop_service() {
 	ip -4 route del local default dev lo table "$table" 2>/dev/null || true
 	neto_remove_dnsmasq
 	neto_remove_cron
-}
-
-reload_service() {
-	stop_service
-	start_service
 }
 
 neto_add_interface_trigger() {
